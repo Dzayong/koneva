@@ -1,0 +1,126 @@
+name: wa-gateway
+
+x-app-environment: &app-environment
+  NODE_ENV: production
+  PORT: 8000
+  ADMIN_API_KEY: ${ADMIN_API_KEY}
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+  DOCKER_SOCKET: /var/run/docker.sock
+  BOT_IMAGE: ${BOT_IMAGE:-wa-bot:${IMAGE_TAG:-latest}}
+  BOT_DOCKER_NETWORK: wa-gateway-backend
+  SESSION_PATH: /app/sessions
+  SESSION_HOST_PATH: ${SESSION_HOST_PATH:-/opt/wa-gateway/sessions}
+  MAX_MSG_PER_MINUTE: ${MAX_MSG_PER_MINUTE:-2}
+  MAX_MSG_PER_HOUR: ${MAX_MSG_PER_HOUR:-50}
+  WARMUP_DAYS: ${WARMUP_DAYS:-7}
+  DEVICE_MANAGER_URL: http://device-manager:8001
+  DEVICE_MANAGER_PORT: 8001
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH='${REDIS_PASSWORD}' redis-cli ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  migrate:
+    image: ${API_IMAGE:-wa-gateway-api:${IMAGE_TAG:-latest}}
+    environment: *app-environment
+    command: ["node", "dist/scripts/migrate.js"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [backend]
+    restart: "no"
+
+  api-gateway:
+    image: ${API_IMAGE:-wa-gateway-api:${IMAGE_TAG:-latest}}
+    restart: unless-stopped
+    environment: *app-environment
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    deploy:
+      replicas: 3
+      update_config: { parallelism: 1, delay: 10s, order: start-first }
+      rollback_config: { parallelism: 1, order: stop-first }
+    networks: [backend, edge]
+
+  device-manager:
+    image: ${MANAGER_IMAGE:-wa-gateway-manager:${IMAGE_TAG:-latest}}
+    restart: unless-stopped
+    environment: *app-environment
+    user: "10001:${DOCKER_GID:-999}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SESSION_HOST_PATH:-/opt/wa-gateway/sessions}:${SESSION_HOST_PATH:-/opt/wa-gateway/sessions}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    networks: [backend]
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      NGINX_ENVSUBST_FILTER: DOMAIN
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      api-gateway: { condition: service_healthy }
+    command: /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
+    networks: [edge]
+
+  certbot:
+    image: certbot/certbot:v3.1.0
+    restart: unless-stopped
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: /bin/sh
+    command: -c "while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h; done"
+    networks: [edge]
+
+networks:
+  backend:
+    name: wa-gateway-backend
+    internal: true
+  edge:
+    name: wa-gateway-edge
+
+volumes:
+  postgres_data:
+  redis_data:

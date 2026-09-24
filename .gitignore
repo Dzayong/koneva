@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.production
+*.log
+sessions/
+.DS_Store
+Thumbs.db
+backups/
+docker/certbot/conf/
+docker/certbot/www/
+docker/grafana/data/

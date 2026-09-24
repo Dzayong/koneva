@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wa-gateway-config
+  namespace: wa-gateway
+  labels:
+    app.kubernetes.io/name: wa-gateway
+    app.kubernetes.io/part-of: wa-gateway
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  MAX_DEVICES_PER_TENANT: "10"
+  DEFAULT_QUOTA: "10000"
+  RATE_LIMIT_PER_MINUTE: "60"
+  BOT_IMAGE: "your-registry/wa-bot:latest"
+  PORT: "8000"
+  DEVICE_MANAGER_PORT: "8001"
+  DEVICE_MANAGER_URL: "http://device-manager:8001"
+  SESSION_PATH: "/app/sessions"
+  JWT_EXPIRES_IN: "7d"
+  MAX_MSG_PER_MINUTE: "2"
+  MAX_MSG_PER_HOUR: "50"
+  WARMUP_DAYS: "7"

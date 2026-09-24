@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.env.*
+node_modules
+dist
+backups
+sessions
+docker/certbot
+docker/grafana/data
+*.log
+docs

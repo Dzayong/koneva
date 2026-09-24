@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wa-gateway
+  labels:
+    app: wa-gateway
+    version: v1
+    app.kubernetes.io/name: wa-gateway
+    app.kubernetes.io/version: v1
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

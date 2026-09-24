@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: database-migrate
+  namespace: wa-gateway
+  labels:
+    app.kubernetes.io/name: database-migrate
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: wa-gateway
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: database-migrate
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/part-of: wa-gateway
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: your-registry/wa-gateway-api:latest
+          imagePullPolicy: IfNotPresent
+          command: [node, dist/scripts/migrate.js]
+          envFrom:
+            - configMapRef: { name: wa-gateway-config }
+            - secretRef: { name: wa-gateway-secrets }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}

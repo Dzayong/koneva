@@ -1,0 +1,167 @@
+import './tracing';
+import express from 'express';
+import { z } from 'zod';
+import type { WASocket } from '@whiskeysockets/baileys';
+import sharedConfig from '../shared/config';
+import pool, { query } from '../shared/database/connection';
+import logger from '../shared/utils/logger';
+import { getRedisClient, closeRedisClient } from '../shared/redis';
+import { startBotConnection } from './connection';
+import { startQueueProcessor, registerReceiptListener, closeQueueResources } from './queue';
+import { createApiRouter } from './api';
+import { activeConnections } from './metrics';
+import { shutdownTracing } from './tracing';
+import type { BotConfig, ConnectionState, BotStatus } from './types';
+
+const DEVICE_STATUS_BY_BOT_STATUS: Record<BotStatus, string> = {
+  initializing: 'starting',
+  qr_pending: 'pending_qr',
+  connecting: 'starting',
+  online: 'online',
+  reconnecting: 'starting',
+  offline: 'offline',
+  logged_out: 'offline',
+  error: 'error',
+};
+
+const RECONNECT_DELAYS_MS = [5_000, 10_000, 20_000, 40_000, 60_000];
+
+const botEnvSchema = z.object({
+  BOT_ID: z.string().min(1, 'BOT_ID is required'),
+  BOT_CONTAINER_PORT: z.coerce.number().int().positive().default(9000),
+  MAX_RECONNECT_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  // Comma-separated list so a new key can be added ahead of removing the old
+  // one during rotation. Falls back to the shared ADMIN_API_KEY if unset.
+  BOT_API_KEYS: z.string().optional(),
+});
+
+function loadConfig(): BotConfig {
+  const parsed = botEnvSchema.safeParse(process.env);
+  if (!parsed.success) {
+    throw new Error(`Invalid environment configuration: ${parsed.error.message}`);
+  }
+
+  const env = parsed.data;
+  const apiKeys = (env.BOT_API_KEYS ?? sharedConfig.adminApiKey)
+    .split(',')
+    .map((key) => key.trim())
+    .filter((key) => key.length > 0);
+
+  return {
+    botId: env.BOT_ID,
+    nodeEnv: sharedConfig.env,
+    databaseUrl: sharedConfig.database.url,
+    redisUrl: sharedConfig.redis.url,
+    sessionPath: sharedConfig.sessionPath,
+    healthPort: env.BOT_CONTAINER_PORT,
+    maxReconnectAttempts: env.MAX_RECONNECT_ATTEMPTS,
+    reconnectDelaysMs: RECONNECT_DELAYS_MS,
+    queueName: `queue:messages:${env.BOT_ID}`,
+    apiKeys,
+  };
+}
+
+async function main(): Promise<void> {
+  const botConfig = loadConfig();
+  const log = logger.child({ service: 'bot-container', botId: botConfig.botId });
+
+  log.info('Starting bot container', { nodeEnv: botConfig.nodeEnv });
+
+  await pool.query('SELECT 1');
+  log.info('Connected to PostgreSQL');
+
+  const redis = getRedisClient(botConfig.redisUrl);
+  await redis.ping();
+  log.info('Connected to Redis');
+
+  const queryFn = (text: string, params?: unknown[]) => query(text, params);
+
+  let currentState: ConnectionState = {
+    botId: botConfig.botId,
+    status: 'initializing',
+    reconnectAttempt: 0,
+  };
+  let currentSocket: WASocket | undefined;
+
+  const queueProcessor = startQueueProcessor(
+    botConfig.botId,
+    redis,
+    {
+      getSocket: () => currentSocket,
+      isConnected: () => currentState.status === 'online',
+    },
+    log,
+    queryFn,
+  );
+
+  const app = express();
+  app.use(
+    createApiRouter({
+      config: botConfig,
+      getState: () => currentState,
+      getSocket: () => currentSocket,
+      redis,
+      queryFn,
+    }),
+  );
+
+  const server = app.listen(botConfig.healthPort, () => {
+    log.info('Health check endpoint listening', { port: botConfig.healthPort });
+  });
+
+  await startBotConnection(botConfig, log, {
+    onStateChange: (state) => {
+      currentState = state;
+      activeConnections.set({ device_key: botConfig.botId }, state.status === 'online' ? 1 : 0);
+
+      const deviceStatus = DEVICE_STATUS_BY_BOT_STATUS[state.status];
+      const qrCode = state.status === 'qr_pending' ? (state.qr ?? null) : null;
+      const clearsQr = state.status === 'online' || state.status === 'qr_pending';
+
+      // Never clobber an administrative status (paused/banned) with raw
+      // connection state — anti-ban.ts owns that transition, not this loop.
+      queryFn(
+        `UPDATE devices
+         SET status = $1::varchar,
+             qr_code = CASE WHEN $3::boolean THEN $2 ELSE qr_code END,
+             last_connected = CASE WHEN $1::varchar = 'online' THEN now() ELSE last_connected END,
+             updated_at = now()
+         WHERE device_key = $4 AND status NOT IN ('paused', 'banned')`,
+        [deviceStatus, qrCode, clearsQr, botConfig.botId],
+      ).catch((err: unknown) => {
+        log.error('Failed to sync device status', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    },
+    onSocketReady: (sock: WASocket) => {
+      currentSocket = sock;
+      registerReceiptListener(sock, log, queryFn);
+    },
+  });
+
+  let shuttingDown = false;
+  const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+
+    log.info('Shutting down bot container', { signal });
+    server.close();
+    await queueProcessor.stop();
+    await closeQueueResources();
+    await closeRedisClient();
+    await pool.end();
+    await shutdownTracing();
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+}
+
+main().catch((err: unknown) => {
+  console.error('Fatal error starting bot container', err);
+  process.exit(1);
+});
