@@ -4,6 +4,7 @@ import pool, { transaction } from '../../shared/database/connection';
 import type { Role } from '../../shared/permissions';
 import { TERMS_VERSION, hashPassword, newSessionToken, sha256, type SessionResult } from './account.service';
 import { ServiceError } from './service-error';
+import { assertCanAddMember } from './billing.service';
 
 export const INVITABLE_ROLES = ['admin', 'developer', 'viewer'] as const;
 export const INVITE_HOURS = 48;
@@ -42,6 +43,7 @@ export async function createInvitation(
   if (!canGrant(inviter.role, input.role)) {
     throw new ServiceError(403, 'ROLE_NOT_GRANTABLE', `Your role cannot invite a ${input.role}`);
   }
+  await assertCanAddMember(tenantId);
   const existing = await pool.query(
     `SELECT 1 FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = $1 AND lower(u.email) = lower($2)`,
     [tenantId, input.email],

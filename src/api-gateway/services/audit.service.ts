@@ -23,6 +23,8 @@ const RULES: readonly Rule[] = [
   ['DELETE', /^\/team\/invitations\/([^/]+)$/, 'team.invite_revoke', 'invitation', 1],
   ['PATCH', /^\/team\/members\/([^/]+)$/, 'team.role_change', 'user', 1],
   ['DELETE', /^\/team\/members\/([^/]+)$/, 'team.remove', 'user', 1],
+  ['POST', /^\/billing\/orders$/, 'billing.order', 'invoice', null],
+  ['POST', /^\/billing\/student-request$/, 'billing.student_request', 'workspace', null],
   ['POST', /^\/broadcast$/, 'broadcast.create', 'broadcast', null],
   ['POST', /^\/auto-reply-rules$/, 'auto_reply.create', 'rule', null],
   ['PATCH', /^\/auto-reply-rules\/([^/]+)$/, 'auto_reply.update', 'rule', 1],

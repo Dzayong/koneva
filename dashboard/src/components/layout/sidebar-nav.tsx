@@ -6,6 +6,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  CreditCard,
   History,
   KeyRound,
   LayoutDashboard,
@@ -51,6 +52,7 @@ const groups: Array<{ label: string; items: NavItem[] }> = [
     label: "ADMINISTRASI",
     items: [
       { name: "Tim", href: "/team", icon: UserPlus, permission: "team:manage" },
+      { name: "Tagihan", href: "/billing", icon: CreditCard, permission: "billing:manage" },
       { name: "Aktivitas", href: "/activity", icon: History, permission: "audit:read" },
       { name: "Pengaturan", href: "/settings", icon: Settings, permission: "devices:read" },
     ],

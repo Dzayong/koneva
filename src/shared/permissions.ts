@@ -47,6 +47,7 @@ const RULES: readonly Rule[] = [
   [['GET', 'POST', 'DELETE'], /^\/keys(\/[^/]+(\/rotate)?)?$/, 'keys:manage'],
   [['GET', 'POST', 'PATCH', 'DELETE'], /^\/team(\/[^/]+(\/[^/]+)?)?$/, 'team:manage'],
   [['GET'], /^\/audit$/, 'audit:read'],
+  [['GET', 'POST'], /^\/billing(\/[^/]+)?$/, 'billing:manage'],
   [['GET'], /^\/tenant$/, 'devices:read'],
   [['PATCH'], /^\/tenant$/, 'webhooks:manage'],
   [['POST'], /^\/templates\/[^/]+\/render$/, 'messages:read'],

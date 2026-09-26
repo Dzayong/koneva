@@ -268,6 +268,27 @@ When a number's state settles, a `device.status_changed` webhook is sent and the
 WhatsApp does not tell us why an account is refused, so `banned` means "suspected". This service uses an
 unofficial connection; WhatsApp states that unofficial apps can lead to a temporary or permanent ban.
 
+## Plans and billing
+
+Billing is manual: the owner orders a plan, pays outside the system, and the operator confirms.
+
+| Endpoint | Who | What |
+|---|---|---|
+| `GET /public/plans` | anyone | Published plans. Prices are `null` until the operator marks them final. |
+| `GET /api/v1/billing` | owner | Subscription, usage (messages, numbers, members), invoices, payment instructions. |
+| `POST /api/v1/billing/orders` `{plan, cycle}` | owner | Creates an invoice (`monthly`/`yearly`). Replaces the previous unpaid one. |
+| `POST /api/v1/billing/student-request` `{note}` | owner | Asks for student verification (campus/school email required). |
+| `GET /auth/me` | any member | Includes `subscription` (status, days left) for the banner. |
+
+Order errors: `409 PRICE_NOT_FINAL`, `409 STUDENT_NOT_VERIFIED`, `400 INVALID_PLAN`.
+Enforcement: `402 PLAN_INACTIVE` (send / add number), `402 PLAN_MEMBER_LIMIT` (invite),
+`429 QUOTA_EXCEEDED` (monthly messages, with reset date). A late payment keeps working
+for a 7-day grace period, then sending stops; reading data still works.
+
+Operator (admin key): `GET/PATCH /plans`, `GET /subscriptions`, `GET /invoices`,
+`POST /invoices/:id/pay|void`, `POST /tenant/:id/student-verify`,
+`POST /tenant/:id/subscription` (grant a plan).
+
 ## Bot Container (internal)
 
 Each running `bot-container` process exposes a small HTTP API on

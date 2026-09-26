@@ -27,8 +27,8 @@ const environmentSchema = z.object({
   BOT_STORAGE_CLASS: z.string().optional(),
   BOT_SESSION_STORAGE_SIZE: z.string().min(1).default('1Gi'),
   SIGNUP_ENABLED: z.string().optional(),
-  TRIAL_MAX_DEVICES: z.coerce.number().int().positive().default(1),
-  TRIAL_QUOTA_MESSAGES: z.coerce.number().int().positive().default(200),
+  PAYMENT_INSTRUCTIONS: z.string().optional(),
+  OPERATOR_CONTACT: z.string().optional(),
 });
 
 const environment = environmentSchema.parse(process.env);
@@ -64,8 +64,10 @@ const config = {
   },
   signup: {
     enabled: environment.SIGNUP_ENABLED !== 'false',
-    trialMaxDevices: environment.TRIAL_MAX_DEVICES,
-    trialQuotaMessages: environment.TRIAL_QUOTA_MESSAGES,
+  },
+  billing: {
+    paymentInstructions: environment.PAYMENT_INSTRUCTIONS ?? 'Instruksi pembayaran belum diatur. Hubungi penyedia layanan.',
+    operatorContact: environment.OPERATOR_CONTACT ?? null,
   },
   sessionPath: environment.SESSION_PATH,
   sessionHostPath: environment.SESSION_HOST_PATH,

@@ -54,7 +54,7 @@ test('a viewer cannot reach the QR code, sending, or any write', () => {
 
 test('every route mounted on /api/v1 has a permission rule (guards against forgotten routes)', () => {
   const dir = path.join(__dirname, '..', 'api-gateway', 'routes');
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.routes.ts') && !['admin.routes.ts', 'auth.routes.ts'].includes(f));
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.routes.ts') && !['admin.routes.ts', 'auth.routes.ts', 'public.routes.ts'].includes(f));
   const missing: string[] = [];
   let seen = 0;
   for (const file of files) {
@@ -67,4 +67,12 @@ test('every route mounted on /api/v1 has a permission rule (guards against forgo
   }
   assert.ok(seen > 30, `scanned only ${seen} routes`);
   assert.deepEqual(missing, []);
+});
+
+test('billing belongs to the owner alone', async () => {
+  const { can } = await import('./permissions');
+  assert.equal(permissionFor('GET', '/billing'), 'billing:manage');
+  assert.equal(permissionFor('POST', '/billing/orders'), 'billing:manage');
+  assert.equal(permissionFor('POST', '/billing/student-request'), 'billing:manage');
+  assert.deepEqual((['owner', 'admin', 'developer', 'viewer'] as const).map((r) => can(r, 'billing:manage')), [true, false, false, false]);
 });

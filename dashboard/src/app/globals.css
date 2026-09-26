@@ -225,3 +225,11 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Marketing: ticker and page loader */
+@keyframes marquee { to { transform: translateX(-50%); } }
+.marquee-track { animation: marquee 32s linear infinite; }
+.marquee:hover .marquee-track { animation-play-state: paused; }
+@keyframes loader-ring { 0% { transform: scale(.8); opacity: .7; } 100% { transform: scale(1.6); opacity: 0; } }
+.loader-ring { animation: loader-ring 1.4s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) { .marquee-track, .loader-ring { animation: none; } }

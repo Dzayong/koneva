@@ -22,6 +22,9 @@ import authRoutes from './routes/auth.routes';
 import keysRoutes from './routes/keys.routes';
 import auditRoutes from './routes/audit.routes';
 import teamRoutes from './routes/team.routes';
+import billingRoutes from './routes/billing.routes';
+import publicRoutes from './routes/public.routes';
+import { sweepSubscriptions } from './services/billing.service';
 import { auditTrail } from './middleware/audit';
 import { ServiceError } from './services/service-error';
 
@@ -71,8 +74,9 @@ app.get('/ready', async (_request, response) => {
   }
 });
 app.use('/auth', authRoutes);
+app.use('/public', publicRoutes);
 app.use('/api/v1', tenantAuth, authorize, auditTrail, messageRoutes, deviceRoutes, tenantRoutes,
-  contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes);
+  contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes, billingRoutes);
 app.use('/admin', adminAuth, adminRoutes);
 app.use((_request, response) => response.status(404).json({
   success: false, error: { code: 'NOT_FOUND', message: 'Route not found' },
@@ -96,6 +100,17 @@ const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => 
 app.use(errorHandler);
 
 const server = app.listen(config.port, () => logger.info(`API Gateway listening on port ${config.port}`));
+
+// Records lapsed subscriptions for operators. Enforcement is computed from dates and does not depend on this.
+const runSweep = (): void => {
+  sweepSubscriptions()
+    .then((counts) => {
+      if (counts.expired + counts.past_due + counts.suspended > 0) logger.info('Subscriptions swept', counts);
+    })
+    .catch((error: unknown) => logger.error('Subscription sweep failed', { error: error instanceof Error ? error.message : String(error) }));
+};
+setTimeout(runSweep, 30_000).unref();
+setInterval(runSweep, 60 * 60_000).unref();
 
 function shutdown(): void {
   server.close(() => process.exit(0));

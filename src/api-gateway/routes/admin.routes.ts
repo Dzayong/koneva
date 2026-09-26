@@ -6,6 +6,9 @@ import pool from '../../shared/database/connection';
 import { validate } from '../middleware/validate';
 import { ServiceError } from '../services/service-error';
 import { createOwnerForTenant } from '../services/account.service';
+import {
+  grantPlan, listAllInvoices, listPlans, listSubscriptions, markInvoicePaid, setStudentVerified, updatePlan, voidInvoice,
+} from '../services/billing.service';
 
 const router = Router();
 const createTenantSchema = z.object({
@@ -38,6 +41,58 @@ router.post('/tenant/:id/owner', validate({ params: z.object({ id: z.string().uu
   const { id } = request.validated!.params as { id: string };
   const created = await createOwnerForTenant(id, request.validated!.body as z.infer<typeof ownerSchema>);
   response.status(201).json({ success: true, data: created });
+});
+
+// ---- Plans, subscriptions and manual payment (operator only) ----
+const uuidParam = z.object({ id: z.string().uuid() });
+const planPatch = z.object({
+  name: z.string().min(1).max(60).optional(),
+  price_month_idr: z.number().int().min(0).optional(), price_year_idr: z.number().int().min(0).optional(),
+  max_devices: z.number().int().min(1).max(1000).optional(), monthly_messages: z.number().int().min(1).optional(),
+  max_members: z.number().int().min(1).max(1000).optional(),
+  price_is_final: z.boolean().optional(), published: z.boolean().optional(),
+}).strict();
+
+router.get('/plans', async (_request, response) => {
+  response.json({ success: true, data: await listPlans(pool, { publishedOnly: false }) });
+});
+router.patch('/plans/:id', validate({ params: z.object({ id: z.string().min(1).max(20) }), body: planPatch }), async (request, response) => {
+  const { id } = request.validated!.params as { id: string };
+  response.json({ success: true, data: await updatePlan(id, request.validated!.body as z.infer<typeof planPatch>) });
+});
+router.get('/subscriptions', async (request, response) => {
+  response.json({ success: true, data: await listSubscriptions({
+    status: typeof request.query['status'] === 'string' ? request.query['status'] : undefined,
+    q: typeof request.query['q'] === 'string' ? request.query['q'] : undefined,
+  }) });
+});
+router.get('/invoices', async (request, response) => {
+  response.json({ success: true, data: await listAllInvoices(typeof request.query['status'] === 'string' ? request.query['status'] : undefined) });
+});
+router.post('/invoices/:id/pay', validate({
+  params: uuidParam,
+  body: z.object({ method: z.string().min(1).max(30), reference: z.string().max(80).optional(), note: z.string().max(500).optional() }).strict(),
+}), async (request, response) => {
+  const { id } = request.validated!.params as { id: string };
+  response.json({ success: true, data: await markInvoicePaid(id, request.validated!.body as { method: string; reference?: string; note?: string }) });
+});
+router.post('/invoices/:id/void', validate({ params: uuidParam }), async (request, response) => {
+  await voidInvoice((request.validated!.params as { id: string }).id);
+  response.json({ success: true });
+});
+router.post('/tenant/:id/student-verify', validate({
+  params: uuidParam, body: z.object({ approved: z.boolean(), note: z.string().max(500).optional() }).strict(),
+}), async (request, response) => {
+  const body = request.validated!.body as { approved: boolean; note?: string };
+  await setStudentVerified((request.validated!.params as { id: string }).id, body.approved, body.note);
+  response.json({ success: true });
+});
+router.post('/tenant/:id/subscription', validate({
+  params: uuidParam,
+  body: z.object({ plan: z.string().min(1).max(20), cycle: z.enum(['monthly', 'yearly']).default('monthly'), note: z.string().min(1).max(200) }).strict(),
+}), async (request, response) => {
+  const body = request.validated!.body as { plan: string; cycle: 'monthly' | 'yearly'; note: string };
+  response.status(201).json({ success: true, data: await grantPlan((request.validated!.params as { id: string }).id, body.plan, body.cycle, body.note) });
 });
 
 router.post('/device/create', validate({ body: createDeviceSchema }), async (request, response) => {

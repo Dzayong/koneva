@@ -5,6 +5,7 @@ import pool, { transaction } from '../../shared/database/connection';
 import type { Role } from '../../shared/permissions';
 import type { TenantContext } from '../../shared/types/api';
 import { ServiceError } from './service-error';
+import { createTrial } from './billing.service';
 
 const BCRYPT_COST = 12;
 const SESSION_DAYS = 14;
@@ -61,7 +62,7 @@ async function listWorkspaces(db: Queryable, userId: string): Promise<Workspace[
 
 export interface SignupInput { email: string; password: string; name: string; workspace_name?: string | undefined }
 
-export async function signup(input: SignupInput, trial: { maxDevices: number; quotaMessages: number }, meta: ClientMeta): Promise<SessionResult> {
+export async function signup(input: SignupInput, meta: ClientMeta): Promise<SessionResult> {
   const passwordHash = await hashPassword(input.password);
   const workspaceName = input.workspace_name ?? `Workspace ${input.name}`;
   try {
@@ -74,11 +75,11 @@ export async function signup(input: SignupInput, trial: { maxDevices: number; qu
       // The legacy tenant api_key column is required but never shown to the user;
       // access for new workspaces goes through sessions and scoped keys.
       const tenant = (await client.query<{ id: string }>(
-        `INSERT INTO tenants (name, email, api_key, webhook_secret, max_devices, quota_messages)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [workspaceName, input.email, `wg_${randomBytes(24).toString('hex')}`, `whsec_${randomBytes(24).toString('hex')}`,
-          trial.maxDevices, trial.quotaMessages],
+        `INSERT INTO tenants (name, email, api_key, webhook_secret) VALUES ($1, $2, $3, $4) RETURNING id`,
+        [workspaceName, input.email, `wg_${randomBytes(24).toString('hex')}`, `whsec_${randomBytes(24).toString('hex')}`],
       )).rows[0]!;
+      // Limits and the trial period come from the 'trial' plan, so the operator can change them in one place.
+      await createTrial(client, tenant.id);
       await client.query(`INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`, [user.id, tenant.id]);
       const session = await createSession(client, user.id, meta);
       return {

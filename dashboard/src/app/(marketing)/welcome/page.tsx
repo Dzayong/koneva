@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion, type Variants } from "framer-motion";
 import {
@@ -13,6 +14,13 @@ import {
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HeroDemo } from "@/components/marketing/hero-demo";
+import { ReadinessRing } from "@/components/marketing/readiness-ring";
+import { UseCaseMarquee } from "@/components/marketing/use-case-marquee";
+import { WarmupFlow } from "@/components/marketing/warmup-flow";
+import { CycleToggle, PlanCards } from "@/components/billing/plan-cards";
+import { usePublicPlans } from "@/hooks/use-billing";
+import type { BillingCycle } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const entrance: Variants = {
@@ -66,6 +74,8 @@ const STEPS = [
 
 export default function WelcomePage() {
   const reduceMotion = useReducedMotion();
+  const plans = usePublicPlans();
+  const [cycle, setCycle] = useState<BillingCycle>("monthly");
   const rise: Variants = reduceMotion
     ? { hidden: { opacity: 1, y: 0 }, show: { opacity: 1, y: 0, transition: { duration: 0 } } }
     : entrance;
@@ -84,47 +94,33 @@ export default function WelcomePage() {
       </header>
 
       {/* Hero */}
-      <section className="mx-auto max-w-7xl px-6 pt-16 pb-24 md:pt-28 md:pb-36">
-        <motion.h1
-          initial="hidden"
-          animate="show"
-          variants={rise}
-          className="max-w-4xl text-5xl leading-[1.05] font-semibold tracking-tight sm:text-6xl md:text-7xl"
-        >
-          <span className="text-primary">WhatsApp API</span>
-          <br />
-          untuk bisnis modern.
-        </motion.h1>
-        <motion.p
-          initial="hidden"
-          animate="show"
-          custom={2}
-          variants={rise}
-          className="mt-6 max-w-2xl text-lg font-medium leading-relaxed text-muted-foreground md:text-xl"
-        >
-          Kirim dari banyak nomor, dengan perlindungan nomor, pelacakan pengiriman, dan dashboard yang
-          tidak menghalangi kerja Anda. Skalakan pesan tanpa harus mengawasinya terus.
-        </motion.p>
-        <motion.div
-          initial="hidden"
-          animate="show"
-          custom={4}
-          variants={rise}
-          className="mt-10 flex flex-wrap gap-4"
-        >
-          <Button asChild size="lg" className="h-11 px-6 text-base">
-            <Link href="/login">
-              Masuk ke dashboard <ArrowRight className="ml-1" />
-            </Link>
-          </Button>
-          <Button asChild variant="outline" size="lg" className="h-11 px-6 text-base">
-            <a href="#features">Lihat fitur</a>
-          </Button>
-        </motion.div>
+      <section className="relative mx-auto max-w-7xl px-6 pt-12 pb-16 md:pt-20 md:pb-24">
+        <div aria-hidden className="absolute inset-x-0 top-0 -z-10 h-[520px] [background-image:radial-gradient(var(--border)_1px,transparent_1px)] [background-size:22px_22px] [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_72%)]" />
+        <div className="grid items-center gap-14 lg:grid-cols-[1.05fr_1fr]">
+          <div>
+            <motion.p initial="hidden" animate="show" variants={rise} className="inline-flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" />Jalur non-resmi, risikonya kami jelaskan terbuka
+            </motion.p>
+            <motion.h1 initial="hidden" animate="show" custom={1} variants={rise} className="mt-5 text-5xl leading-[1.04] font-semibold tracking-tight sm:text-6xl">
+              Kirim WhatsApp lewat API,<br /><span className="text-primary">dengan nomor Anda sendiri.</span>
+            </motion.h1>
+            <motion.p initial="hidden" animate="show" custom={2} variants={rise} className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
+              Pindai QR, ambil kunci API, kirim pesan. Nomor dijaga dengan pemanasan bertahap, jeda seperti orang, dan skor kesiapan, supaya Anda tahu kondisinya sebelum WhatsApp yang memberi tahu.
+            </motion.p>
+            <motion.div initial="hidden" animate="show" custom={3} variants={rise} className="mt-9 flex flex-wrap gap-3">
+              <Button asChild size="lg" className="h-11 px-6 text-base"><Link href="/signup">Coba gratis 14 hari <ArrowRight className="ml-1" /></Link></Button>
+              <Button asChild variant="outline" size="lg" className="h-11 px-6 text-base"><a href="#features">Lihat cara kerjanya</a></Button>
+            </motion.div>
+            <motion.p initial="hidden" animate="show" custom={4} variants={rise} className="mt-4 text-xs text-muted-foreground">Tanpa kartu kredit. Tidak ada jaminan bebas blokir, dan kami tidak menjanjikannya.</motion.p>
+          </div>
+          <motion.div initial="hidden" animate="show" custom={3} variants={rise}><HeroDemo /></motion.div>
+        </div>
       </section>
 
+      <UseCaseMarquee />
+
       {/* Features — bento */}
-      <section id="features" className="mx-auto max-w-7xl scroll-mt-8 px-6 pb-24">
+      <section id="features" className="mx-auto max-w-7xl scroll-mt-8 px-6 pt-24 pb-24">
         <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Dibuat untuk keandalan</h2>
         <div className="mt-10 grid gap-5 md:grid-cols-3">
           {FEATURES.map((f, i) => (
@@ -148,6 +144,20 @@ export default function WelcomePage() {
             </motion.div>
           ))}
         </div>
+      </section>
+
+      {/* Nomor aman: pemanasan */}
+      <section className="mx-auto max-w-7xl px-6 pt-24 pb-24">
+        <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Nomor baru dilatih dulu, bukan langsung dipakai penuh</h2>
+        <p className="mt-3 max-w-2xl text-muted-foreground">Batas kirim naik bertahap. Balasan ke orang yang menulis lebih dulu selalu diperbolehkan sejak hari pertama.</p>
+        <div className="mt-10"><WarmupFlow /></div>
+      </section>
+
+      {/* Skor kesiapan */}
+      <section className="mx-auto max-w-7xl px-6 pb-24">
+        <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Lihat kesehatan nomor, bukan menebak</h2>
+        <p className="mt-3 max-w-2xl text-muted-foreground">Lima faktor dengan bobot yang jelas. Kalau datanya belum cukup, skor bilang belum yakin, bukan berpura-pura pasti.</p>
+        <div className="mt-10"><ReadinessRing /></div>
       </section>
 
       {/* How it works */}
@@ -174,6 +184,20 @@ export default function WelcomePage() {
           ))}
         </div>
       </section>
+
+      {/* Harga: hanya paket yang dipublikasikan; angka muncul setelah operator menetapkannya final */}
+      {plans.data && plans.data.length > 0 && (
+        <section id="harga" className="mx-auto max-w-7xl scroll-mt-8 px-6 pb-24">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-3xl font-semibold tracking-tight">Paket</h2>
+              <p className="mt-1 text-muted-foreground">Percobaan gratis 14 hari saat mendaftar. Pembayaran dikonfirmasi manual oleh penyedia layanan.</p>
+            </div>
+            <CycleToggle value={cycle} onChange={setCycle} />
+          </div>
+          <div className="mt-6"><PlanCards plans={plans.data} cycle={cycle} /></div>
+        </section>
+      )}
 
       {/* CTA */}
       <section className="mx-auto max-w-7xl px-6 pb-24">

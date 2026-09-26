@@ -12,6 +12,10 @@ declare module "axios" {
 }
 import type {
   ApiKeyRecord,
+  BillingCycle,
+  BillingState,
+  Invoice,
+  PublicPlan,
   AuditEntry,
   AuthResult,
   CreatedApiKey,
@@ -472,6 +476,29 @@ class ApiClient {
       "/api/v1/audit", { params: { limit, before }, skipErrorToast: true },
     );
     return response.data.data;
+  }
+
+  // ---- Plans and billing ---------------------------------------------------
+
+  async getPublicPlans(): Promise<PublicPlan[]> {
+    const response = await this.client.get<ApiSuccess<PublicPlan[]>>("/public/plans", { skipErrorToast: true });
+    return response.data.data;
+  }
+
+  async getBilling(): Promise<BillingState> {
+    const response = await this.client.get<ApiSuccess<BillingState>>("/api/v1/billing", { skipErrorToast: true });
+    return response.data.data;
+  }
+
+  async createOrder(plan: string, cycle: BillingCycle): Promise<{ invoice: Invoice; payment: BillingState["payment"] }> {
+    const response = await this.client.post<{ data: Invoice; payment: BillingState["payment"] }>(
+      "/api/v1/billing/orders", { plan, cycle }, { skipErrorToast: true },
+    );
+    return { invoice: response.data.data, payment: response.data.payment };
+  }
+
+  async requestStudentVerification(note: string): Promise<void> {
+    await this.client.post("/api/v1/billing/student-request", { note }, { skipErrorToast: true });
   }
 
   // ---- Sending behaviour --------------------------------------------------

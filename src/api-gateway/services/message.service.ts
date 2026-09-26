@@ -5,6 +5,7 @@ import pool, { transaction } from '../../shared/database/connection';
 import { getRedisClient } from '../../shared/redis';
 import type { PaginatedResponse, SendMessageRequest } from '../../shared/types/api';
 import { ServiceError } from './service-error';
+import { assertSubscriptionActive, currentUsage } from './billing.service';
 
 const messageQueues = new Map<string, Queue>();
 
@@ -55,16 +56,11 @@ export async function queueMessage(
   input: SendMessageRequest,
 ): Promise<MessageRow> {
   const message = await transaction(async (client: PoolClient) => {
-    const tenantResult = await client.query<{
-      quota_messages: number;
-      used_messages: number;
-    }>(
-      'SELECT quota_messages, used_messages FROM tenants WHERE id = $1 FOR UPDATE',
-      [tenantId],
-    );
-    const tenant = tenantResult.rows[0];
-    if (!tenant || tenant.used_messages >= tenant.quota_messages) {
-      throw new ServiceError(429, 'QUOTA_EXCEEDED', 'Message quota exceeded');
+    await assertSubscriptionActive(client, tenantId);
+    const usage = await currentUsage(client, tenantId);
+    if (usage.used >= usage.quota) {
+      const resets = usage.resetsAt ? ` Kuota direset ${usage.resetsAt.toISOString().slice(0, 10)}.` : '';
+      throw new ServiceError(429, 'QUOTA_EXCEEDED', `Kuota pesan paket ini sudah habis.${resets}`);
     }
 
     const deviceResult = await client.query<{ id: string; status: string }>(

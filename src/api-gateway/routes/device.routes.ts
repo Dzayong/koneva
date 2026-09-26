@@ -6,12 +6,15 @@ import { createDeviceSchema } from '../../shared/types/api';
 import { validate } from '../middleware/validate';
 import { getDeviceStatus, listDevices, pauseDevice, resumeDevice } from '../services/device.service';
 
+import { assertSubscriptionActive } from '../services/billing.service';
+
 const router = Router();
 const deviceParams = z.object({ deviceKey: z.string().min(1).max(32) });
 
 export async function createDevice(request: Request, response: Response): Promise<void> {
   const tenant = request.tenant!;
   const input = request.validated!.body as z.infer<typeof createDeviceSchema>;
+  await assertSubscriptionActive(pool, tenant.id);
   const deviceCount = await pool.query<{ count: number }>(
     'SELECT COUNT(*)::int AS count FROM devices WHERE tenant_id = $1',
     [tenant.id],

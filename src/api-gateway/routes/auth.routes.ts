@@ -7,6 +7,7 @@ import { getRedisClient } from '../../shared/redis';
 import { validate } from '../middleware/validate';
 import { login, resolveSession, revokeSession, sha256, signup } from '../services/account.service';
 import { acceptInvitation, previewInvitation } from '../services/team.service';
+import { getSubscriptionSummary } from '../services/billing.service';
 import { recordAudit } from '../services/audit.service';
 import { ServiceError } from '../services/service-error';
 
@@ -48,9 +49,7 @@ function bearer(request: Request): string | undefined {
 router.post('/signup', limited(60 * 60_000, 10), validate({ body: signupSchema }), async (request: Request, response: Response) => {
   if (!config.signup.enabled) throw new ServiceError(403, 'SIGNUP_DISABLED', 'Sign-up is currently closed');
   const body = request.validated!.body as z.infer<typeof signupSchema>;
-  const result = await signup(body, {
-    maxDevices: config.signup.trialMaxDevices, quotaMessages: config.signup.trialQuotaMessages,
-  }, meta(request));
+  const result = await signup(body, meta(request));
   response.status(201).json({ success: true, data: result });
 });
 
@@ -90,6 +89,7 @@ router.get('/me', async (request: Request, response: Response) => {
       workspace: { id: session.tenant.id, name: session.tenant.name, role: session.role },
       workspaces: session.workspaces,
       permissions: PERMISSIONS.filter((p) => ROLE_PERMISSIONS[session.role].includes(p)),
+      subscription: await getSubscriptionSummary(session.tenant.id),
     },
   });
 });

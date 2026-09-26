@@ -39,6 +39,7 @@ account, or `/login`.
 | `/developers/quickstart` | Send a live test message and copy code (cURL, Node.js, Python) | `messages:send` |
 | `/developers/keys` | Create, rotate and revoke scoped API keys; a key is shown once | `keys:manage` |
 | `/team` | Members, roles, invitation links | `team:manage` |
+| `/billing` | Owner only: plan, usage, ordering, payment instructions, student verification, invoices | `billing:manage` |
 | `/activity` | Audit log of who changed what | `audit:read` |
 | `/messages`, `/broadcast`, `/contacts`, `/analytics`, `/settings/auto-reply`, `/settings` | History, templated sends, contacts, charts, auto-reply rules, webhook and usage | see role table in `docs/API.md` |
 
@@ -65,7 +66,7 @@ the session. Moving the token to an httpOnly cookie is the known upgrade.
   current page only.
 - No email verification or password reset (no email service yet), and no
   ownership transfer or "leave workspace".
-- Billing is handled by the operator; the dashboard only shows usage and limits.
+- Payments are confirmed manually by the operator; no payment gateway or automatic reminders yet. Prices show "segera diumumkan" until the operator marks them final.
 - Real-time updates are polling (10 to 60 seconds), not WebSocket.
 - The QR flow has been exercised up to the real QR code appearing; the
   "connected" state needs a phone to scan it.

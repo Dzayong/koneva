@@ -274,6 +274,7 @@ export interface Me {
   workspace: WorkspaceRef;
   workspaces: WorkspaceRef[];
   permissions: Permission[];
+  subscription: SubscriptionSummary | null;
 }
 
 export interface AuthResult {
@@ -373,4 +374,61 @@ export interface DeviceEvent {
   reason: string | null;
   code: number | null;
   created_at: string;
+}
+
+// ---- Plans and billing ------------------------------------------------------
+
+export type SubscriptionStatus = "trial" | "active" | "past_due" | "suspended" | "expired" | "cancelled";
+export type BillingCycle = "monthly" | "yearly";
+
+export interface PublicPlan {
+  id: string;
+  name: string;
+  audience: string;
+  features: string[];
+  max_devices: number;
+  monthly_messages: number;
+  max_members: number;
+  requires_student_verification: boolean;
+  price_month_idr: number | null;
+  price_year_idr: number | null;
+  price_is_final: boolean;
+}
+
+export interface SubscriptionSummary {
+  plan_id: string;
+  plan_name: string;
+  status: SubscriptionStatus;
+  can_send: boolean;
+  days_left: number | null;
+  period_end: string | null;
+}
+
+export interface Invoice {
+  id: string;
+  number: string;
+  plan_id: string;
+  cycle: BillingCycle;
+  amount_idr: number;
+  status: "unpaid" | "paid" | "void";
+  due_at: string;
+  paid_at: string | null;
+  method: string | null;
+  reference: string | null;
+  created_at: string;
+}
+
+export interface BillingState {
+  subscription: {
+    plan_id: string; plan_name: string; status: SubscriptionStatus; cycle: BillingCycle | null;
+    period_start: string; period_end: string | null; days_left: number | null; grace_days: number;
+  } | null;
+  usage: {
+    messages_used: number; messages_limit: number; resets_at: string | null;
+    devices_used: number; devices_limit: number; members_used: number; members_limit: number | null;
+  };
+  student: { verified: boolean; requested: boolean };
+  plans: PublicPlan[];
+  invoices: Invoice[];
+  payment: { instructions: string; contact: string | null };
 }

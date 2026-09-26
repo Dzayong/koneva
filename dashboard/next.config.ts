@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     return process.env.INTERNAL_API_URL ? [
       { source: "/api/v1/:path*", destination: `${process.env.INTERNAL_API_URL}/api/v1/:path*` },
       { source: "/auth/:path*", destination: `${process.env.INTERNAL_API_URL}/auth/:path*` },
+      { source: "/public/:path*", destination: `${process.env.INTERNAL_API_URL}/public/:path*` },
     ] : [];
   },
   turbopack: {
