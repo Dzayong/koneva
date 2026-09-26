@@ -23,6 +23,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
+import { KonevaMark } from "@/components/brand/koneva-logo";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { usePermissions } from "@/hooks/use-me";
@@ -78,11 +79,9 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full w-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-20 shrink-0 items-center gap-3 border-b border-sidebar-border px-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sidebar-primary">
-          <MessageSquare className="h-5 w-5 text-sidebar-primary-foreground" />
-        </div>
+        <KonevaMark className="h-9 w-9" />
         <div>
-          <span className="text-lg font-semibold tracking-tight text-sidebar-accent-foreground">WA Gateway</span>
+          <span className="text-lg font-bold tracking-[0.16em] text-sidebar-accent-foreground">KONEVA</span>
           <p className="mt-0.5 text-[11px] tracking-wide text-sidebar-foreground">Ruang kerja pesan</p>
         </div>
       </div>

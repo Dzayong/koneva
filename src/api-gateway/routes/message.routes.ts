@@ -1,15 +1,21 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { mediaUrl, MEDIA_TYPES } from '../../shared/media-url';
 import { validate } from '../middleware/validate';
 import { getMessageStatus, listMessages, queueMessage, retryMessage } from '../services/message.service';
 
 const router = Router();
-const sendSchema = z.object({
+export const sendSchema = z.object({
   device_key: z.string().min(1).max(32),
   to: z.string().regex(/^\+?[1-9]\d{6,19}$/),
-  message: z.string().min(1).max(4096),
+  /** The text, or the caption when media_url is given (then it may be empty). */
+  message: z.string().max(4096).default(''),
+  media_url: mediaUrl.optional(),
+  media_type: z.enum(MEDIA_TYPES).default('image'),
   external_id: z.string().max(64).optional(),
   priority: z.enum(['normal', 'urgent']).default('normal'),
+}).superRefine((v, ctx) => {
+  if (!v.media_url && v.message.trim().length === 0) ctx.addIssue({ code: 'custom', path: ['message'], message: 'message is required unless media_url is given' });
 });
 const listSchema = z.object({
   device_key: z.string().max(32).optional(),

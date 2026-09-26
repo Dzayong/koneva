@@ -1,19 +1,14 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
-import { cancelCommand, enqueueCommand, getCommand, listCommands, runCommand } from '../services/command.service';
-import { BLOCKED_HOSTS } from './tenant.routes';
+import { cancelCommand, enqueueCommand, getCommand, listCommands, listStatusViewers, runCommand } from '../services/command.service';
+import { mediaUrl } from '../../shared/media-url';
 
 const router = Router();
 
 const deviceParams = z.object({ key: z.string().min(1).max(32) });
 const commandParams = deviceParams.extend({ id: z.string().uuid() });
 const productParams = deviceParams.extend({ id: z.string().min(1).max(64) });
-
-/** Media is fetched by the bot, so only public https addresses are accepted. */
-const mediaUrl = z.string().url().max(2048)
-  .refine((u) => u.toLowerCase().startsWith('https://'), 'Media URL must use https')
-  .refine((u) => { try { return !BLOCKED_HOSTS.test(new URL(u).hostname); } catch { return false; } }, 'Media URL must not point to a private address');
 
 export const statusSchema = z.object({
   kind: z.enum(['text', 'image', 'video']),
@@ -71,6 +66,10 @@ router.post('/devices/:key/status', validate({ params: deviceParams, body: statu
 });
 router.get('/devices/:key/status', validate({ params: deviceParams }), async (request: Request, response: Response) => {
   response.json({ success: true, data: await listCommands(request.tenant!.id, key(request), 'status.post') });
+});
+router.get('/devices/:key/commands/:id/viewers', validate({ params: commandParams }), async (request: Request, response: Response) => {
+  const p = request.validated!.params as z.infer<typeof commandParams>;
+  response.json({ success: true, data: await listStatusViewers(request.tenant!.id, p.key, p.id) });
 });
 router.get('/devices/:key/commands/:id', validate({ params: commandParams }), async (request: Request, response: Response) => {
   const p = request.validated!.params as z.infer<typeof commandParams>;

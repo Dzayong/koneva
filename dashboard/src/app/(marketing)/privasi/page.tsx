@@ -3,7 +3,7 @@ import { MarketingShell } from "@/components/marketing/marketing-shell";
 
 export const metadata: Metadata = {
   title: "Kebijakan Privasi",
-  description: "Data apa yang dikumpulkan WA Gateway, untuk apa, dan bagaimana Anda mengendalikannya.",
+  description: "Data apa yang dikumpulkan KONEVA, untuk apa, dan bagaimana Anda mengendalikannya.",
   alternates: { canonical: "/privasi" },
   robots: { index: false, follow: true },
 };

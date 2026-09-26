@@ -1,6 +1,6 @@
-# WA Gateway Dashboard
+# KONEVA Dashboard
 
-Customer-facing Next.js dashboard for WA Gateway. People sign in with their own
+Customer-facing Next.js dashboard for KONEVA. People sign in with their own
 account, connect WhatsApp numbers, send a first message, manage API keys and
 their team, and watch what happens. It talks to `src/api-gateway` (repo root)
 through same-origin `/api/v1/*` and `/auth/*`, which Next proxies to the API

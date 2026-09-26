@@ -29,7 +29,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.url),
-  title: { default: SITE.title, template: "%s · WA Gateway" },
+  title: { default: SITE.title, template: "%s · KONEVA" },
   description: SITE.description,
   applicationName: SITE.name,
 };

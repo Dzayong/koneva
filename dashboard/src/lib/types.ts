@@ -98,6 +98,8 @@ export interface SendMessageRequest {
   device_key: string;
   to: string;
   message: string;
+  media_url?: string;
+  media_type?: "image" | "video" | "document";
   external_id?: string;
 }
 
@@ -460,6 +462,7 @@ export interface StatusPost {
   send_at?: string;
 }
 export interface DeviceCommand {
+  views?: number;
   id: string; type: string; status: CommandStatus; payload: Partial<StatusPost>;
   result: { message_id?: string | null; recipients?: number } | null;
   error: string | null; run_at: string; created_at: string; finished_at: string | null;
@@ -482,3 +485,5 @@ export interface BusinessUpdate {
   description?: string; address?: string; email?: string; websites?: string[];
   hours?: { timezone: string; days: BusinessHoursDay[] };
 }
+
+export interface StatusViewers { viewers: Array<{ number: string | null; viewed_at: string }>; total: number }

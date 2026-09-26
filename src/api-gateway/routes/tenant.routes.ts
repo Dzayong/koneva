@@ -5,7 +5,7 @@ import { validate } from '../middleware/validate';
 import { getWebhookLogs, getWebhookSettings, rotateWebhookSecret, testWebhook } from '../services/webhook.service';
 
 const router = Router();
-export const BLOCKED_HOSTS = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|0\.0\.0\.0|\[::1?\])$/i;
+import { BLOCKED_HOSTS } from '../../shared/media-url';
 const webhookUrl = z.string()
   .regex(/^https?:\/\//i, 'Webhook URL must use http or https')
   .url()

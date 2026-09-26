@@ -35,7 +35,7 @@ const PAGE_TITLES: Record<string, string> = {
 function pageTitle(pathname: string): string {
   if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname];
   if (pathname.startsWith("/devices/")) return "Detail nomor";
-  return "WA Gateway";
+  return "KONEVA";
 }
 
 const ROLE_LABEL = { owner: "Owner", admin: "Admin", developer: "Developer", viewer: "Viewer" } as const;

@@ -289,6 +289,13 @@ Operator (admin key): `GET/PATCH /plans`, `GET /subscriptions`, `GET /invoices`,
 `POST /invoices/:id/pay|void`, `POST /tenant/:id/student-verify`,
 `POST /tenant/:id/subscription` (grant a plan).
 
+## Media in messages and broadcasts
+
+`POST /api/v1/message/send` and `POST /api/v1/broadcast` accept `media_url` (public `https` address; private
+addresses are rejected) and `media_type` (`image` default, `video`, `document`). `message` then becomes the
+caption and may be empty. Links written in `message` are clickable for the recipient; no link preview card is
+generated. Numbers still in warm-up (days 1-4) cannot send media (`media_not_allowed_in_warmup`).
+
 ## Status, catalog and business profile
 
 These run on the number itself, so the number must be online. They are asynchronous commands stored in
@@ -303,6 +310,7 @@ edits, up to 20 s, `504 DEVICE_NOT_RESPONDING` otherwise) or returns `202` (stat
 | `GET /api/v1/devices/:key/status` | `devices:read` | last 30 status posts with state (`queued`, `running`, `done`, `failed`, `cancelled`) |
 | `GET /api/v1/devices/:key/commands/:id` | `devices:read` | one command and its result |
 | `POST /api/v1/devices/:key/commands/:id/cancel` | `content:write` | cancel while still `queued` |
+| `GET /api/v1/devices/:key/commands/:id/viewers` | `devices:read` | who opened a status: `{viewers: [{number, viewed_at}], total}` |
 
 - Media is fetched by the bot: `media_url` must be a public `https` address (private addresses are rejected).
 - WhatsApp needs to know who may see a status. `audience: "chatted"` uses people this number has exchanged
@@ -311,6 +319,9 @@ edits, up to 20 s, `504 DEVICE_NOT_RESPONDING` otherwise) or returns `202` (stat
 - A post outside the number's active hours waits until the number "wakes up" (plus 0-20 random minutes).
 - At most **3 posts per number per day** (`429 STATUS_LIMIT`). This is a caution, not a measured WhatsApp limit.
 - `send_at` schedules up to 7 days ahead.
+- **Views:** each post in `GET .../status` carries `views`, counted from the read receipts WhatsApp sends back.
+  Only people whose own "read receipts" setting is on are reported, so it is a lower bound. Recorded by the bot
+  from `message-receipt.update` events; **not yet confirmed against a real posted status**.
 
 **Business profile and catalog** (only for numbers registered in WhatsApp Business; a regular number gets
 `409 NOT_BUSINESS`)

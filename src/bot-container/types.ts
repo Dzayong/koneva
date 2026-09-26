@@ -66,6 +66,7 @@ export interface MessageRecord {
   deviceKey: string;
   to: string;
   content: string;
+  mediaUrl?: string | null;
   type: QueueMessageType;
   status: MessageStatus;
   whatsappMessageId: string | null;

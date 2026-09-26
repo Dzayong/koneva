@@ -90,7 +90,7 @@ export default function QuickstartPage() {
   const online = useMemo(() => (devices ?? []).filter((d) => d.status === "online"), [devices]);
   const [deviceKey, setDeviceKey] = useState<string>("");
   const [to, setTo] = useState("");
-  const [text, setText] = useState("Halo! Ini pesan pertama dari WA Gateway.");
+  const [text, setText] = useState("Halo! Ini pesan pertama dari KONEVA.");
   const [lang, setLang] = useState<Lang>("curl");
   const [createOpen, setCreateOpen] = useState(false);
   const [created, setCreated] = useState<CreatedApiKey | null>(null);

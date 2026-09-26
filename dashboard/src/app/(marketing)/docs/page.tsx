@@ -8,9 +8,9 @@ import { SITE } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Dokumentasi API WhatsApp: kirim pesan, status, dan webhook",
-  description: "Panduan API WA Gateway: autentikasi, mengirim pesan dan OTP, membaca status, aturan pemanasan nomor, serta webhook bertanda tangan dengan contoh Node.js, Python, dan PHP.",
+  description: "Panduan API KONEVA: autentikasi, mengirim pesan dan OTP, membaca status, aturan pemanasan nomor, serta webhook bertanda tangan dengan contoh Node.js, Python, dan PHP.",
   alternates: { canonical: "/docs" },
-  openGraph: { url: "/docs", title: "Dokumentasi API WA Gateway", description: "Kirim pesan, baca status, dan pasang webhook." },
+  openGraph: { url: "/docs", title: "Dokumentasi API KONEVA", description: "Kirim pesan, baca status, dan pasang webhook." },
 };
 
 const BASE = "https://api.domain-anda.com";
@@ -72,7 +72,9 @@ export default function DocsPage() {
             <tbody>
               <tr><td><code>device_key</code></td><td>Kode nomor pengirim, misalnya <code>WAPI-XXXXXXXX</code> (lihat di dashboard).</td></tr>
               <tr><td><code>to</code></td><td>Nomor tujuan dengan kode negara, tanpa spasi, misalnya <code>6281234567890</code>.</td></tr>
-              <tr><td><code>message</code></td><td>Isi pesan, 1 sampai 4096 karakter.</td></tr>
+              <tr><td><code>message</code></td><td>Isi pesan, sampai 4096 karakter. Bila ada <code>media_url</code>, ini menjadi keterangan gambar dan boleh kosong. Tautan (https://…) di dalamnya bisa diketuk penerima.</td></tr>
+              <tr><td><code>media_url</code></td><td>Opsional. Alamat publik <code>https</code> untuk gambar, video, atau dokumen. Alamat lokal ditolak.</td></tr>
+              <tr><td><code>media_type</code></td><td><code>image</code> (bawaan), <code>video</code>, atau <code>document</code>. Nomor yang masih masa pemanasan belum boleh mengirim media sampai hari ke-5.</td></tr>
               <tr><td><code>priority</code></td><td><code>normal</code> (bawaan, diberi jeda seperti manusia) atau <code>urgent</code> untuk OTP: tanpa jeda dan lewat antrean sendiri.</td></tr>
               <tr><td><code>external_id</code></td><td>Opsional, penanda dari sistem Anda (maks 64 karakter).</td></tr>
             </tbody>

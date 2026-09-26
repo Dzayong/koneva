@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { DeviceSelect } from "@/components/devices/device-select";
 import { useDevices } from "@/hooks/use-devices";
-import { useCancelCommand, usePostStatus, useStatusPosts } from "@/hooks/use-business";
+import { useCancelCommand, usePostStatus, useStatusPosts, useStatusViewers } from "@/hooks/use-business";
 import { usePermissions } from "@/hooks/use-me";
 import { businessErrorText, commandErrorText } from "@/lib/business-errors";
 import type { CommandStatus, StatusPost } from "@/lib/types";
@@ -27,6 +27,25 @@ const STATE: Record<CommandStatus, { label: string; variant: "default" | "second
   queued: { label: "Menunggu", variant: "secondary" }, running: { label: "Diproses", variant: "secondary" },
   done: { label: "Terposting", variant: "default" }, failed: { label: "Gagal", variant: "destructive" }, cancelled: { label: "Dibatalkan", variant: "outline" },
 };
+
+function Viewers({ deviceKey, id, total }: { deviceKey: string; id: string; total: number }) {
+  const [open, setOpen] = useState(false);
+  const viewers = useStatusViewers(deviceKey, open ? id : null);
+  return (
+    <div className="w-full">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="text-xs font-medium text-primary underline underline-offset-2">
+        {total} dilihat {open ? "(sembunyikan)" : "(lihat siapa)"}
+      </button>
+      {open && (
+        <ul className="mt-2 flex flex-wrap gap-2">
+          {viewers.isLoading ? <li className="text-xs text-muted-foreground">Memuat…</li> : (viewers.data?.viewers ?? []).map((v, i) => (
+            <li key={i} className="rounded-full border bg-muted px-2.5 py-0.5 text-xs">{v.number ? `+${v.number}` : "Kontak (nomor disembunyikan)"}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export default function StatusPage() {
   const { can, isLoading: permsLoading } = usePermissions();
@@ -149,10 +168,15 @@ export default function StatusPage() {
                       <p className="truncate text-sm font-medium">{c.payload.kind === "text" ? c.payload.text : `${c.payload.kind === "image" ? "Gambar" : "Video"}: ${c.payload.media_url}`}</p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(c.run_at).getTime() - new Date(c.created_at).getTime() > 60_000 && c.status === "queued" ? `Dijadwalkan ${formatDate(c.run_at)}` : formatDate(c.created_at)}
-                        {c.status === "done" && c.result?.recipients ? ` · dilihat ${c.result.recipients} kontak` : ""}
+                        {c.status === "done" && c.result?.recipients ? ` · dikirim ke ${c.result.recipients} kontak` : ""}
                         {c.status === "failed" ? ` · ${commandErrorText(c.error)}` : ""}
                       </p>
                     </div>
+                    {c.status === "done" && deviceKey && (
+                      (c.views ?? 0) > 0
+                        ? <Viewers deviceKey={deviceKey} id={c.id} total={c.views ?? 0} />
+                        : <p className="w-full text-xs text-muted-foreground">Belum ada yang tercatat melihat. Hanya orang yang mengaktifkan tanda baca di WhatsApp-nya yang terhitung, jadi angka ini bisa lebih kecil dari yang sebenarnya.</p>
+                    )}
                     {c.status === "queued" && <Button size="sm" variant="ghost" onClick={() => cancel.mutate(c.id)} disabled={cancel.isPending}>Batalkan</Button>}
                   </li>
                 ))}

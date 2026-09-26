@@ -1,4 +1,5 @@
 import type { PresenceRoutine } from './presence';
+import { recordStatusView, type ReceiptUpdate } from './status-views';
 import { Queue, Worker, UnrecoverableError, type Job } from 'bullmq';
 import type Redis from 'ioredis';
 import {
@@ -81,16 +82,20 @@ function toWaJid(to: string): string {
   return to.includes('@') ? to : `${to}@s.whatsapp.net`;
 }
 
-function toMessageContent(message: Pick<MessageRecord, 'type' | 'content'>): AnyMessageContent {
+export function toMessageContent(message: Pick<MessageRecord, 'type' | 'content'> & { mediaUrl?: string | null }): AnyMessageContent {
+  // Messages queued through the gateway keep the file address in media_url and the caption in content.
+  // Older rows (bot API) hold the address in content itself.
+  const url = message.mediaUrl ?? message.content;
+  const caption = message.mediaUrl && message.content.trim() ? { caption: message.content } : {};
   switch (message.type) {
     case 'image':
-      return { image: { url: message.content } };
+      return { image: { url }, ...caption };
     case 'video':
-      return { video: { url: message.content } };
+      return { video: { url }, ...caption };
     case 'audio':
-      return { audio: { url: message.content }, mimetype: 'audio/mp4' };
+      return { audio: { url }, mimetype: 'audio/mp4' };
     case 'document':
-      return { document: { url: message.content }, mimetype: 'application/octet-stream' };
+      return { document: { url }, mimetype: 'application/octet-stream', ...caption };
     case 'text':
     default:
       return { text: message.content };
@@ -104,6 +109,7 @@ interface MessageRow {
   device_key: string;
   to_number: string;
   content: string;
+  media_url: string | null;
   type: MessageRecord['type'];
   status: MessageStatus;
   whatsapp_message_id: string | null;
@@ -120,6 +126,7 @@ function mapMessageRow(row: MessageRow): MessageRecord {
     deviceKey: row.device_key,
     to: row.to_number,
     content: row.content,
+    mediaUrl: row.media_url,
     type: row.type,
     status: row.status,
     whatsappMessageId: row.whatsapp_message_id,
@@ -131,7 +138,7 @@ function mapMessageRow(row: MessageRow): MessageRecord {
 
 async function getMessageById(id: string, queryFn: QueryFn): Promise<MessageRecord | undefined> {
   const { rows } = await queryFn(
-    `SELECT id, tenant_id, device_id, device_key, to_number, content, type, status,
+    `SELECT id, tenant_id, device_id, device_key, to_number, content, media_url, type, status,
             whatsapp_message_id, error_message, priority, created_at
      FROM messages WHERE id = $1`,
     [id],
@@ -649,7 +656,17 @@ export function registerReceiptListener(
   sock: WASocket,
   log: Logger,
   queryFn: QueryFn = defaultQueryFn,
+  deviceKey?: string,
 ): void {
+  if (deviceKey) {
+    sock.ev.on('message-receipt.update', (updates) => {
+      for (const update of updates) {
+        recordStatusView(update as unknown as ReceiptUpdate, deviceKey, queryFn, log).catch((err: unknown) => {
+          log.error('Failed to record status view', { error: err instanceof Error ? err.message : String(err) });
+        });
+      }
+    });
+  }
   sock.ev.on('messages.update', (updates) => {
     log.debug('WhatsApp messages.update batch received', { updateCount: updates.length });
     for (const update of updates) {

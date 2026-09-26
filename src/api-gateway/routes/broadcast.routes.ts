@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { mediaUrl, MEDIA_TYPES } from '../../shared/media-url';
 import type { TenantContext } from '../../shared/types/api';
 import { validate } from '../middleware/validate';
 import { queueMessage } from '../services/message.service';
@@ -9,8 +10,13 @@ const router = Router();
 export const broadcastSchema = z.object({
   device_key: z.string().min(1).max(32),
   recipients: z.array(z.string().regex(/^\+?[1-9]\d{6,19}$/)).min(1).max(500),
-  message: z.string().min(1).max(4096),
-}).strict();
+  /** Text, or the caption when media_url is given. Links in the text are clickable in WhatsApp. */
+  message: z.string().max(4096).default(''),
+  media_url: mediaUrl.optional(),
+  media_type: z.enum(MEDIA_TYPES).default('image'),
+}).strict().superRefine((v, ctx) => {
+  if (!v.media_url && v.message.trim().length === 0) ctx.addIssue({ code: 'custom', path: ['message'], message: 'message is required unless media_url is given' });
+});
 
 export async function createBroadcast(request: Request, response: Response): Promise<void> {
   const input = request.validated!.body as z.infer<typeof broadcastSchema>;
@@ -22,6 +28,7 @@ export async function createBroadcast(request: Request, response: Response): Pro
         device_key: input.device_key,
         to: recipient,
         message: input.message,
+        ...(input.media_url ? { media_url: input.media_url, media_type: input.media_type } : {}),
         external_id: `broadcast:${broadcastId}:${index}`,
       });
       results.push({ phone_number: recipient, message_id: message.id, status: 'queued' });

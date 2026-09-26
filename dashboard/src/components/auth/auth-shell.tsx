@@ -1,14 +1,11 @@
-import { MessageSquare } from "lucide-react";
+import { KonevaLogo } from "@/components/brand/koneva-logo";
 
 export function AuthShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/50 px-4 py-10">
       <div className="w-full max-w-md space-y-6">
-        <div className="flex items-center justify-center gap-2.5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-            <MessageSquare className="h-6 w-6 text-primary-foreground" />
-          </div>
-          <span className="text-xl font-semibold tracking-tight">WA Gateway</span>
+        <div className="flex items-center justify-center">
+          <KonevaLogo markClassName="h-10 w-10" textClassName="text-xl" />
         </div>
         {children}
       </div>

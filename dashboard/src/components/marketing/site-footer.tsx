@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Zap } from "lucide-react";
+import { KonevaLogo } from "@/components/brand/koneva-logo";
 import { usePublicInfo } from "@/hooks/use-billing";
 import { PhotoBackdrop } from "./photo-backdrop";
 
@@ -20,10 +20,7 @@ export function SiteFooter() {
       <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-[#0a1224] via-[#0a1224]/80 to-[#0a1224]" />
       <div className="relative mx-auto grid max-w-7xl gap-10 px-6 py-14 md:grid-cols-[1.4fr_1fr_1fr_1fr_1.2fr]">
         <div>
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#2563eb] to-[#06b6d4]"><Zap className="h-4 w-4 text-white" /></div>
-            <span className="text-lg font-semibold">WA Gateway</span>
-          </div>
+          <KonevaLogo />
           <p className="mt-4 max-w-xs text-sm text-muted-foreground">API WhatsApp dengan nomor Anda sendiri, dilengkapi perlindungan nomor, pelacakan pengiriman, dan dashboard tim.</p>
         </div>
         {COLUMNS.map((c) => (
@@ -45,8 +42,8 @@ export function SiteFooter() {
       </div>
       <div className="relative border-t">
         <div className="mx-auto max-w-7xl space-y-3 px-6 py-6 text-xs leading-relaxed text-muted-foreground">
-          <p><strong className="font-semibold text-foreground">Pernyataan penting.</strong> WA Gateway adalah layanan pihak ketiga dan tidak berafiliasi, disponsori, atau didukung oleh WhatsApp maupun Meta. Layanan ini memakai koneksi tidak resmi. WhatsApp menyatakan bahwa penggunaan aplikasi tidak resmi dapat berujung pada pembatasan atau pemblokiran nomor. Kami mengurangi risikonya, tetapi tidak menjaminnya.</p>
-          <p>© {new Date().getFullYear()} WA Gateway. Foto oleh kontributor Pexels dan Unsplash.</p>
+          <p><strong className="font-semibold text-foreground">Pernyataan penting.</strong> KONEVA adalah layanan pihak ketiga dan tidak berafiliasi, disponsori, atau didukung oleh WhatsApp maupun Meta. Layanan ini memakai koneksi tidak resmi. WhatsApp menyatakan bahwa penggunaan aplikasi tidak resmi dapat berujung pada pembatasan atau pemblokiran nomor. Kami mengurangi risikonya, tetapi tidak menjaminnya.</p>
+          <p>© {new Date().getFullYear()} KONEVA. Foto oleh kontributor Pexels dan Unsplash.</p>
         </div>
       </div>
     </footer>

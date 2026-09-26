@@ -5,6 +5,7 @@ import { commandChannel, STATUS_DAILY_LIMIT, type CommandType } from '../../shar
 import { ServiceError } from './service-error';
 
 export interface CommandRow {
+  views?: number;
   id: string; type: string; status: string; payload: unknown; result: unknown; error: string | null;
   run_at: Date; created_at: Date; finished_at: Date | null;
 }
@@ -86,8 +87,10 @@ export function commandFailure(error: string | null): ServiceError {
 export async function listCommands(tenantId: string, deviceKey: string, type: CommandType, limit = 30): Promise<CommandRow[]> {
   await findDevice(tenantId, deviceKey);
   return (await pool.query<CommandRow>(
-    `SELECT ${COLUMNS} FROM device_commands WHERE tenant_id = $1 AND device_key = $2 AND type = $3
-     ORDER BY created_at DESC LIMIT $4`, [tenantId, deviceKey, type, Math.min(Math.max(limit, 1), 100)],
+    `SELECT ${COLUMNS.split(', ').map((c) => `c.${c}`).join(', ')},
+       (SELECT COUNT(*)::int FROM status_views v WHERE v.device_id = c.device_id AND v.status_message_id = c.result->>'message_id') AS views
+     FROM device_commands c WHERE c.tenant_id = $1 AND c.device_key = $2 AND c.type = $3
+     ORDER BY c.created_at DESC LIMIT $4`, [tenantId, deviceKey, type, Math.min(Math.max(limit, 1), 100)],
   )).rows;
 }
 
@@ -103,6 +106,18 @@ export async function purgeOldCommands(): Promise<number> {
     `DELETE FROM device_commands WHERE type = 'status.post' AND finished_at < now() - interval '30 days'`,
   );
   return (reads.rowCount ?? 0) + (posts.rowCount ?? 0);
+}
+
+/** Who opened one of our Status posts. Only people with read receipts on appear, so this is a lower bound. */
+export async function listStatusViewers(tenantId: string, deviceKey: string, commandId: string) {
+  const command = await getCommand(tenantId, deviceKey, commandId);
+  const messageId = (command.result as { message_id?: string | null } | null)?.message_id;
+  if (!messageId) return { viewers: [], total: 0 };
+  const rows = (await pool.query<{ viewer: string; viewed_at: Date }>(
+    `SELECT v.viewer, v.viewed_at FROM status_views v JOIN devices d ON d.id = v.device_id
+     WHERE d.device_key = $1 AND d.tenant_id = $2 AND v.status_message_id = $3 ORDER BY v.viewed_at`, [deviceKey, tenantId, messageId],
+  )).rows;
+  return { viewers: rows.map((r) => ({ number: r.viewer.startsWith('lid:') ? null : r.viewer, viewed_at: r.viewed_at })), total: rows.length };
 }
 
 export async function cancelCommand(tenantId: string, deviceKey: string, id: string): Promise<CommandRow> {

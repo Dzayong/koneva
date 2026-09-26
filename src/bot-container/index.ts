@@ -169,7 +169,7 @@ async function main(): Promise<void> {
     },
     onSocketReady: (sock: WASocket) => {
       currentSocket = sock;
-      registerReceiptListener(sock, log, queryFn);
+      registerReceiptListener(sock, log, queryFn, botConfig.botId);
       registerIncomingMessageListener(sock, botConfig.botId, log, queryFn, async (message) => {
         // Direct chats only: groups are not "opened" by this routine.
         if (!message.isGroup) await presence.onInbound(message.key);

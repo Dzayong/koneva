@@ -75,9 +75,10 @@ export async function queueMessage(
 
     const result = await client.query<MessageRow>(
       `INSERT INTO messages
-         (tenant_id, device_id, device_key, to_number, content, external_id, status, priority)
-       VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7) RETURNING *`,
-      [tenantId, device.id, input.device_key, input.to, input.message, input.external_id ?? null, input.priority ?? 'normal'],
+         (tenant_id, device_id, device_key, to_number, content, external_id, status, priority, type, media_url)
+       VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, $9) RETURNING *`,
+      [tenantId, device.id, input.device_key, input.to, input.message, input.external_id ?? null, input.priority ?? 'normal',
+        input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null],
     );
     await client.query('UPDATE tenants SET used_messages = used_messages + 1 WHERE id = $1', [tenantId]);
     return result.rows[0]!;

@@ -21,6 +21,10 @@ export function usePostStatus(deviceKey: string) {
   });
 }
 
+export function useStatusViewers(deviceKey: string, id: string | null) {
+  return useQuery({ queryKey: ["status-viewers", deviceKey, id], queryFn: () => api.getStatusViewers(deviceKey, id!), enabled: Boolean(id) });
+}
+
 export function useCancelCommand(deviceKey: string) {
   const qc = useQueryClient();
   return useMutation({

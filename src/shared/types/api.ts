@@ -39,7 +39,10 @@ export interface ApiErrorResponse {
 export interface SendMessageRequest {
   device_key: string;
   to: string;
+  /** Text, or the caption when `media_url` is set (may be empty for media). */
   message: string;
+  media_url?: string | undefined;
+  media_type?: 'image' | 'video' | 'document' | undefined;
   external_id?: string | undefined;
   /** 'urgent' is for OTP and other time-critical transactional messages. */
   priority?: 'normal' | 'urgent' | undefined;

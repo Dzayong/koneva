@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion, useScroll, useTransform, type Variants } from "framer-motion";
-import { ArrowRight, BellRing, CheckCheck, Gauge, ShieldCheck, Smartphone, Zap } from "lucide-react";
+import { ArrowRight, BellRing, CheckCheck, Gauge, ShieldCheck, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CycleToggle, PlanCards } from "@/components/billing/plan-cards";
+import { KonevaLogo } from "@/components/brand/koneva-logo";
 import { Faq } from "@/components/marketing/faq";
 import { HeroDemo } from "@/components/marketing/hero-demo";
 import { HowItWorks } from "@/components/marketing/how-it-works";
@@ -112,9 +113,8 @@ export function LandingPage() {
           <motion.div aria-hidden style={{ scale: glowScale }} className="pointer-events-none absolute top-[38%] left-1/2 h-[620px] w-[900px] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(37,99,235,0.38),rgba(6,182,212,0.12)_55%,transparent)] blur-2xl" />
           <div aria-hidden className="absolute inset-x-0 top-0 h-[560px] [background-image:radial-gradient(rgba(148,163,255,0.22)_1px,transparent_1px)] [background-size:24px_24px] [mask-image:radial-gradient(ellipse_at_top,black_25%,transparent_70%)]" />
           <header className="relative mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
-            <Link href="/" className="flex items-center gap-2 sm:gap-3" aria-label="WA Gateway, beranda">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#2563eb] to-[#06b6d4] shadow-md sm:h-10 sm:w-10"><Zap className="h-5 w-5 text-white" /></span>
-              <span className="text-base font-semibold whitespace-nowrap sm:text-lg">WA Gateway</span>
+            <Link href="/" className="flex items-center" aria-label="KONEVA, beranda">
+              <KonevaLogo markClassName="h-9 w-9 sm:h-10 sm:w-10" textClassName="text-base sm:text-lg" />
             </Link>
             <nav aria-label="Utama" className="flex items-center gap-1 sm:gap-2">
               <Button asChild variant="ghost" className="hidden sm:inline-flex"><a href="#harga">Harga</a></Button>

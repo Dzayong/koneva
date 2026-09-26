@@ -1,8 +1,8 @@
 /** One source for the visible FAQ and its FAQPage structured data; the two must say the same thing. */
 export const FAQ: Array<{ q: string; a: string }> = [
   {
-    q: "Apa itu WA Gateway?",
-    a: "WA Gateway adalah layanan API untuk mengirim dan menerima pesan WhatsApp memakai nomor Anda sendiri. Anda memindai kode QR seperti membuka WhatsApp Web, mengambil kunci API, lalu mengirim pesan dari aplikasi Anda. Ada juga dashboard untuk memantau status, tim, dan webhook.",
+    q: "Apa itu KONEVA?",
+    a: "KONEVA adalah layanan API untuk mengirim dan menerima pesan WhatsApp memakai nomor Anda sendiri. Anda memindai kode QR seperti membuka WhatsApp Web, mengambil kunci API, lalu mengirim pesan dari aplikasi Anda. Ada juga dashboard untuk memantau status, tim, dan webhook.",
   },
   {
     q: "Apakah ini WhatsApp API resmi dan apakah nomor bisa diblokir?",
@@ -10,7 +10,7 @@ export const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "Apa bedanya dengan WhatsApp Business API resmi?",
-    a: "Jalur resmi lewat Meta memerlukan verifikasi bisnis, penyedia resmi, dan template pesan yang disetujui, dengan biaya per percakapan. WA Gateway berjalan di nomor yang Anda miliki tanpa persetujuan template, sehingga lebih cepat dipakai dan fleksibel, tetapi memiliki risiko pembatasan nomor yang tidak ada di jalur resmi. Untuk kebutuhan yang tidak boleh berisiko, misalnya instansi dengan kewajiban kepatuhan, jalur resmi lebih tepat.",
+    a: "Jalur resmi lewat Meta memerlukan verifikasi bisnis, penyedia resmi, dan template pesan yang disetujui, dengan biaya per percakapan. KONEVA berjalan di nomor yang Anda miliki tanpa persetujuan template, sehingga lebih cepat dipakai dan fleksibel, tetapi memiliki risiko pembatasan nomor yang tidak ada di jalur resmi. Untuk kebutuhan yang tidak boleh berisiko, misalnya instansi dengan kewajiban kepatuhan, jalur resmi lebih tepat.",
   },
   {
     q: "Bagaimana cara menyambungkan nomor?",

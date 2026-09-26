@@ -18,6 +18,7 @@ import type {
   DeviceCommand,
   ProductInput,
   StatusPost,
+  StatusViewers,
   WebhookLog,
   WebhookSettings,
   WebhookTestResult,
@@ -494,6 +495,9 @@ class ApiClient {
   }
   async getStatusPosts(deviceKey: string): Promise<DeviceCommand[]> {
     return (await this.client.get<ApiSuccess<DeviceCommand[]>>(`/api/v1/devices/${deviceKey}/status`, { skipErrorToast: true })).data.data;
+  }
+  async getStatusViewers(deviceKey: string, id: string): Promise<StatusViewers> {
+    return (await this.client.get<ApiSuccess<StatusViewers>>(`/api/v1/devices/${deviceKey}/commands/${id}/viewers`, { skipErrorToast: true })).data.data;
   }
   async cancelCommand(deviceKey: string, id: string): Promise<void> {
     await this.client.post(`/api/v1/devices/${deviceKey}/commands/${id}/cancel`, {}, { skipErrorToast: true });

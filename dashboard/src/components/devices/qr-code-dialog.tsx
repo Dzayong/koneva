@@ -39,7 +39,7 @@ export function QRCodeDialog({
           <DialogTitle>{connected ? "Nomor tersambung" : "Sambungkan nomor"}</DialogTitle>
           <DialogDescription>
             {connected
-              ? "Nomor Anda sudah aktif di WA Gateway."
+              ? "Nomor Anda sudah aktif di KONEVA."
               : "Di HP, buka WhatsApp, lalu Perangkat tertaut, Tautkan perangkat, dan arahkan kamera ke kode di bawah."}
           </DialogDescription>
         </DialogHeader>

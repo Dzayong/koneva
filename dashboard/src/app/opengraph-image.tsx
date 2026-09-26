@@ -10,8 +10,14 @@ export default function OpengraphImage() {
     (
       <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: 72, background: "linear-gradient(135deg,#0a1224 0%,#14285a 60%,#0e7490 120%)", color: "#f2f5fc" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-          <div style={{ width: 64, height: 64, borderRadius: 16, background: "linear-gradient(135deg,#2563eb,#06b6d4)" }} />
-          <div style={{ fontSize: 40, fontWeight: 700 }}>WA Gateway</div>
+          <svg width="64" height="64" viewBox="0 0 48 48" fill="none">
+            <rect width="48" height="48" rx="12" fill="#0f2d6e" />
+            <path d="M15.5 11.5v25M15.5 24 33 11.5M15.5 24 33 36.5" stroke="#fff" strokeWidth="4.4" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="33" cy="11.5" r="4.3" fill="#22d3ee" />
+            <circle cx="33" cy="36.5" r="4.3" fill="#22d3ee" />
+            <circle cx="15.5" cy="24" r="3.4" fill="#fff" />
+          </svg>
+          <div style={{ fontSize: 40, fontWeight: 700, letterSpacing: 8 }}>KONEVA</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           <div style={{ fontSize: 76, fontWeight: 700, lineHeight: 1.05, letterSpacing: -2 }}>Kirim WhatsApp lewat API, dengan nomor Anda sendiri.</div>

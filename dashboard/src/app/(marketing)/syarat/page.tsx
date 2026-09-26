@@ -3,7 +3,7 @@ import { MarketingShell } from "@/components/marketing/marketing-shell";
 
 export const metadata: Metadata = {
   title: "Syarat dan Ketentuan",
-  description: "Syarat dan ketentuan penggunaan WA Gateway.",
+  description: "Syarat dan ketentuan penggunaan KONEVA.",
   alternates: { canonical: "/syarat" },
   robots: { index: false, follow: true }, // draft: not for search until reviewed
 };
@@ -23,7 +23,7 @@ export default function TermsPage() {
         </header>
 
         <section><h2>1. Tentang layanan</h2>
-          <p>WA Gateway menyambungkan nomor WhatsApp milik Anda ke API agar aplikasi Anda dapat mengirim dan menerima pesan. Layanan ini adalah <strong>pihak ketiga</strong>, memakai koneksi <strong>tidak resmi</strong>, dan tidak berafiliasi, disponsori, atau didukung oleh WhatsApp maupun Meta.</p></section>
+          <p>KONEVA menyambungkan nomor WhatsApp milik Anda ke API agar aplikasi Anda dapat mengirim dan menerima pesan. Layanan ini adalah <strong>pihak ketiga</strong>, memakai koneksi <strong>tidak resmi</strong>, dan tidak berafiliasi, disponsori, atau didukung oleh WhatsApp maupun Meta.</p></section>
 
         <section><h2>2. Risiko pembatasan dan pemblokiran nomor</h2>
           <p>WhatsApp menyatakan bahwa penggunaan aplikasi tidak resmi dapat berujung pada pembatasan sementara atau pemblokiran permanen nomor. Kami mengurangi risikonya (pemanasan bertahap, jeda acak, batas kirim, skor kesiapan), tetapi <strong>tidak menjamin</strong> nomor Anda aman. Dengan memakai layanan ini Anda menerima risiko tersebut. Kami tidak bertanggung jawab atas hilangnya akses ke nomor, kontak, atau percakapan akibat tindakan WhatsApp.</p></section>

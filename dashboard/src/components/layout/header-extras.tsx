@@ -22,7 +22,7 @@ export function HelpButton() {
   const contact = useMe().data?.support_contact;
   const digits = contact?.replace(/\D/g, "");
   if (!digits) return null;
-  const text = encodeURIComponent("Halo, saya butuh bantuan dengan WA Gateway.");
+  const text = encodeURIComponent("Halo, saya butuh bantuan dengan KONEVA.");
   return (
     <a href={`https://wa.me/${digits}?text=${text}`} target="_blank" rel="noopener noreferrer"
       className="flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground">

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Zap } from "lucide-react";
+import { KonevaLogo } from "@/components/brand/koneva-logo";
 import { SiteFooter } from "./site-footer";
 
 /** Frame for the plain public pages (docs, terms, privacy): light header, readable column, shared footer. */
@@ -7,9 +7,8 @@ export function MarketingShell({ children, wide = false }: { children: React.Rea
   return (
     <div className="tone-cream min-h-screen bg-background">
       <header className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-        <Link href="/" className="flex items-center gap-3" aria-label="WA Gateway, beranda">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#2563eb] to-[#06b6d4]"><Zap className="h-4 w-4 text-white" /></span>
-          <span className="text-lg font-semibold">WA Gateway</span>
+        <Link href="/" className="flex items-center gap-3" aria-label="KONEVA, beranda">
+          <KonevaLogo />
         </Link>
         <nav aria-label="Utama" className="flex items-center gap-5 text-sm font-medium">
           <Link href="/docs" className="hover:text-primary">Dokumentasi</Link>

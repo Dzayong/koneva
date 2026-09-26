@@ -57,6 +57,8 @@ export default function BroadcastPage() {
   const onlineDevices = useMemo(() => devices?.filter((d) => d.status === "online") ?? [], [devices]);
   const [deviceKey, setDeviceKey] = useState("");
   const [template, setTemplate] = useState("");
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [mediaType, setMediaType] = useState<"image" | "video" | "document">("image");
   const [manualNumbers, setManualNumbers] = useState("");
   const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
   const [recipients, setRecipients] = useState<RecipientState[]>([]);
@@ -96,8 +98,12 @@ export default function BroadcastPage() {
       toast.error("Pilih nomor dulu");
       return;
     }
-    if (!template.trim()) {
-      toast.error("Tulis pesan dulu");
+    if (!template.trim() && !mediaUrl.trim()) {
+      toast.error("Tulis pesan atau isi alamat gambar dulu");
+      return;
+    }
+    if (mediaUrl.trim() && !/^https:\/\//i.test(mediaUrl.trim())) {
+      toast.error("Alamat berkas harus diawali https://");
       return;
     }
     const list = buildRecipientList();
@@ -118,7 +124,7 @@ export default function BroadcastPage() {
       const content = renderSpintax(template, { nama: recipient.name || recipient.phone });
 
       try {
-        await api.sendMessage({ device_key: deviceKey, to: recipient.phone, message: content });
+        await api.sendMessage({ device_key: deviceKey, to: recipient.phone, message: content, ...(mediaUrl.trim() ? { media_url: mediaUrl.trim(), media_type: mediaType } : {}) });
         setRecipients((prev) =>
           prev.map((r, idx) => (idx === i ? { ...r, status: "queued" } : r)),
         );
@@ -218,6 +224,26 @@ export default function BroadcastPage() {
           </CardHeader>
           <CardContent>
             <TemplateBuilder value={template} onChange={setTemplate} />
+            <p className="mt-3 text-xs text-muted-foreground">Tautan (misalnya https://toko-anda.com/promo) yang Anda tulis di pesan bisa langsung diketuk penerima.</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Gambar atau berkas (opsional)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {([["image", "Gambar"], ["video", "Video"], ["document", "Dokumen"]] as const).map(([id, label]) => (
+                <button key={id} type="button" aria-pressed={mediaType === id} onClick={() => setMediaType(id)}
+                  className={`rounded-md border px-3 py-1.5 text-sm ${mediaType === id ? "border-primary bg-accent font-medium" : "text-muted-foreground"}`}>{label}</button>
+              ))}
+            </div>
+            <Label htmlFor="mediaUrl">Alamat berkas (https)</Label>
+            <input id="mediaUrl" value={mediaUrl} onChange={(e) => setMediaUrl(e.target.value)} inputMode="url" placeholder="https://situs-anda.com/promo.jpg"
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm" />
+            {mediaUrl && !/^https:\/\//i.test(mediaUrl.trim()) && <p role="alert" className="text-sm text-destructive">Alamat harus diawali https://</p>}
+            <p className="text-xs text-muted-foreground">Teks di atas menjadi keterangan gambar. Nomor baru belum boleh mengirim gambar sampai hari ke-5 masa pemanasan.</p>
           </CardContent>
         </Card>
       </div>
