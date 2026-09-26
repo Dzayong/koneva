@@ -19,6 +19,8 @@ const PAGE_TITLES: Record<string, string> = {
   "/messages": "Pesan",
   "/broadcast": "Broadcast",
   "/contacts": "Kontak",
+  "/status": "Status WhatsApp",
+  "/catalog": "Katalog",
   "/analytics": "Analitik",
   "/settings": "Pengaturan",
   "/settings/auto-reply": "Balas otomatis",

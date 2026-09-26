@@ -39,6 +39,12 @@ const RULES: readonly Rule[] = [
   // The QR code links the number to whoever scans it, so viewing it is a write-level power.
   [['GET'], /^\/devices\/[^/]+\/qr$/, 'devices:write'],
   [['GET'], /^\/devices(\/[^/]+(\/[^/]+)?)?$/, 'devices:read'],
+  [['GET'], /^\/devices\/[^/]+\/commands\/[^/]+$/, 'devices:read'],
+  // Status posts, business profile and catalog: content the number publishes, so developers may, viewers may not.
+  [['POST'], /^\/devices\/[^/]+\/(status|products)$/, 'content:write'],
+  [['POST'], /^\/devices\/[^/]+\/commands\/[^/]+\/cancel$/, 'content:write'],
+  [['PATCH'], /^\/devices\/[^/]+\/business$/, 'content:write'],
+  [['PATCH', 'DELETE'], /^\/devices\/[^/]+\/products\/[^/]+$/, 'content:write'],
   [['POST'], /^\/devices$/, 'devices:write'],
   [['POST'], /^\/devices\/[^/]+\/(pause|resume|preset)$/, 'devices:write'],
   [['GET'], /^\/presets$/, 'devices:read'],

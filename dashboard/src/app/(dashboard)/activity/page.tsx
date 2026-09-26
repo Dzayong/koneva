@@ -10,6 +10,11 @@ import { formatDate } from "@/lib/utils";
 const ACTION: Record<string, string> = {
   "devices.create": "Menambah nomor",
   "webhook.secret_rotate": "Membuat kunci webhook baru",
+  "status.post": "Memposting status WhatsApp",
+  "business.update": "Mengubah profil bisnis",
+  "product.create": "Menambah produk katalog",
+  "product.update": "Mengubah produk katalog",
+  "product.delete": "Menghapus produk katalog",
   "devices.pause": "Menjeda nomor",
   "devices.resume": "Melanjutkan nomor",
   "devices.persona_update": "Mengubah pengaturan pengiriman",

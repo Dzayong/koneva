@@ -14,6 +14,7 @@ import { shutdownTracing } from './tracing';
 import { registerIncomingMessageListener } from './incoming';
 import { AutoReplyEngine } from './auto-reply';
 import { PresenceRoutine } from './presence';
+import { CommandRunner } from './command-runner';
 import { getOrCreatePersona } from '../shared/persona';
 import { DeviceStatusNotifier } from './device-events';
 import type { BotConfig, ConnectionState, BotStatus } from './types';
@@ -108,6 +109,11 @@ async function main(): Promise<void> {
     log,
   );
 
+  const commands = new CommandRunner(
+    botConfig.botId, queryFn, () => currentSocket, () => currentState.status === 'online', presence, redis, log,
+  );
+  await commands.start();
+
   const queueProcessor = startQueueProcessor(
     botConfig.botId,
     redis,
@@ -182,6 +188,7 @@ async function main(): Promise<void> {
     log.info('Shutting down bot container', { signal });
     server.close();
     presence.stop();
+    await commands.stop();
     await queueProcessor.stop();
     await closeQueueResources();
     await autoReplyEngine.close();

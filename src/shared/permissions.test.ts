@@ -76,3 +76,15 @@ test('billing belongs to the owner alone', async () => {
   assert.equal(permissionFor('POST', '/billing/student-request'), 'billing:manage');
   assert.deepEqual((['owner', 'admin', 'developer', 'viewer'] as const).map((r) => can(r, 'billing:manage')), [true, false, false, false]);
 });
+
+test('status, catalog and business profile: reading needs devices:read, publishing needs content:write', () => {
+  assert.equal(permissionFor('GET', '/devices/WAPI-X/status'), 'devices:read');
+  assert.equal(permissionFor('GET', '/devices/WAPI-X/catalog'), 'devices:read');
+  assert.equal(permissionFor('GET', '/devices/WAPI-X/commands/abc'), 'devices:read');
+  assert.equal(permissionFor('POST', '/devices/WAPI-X/status'), 'content:write');
+  assert.equal(permissionFor('PATCH', '/devices/WAPI-X/business'), 'content:write');
+  assert.equal(permissionFor('POST', '/devices/WAPI-X/products'), 'content:write');
+  assert.equal(permissionFor('DELETE', '/devices/WAPI-X/products/p1'), 'content:write');
+  assert.equal(can('viewer', 'content:write'), false);
+  assert.equal(can('developer', 'content:write'), true);
+});

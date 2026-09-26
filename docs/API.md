@@ -289,6 +289,46 @@ Operator (admin key): `GET/PATCH /plans`, `GET /subscriptions`, `GET /invoices`,
 `POST /invoices/:id/pay|void`, `POST /tenant/:id/student-verify`,
 `POST /tenant/:id/subscription` (grant a plan).
 
+## Status, catalog and business profile
+
+These run on the number itself, so the number must be online. They are asynchronous commands stored in
+`device_commands`; the bot claims and runs them, and the API either waits for the answer (reads and quick
+edits, up to 20 s, `504 DEVICE_NOT_RESPONDING` otherwise) or returns `202` (status posts).
+
+**Status (WhatsApp Story)**
+
+| Endpoint | Permission | What |
+|---|---|---|
+| `POST /api/v1/devices/:key/status` | `content:write` | `{kind: text\|image\|video, text?, media_url?, caption?, background?, audience: chatted\|list, numbers?, send_at?}` → `202 {command_id, status, run_at}` |
+| `GET /api/v1/devices/:key/status` | `devices:read` | last 30 status posts with state (`queued`, `running`, `done`, `failed`, `cancelled`) |
+| `GET /api/v1/devices/:key/commands/:id` | `devices:read` | one command and its result |
+| `POST /api/v1/devices/:key/commands/:id/cancel` | `content:write` | cancel while still `queued` |
+
+- Media is fetched by the bot: `media_url` must be a public `https` address (private addresses are rejected).
+- WhatsApp needs to know who may see a status. `audience: "chatted"` uses people this number has exchanged
+  messages with in the last 90 days (max 500); `"list"` uses the given numbers. With nobody to show it to the
+  post fails with `NO_AUDIENCE`.
+- A post outside the number's active hours waits until the number "wakes up" (plus 0-20 random minutes).
+- At most **3 posts per number per day** (`429 STATUS_LIMIT`). This is a caution, not a measured WhatsApp limit.
+- `send_at` schedules up to 7 days ahead.
+
+**Business profile and catalog** (only for numbers registered in WhatsApp Business; a regular number gets
+`409 NOT_BUSINESS`)
+
+| Endpoint | Permission | What |
+|---|---|---|
+| `GET /api/v1/devices/:key/business` | `devices:read` | `{is_business, profile}`; also the way to detect the account type |
+| `PATCH /api/v1/devices/:key/business` | `content:write` | `{description?, address?, email?, websites?, hours?}` (`hours.days[]`: `{day: mon..sun, mode: specific_hours\|open_24h\|appointment_only, open?, close?}`) |
+| `GET /api/v1/devices/:key/catalog` | `devices:read` | `?limit&cursor` → `{products, next_cursor}` |
+| `GET /api/v1/devices/:key/collections` | `devices:read` | product collections |
+| `POST /api/v1/devices/:key/products` | `content:write` | `{name, price, description?, currency?, url?, retailer_id?, is_hidden?, image_urls[], origin_country?}` |
+| `PATCH /api/v1/devices/:key/products/:id` | `content:write` | same fields as create |
+| `DELETE /api/v1/devices/:key/products/:id` | `content:write` | |
+
+`price` is in whole currency units (25000 = Rp 25.000). WhatsApp stores prices as amount x 1000; the bot
+converts (`PRICE_SCALE` in `src/shared/commands.ts`). **This conversion and the catalog calls have not been
+tested against a real WhatsApp Business number**: create one product and check the price in the app first.
+
 ## Bot Container (internal)
 
 Each running `bot-container` process exposes a small HTTP API on

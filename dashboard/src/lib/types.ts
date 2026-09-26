@@ -445,3 +445,39 @@ export interface WebhookLog {
   id: string; event_type: string; response_status: number | null; retry_count: number;
   response_body: string | null; created_at: string;
 }
+
+// ---- Status, catalog and business profile ------------------------------------
+
+export type CommandStatus = "queued" | "running" | "done" | "failed" | "cancelled";
+export interface StatusPost {
+  kind: "text" | "image" | "video";
+  text?: string;
+  media_url?: string;
+  caption?: string;
+  background?: string;
+  audience: "chatted" | "list";
+  numbers?: string[];
+  send_at?: string;
+}
+export interface DeviceCommand {
+  id: string; type: string; status: CommandStatus; payload: Partial<StatusPost>;
+  result: { message_id?: string | null; recipients?: number } | null;
+  error: string | null; run_at: string; created_at: string; finished_at: string | null;
+}
+export interface BusinessProfile {
+  description?: string | null; address?: string | null; email?: string | null; website?: string[] | null;
+}
+export interface BusinessInfo { is_business: boolean; profile: BusinessProfile | null }
+export interface CatalogProduct {
+  id: string; name: string; description?: string; price: number; currency: string; url?: string;
+  isHidden?: boolean; imageUrls?: Record<string, string>;
+}
+export interface ProductInput {
+  name: string; description: string; price: number; currency: string; url?: string;
+  is_hidden: boolean; image_urls: string[];
+}
+export interface BusinessHoursDay { day: "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat"; mode: "specific_hours" | "open_24h" | "appointment_only"; open?: string; close?: string }
+export interface BusinessUpdate {
+  description?: string; address?: string; email?: string; websites?: string[];
+  hours?: { timezone: string; days: BusinessHoursDay[] };
+}
