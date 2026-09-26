@@ -11,6 +11,9 @@ import { startQueueProcessor, registerReceiptListener, closeQueueResources } fro
 import { createApiRouter } from './api';
 import { activeConnections } from './metrics';
 import { shutdownTracing } from './tracing';
+import { registerIncomingMessageListener } from './incoming';
+import { AutoReplyEngine } from './auto-reply';
+import { DeviceStatusNotifier } from './device-events';
 import type { BotConfig, ConnectionState, BotStatus } from './types';
 
 const DEVICE_STATUS_BY_BOT_STATUS: Record<BotStatus, string> = {
@@ -21,6 +24,7 @@ const DEVICE_STATUS_BY_BOT_STATUS: Record<BotStatus, string> = {
   reconnecting: 'starting',
   offline: 'offline',
   logged_out: 'offline',
+  banned: 'banned',
   error: 'error',
 };
 
@@ -33,6 +37,8 @@ const botEnvSchema = z.object({
   // Comma-separated list so a new key can be added ahead of removing the old
   // one during rotation. Falls back to the shared ADMIN_API_KEY if unset.
   BOT_API_KEYS: z.string().optional(),
+  // Optional egress proxy (socks5://, http://) so a device keeps one stable IP.
+  WA_PROXY_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
 });
 
 function loadConfig(): BotConfig {
@@ -58,6 +64,7 @@ function loadConfig(): BotConfig {
     reconnectDelaysMs: RECONNECT_DELAYS_MS,
     queueName: `queue:messages:${env.BOT_ID}`,
     apiKeys,
+    proxyUrl: env.WA_PROXY_URL || undefined,
   };
 }
 
@@ -75,6 +82,11 @@ async function main(): Promise<void> {
   log.info('Connected to Redis');
 
   const queryFn = (text: string, params?: unknown[]) => query(text, params);
+  const autoReplyEngine = new AutoReplyEngine(botConfig.botId, queryFn, redis, log);
+  await autoReplyEngine.initialize();
+
+  const notifier = new DeviceStatusNotifier(botConfig.botId, queryFn, log);
+  await notifier.init();
 
   let currentState: ConnectionState = {
     botId: botConfig.botId,
@@ -112,6 +124,7 @@ async function main(): Promise<void> {
   await startBotConnection(botConfig, log, {
     onStateChange: (state) => {
       currentState = state;
+      void notifier.handle(state);
       activeConnections.set({ device_key: botConfig.botId }, state.status === 'online' ? 1 : 0);
 
       const deviceStatus = DEVICE_STATUS_BY_BOT_STATUS[state.status];
@@ -137,6 +150,8 @@ async function main(): Promise<void> {
     onSocketReady: (sock: WASocket) => {
       currentSocket = sock;
       registerReceiptListener(sock, log, queryFn);
+      registerIncomingMessageListener(sock, botConfig.botId, log, queryFn, (message) =>
+        autoReplyEngine.process(message, sock).then(() => undefined));
     },
   });
 
@@ -151,6 +166,7 @@ async function main(): Promise<void> {
     server.close();
     await queueProcessor.stop();
     await closeQueueResources();
+    await autoReplyEngine.close();
     await closeRedisClient();
     await pool.end();
     await shutdownTracing();

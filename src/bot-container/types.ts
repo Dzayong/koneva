@@ -9,6 +9,7 @@ export interface BotConfig {
   reconnectDelaysMs: number[];
   queueName: string;
   apiKeys: string[];
+  proxyUrl?: string | undefined;
 }
 
 export type BotStatus =
@@ -19,6 +20,7 @@ export type BotStatus =
   | 'reconnecting'
   | 'offline'
   | 'logged_out'
+  | 'banned'
   | 'error';
 
 export interface ConnectionState {
@@ -29,6 +31,7 @@ export interface ConnectionState {
   reconnectAttempt: number;
   lastConnectedAt?: Date | undefined;
   lastDisconnectReason?: string | undefined;
+  disconnectCode?: number | undefined;
 }
 
 export type QueueMessageType = 'text' | 'image' | 'video' | 'audio' | 'document';
@@ -38,6 +41,8 @@ export interface EnqueueMessageInput {
   type: QueueMessageType;
   /** Message text, or the media URL when `type` is not `text`. */
   content: string;
+  /** 'urgent' (OTP) uses its own queue and skips pacing. Default 'normal'. */
+  priority?: 'normal' | 'urgent' | undefined;
 }
 
 export interface QueueJobData {
@@ -51,7 +56,8 @@ export type MessageStatus =
   | 'delivered'
   | 'read'
   | 'failed'
-  | 'blocked';
+  | 'blocked'
+  | 'received';
 
 export interface MessageRecord {
   id: string;
@@ -64,5 +70,6 @@ export interface MessageRecord {
   status: MessageStatus;
   whatsappMessageId: string | null;
   errorMessage: string | null;
+  priority: 'normal' | 'urgent';
   createdAt: Date;
 }

@@ -26,9 +26,26 @@ const environmentSchema = z.object({
   KUBERNETES_IN_CLUSTER: z.string().optional(),
   BOT_STORAGE_CLASS: z.string().optional(),
   BOT_SESSION_STORAGE_SIZE: z.string().min(1).default('1Gi'),
+  SIGNUP_ENABLED: z.string().optional(),
+  TRIAL_MAX_DEVICES: z.coerce.number().int().positive().default(1),
+  TRIAL_QUOTA_MESSAGES: z.coerce.number().int().positive().default(200),
 });
 
 const environment = environmentSchema.parse(process.env);
+
+const PLACEHOLDER_SECRET = /(your_|_here|changeme|change_me|secret_key|example|password)/i;
+
+// Production must never boot with a guessable or template secret.
+if (environment.NODE_ENV === 'production') {
+  for (const [name, value] of [
+    ['ADMIN_API_KEY', environment.ADMIN_API_KEY],
+    ['JWT_SECRET', environment.JWT_SECRET],
+  ] as const) {
+    if (value.length < 32 || PLACEHOLDER_SECRET.test(value)) {
+      throw new Error(`${name} is too weak for production (need 32+ random characters, no placeholder text)`);
+    }
+  }
+}
 
 const config = {
   env: environment.NODE_ENV,
@@ -44,6 +61,11 @@ const config = {
     socket: environment.DOCKER_SOCKET,
     botImage: environment.BOT_IMAGE,
     network: environment.BOT_DOCKER_NETWORK,
+  },
+  signup: {
+    enabled: environment.SIGNUP_ENABLED !== 'false',
+    trialMaxDevices: environment.TRIAL_MAX_DEVICES,
+    trialQuotaMessages: environment.TRIAL_QUOTA_MESSAGES,
   },
   sessionPath: environment.SESSION_PATH,
   sessionHostPath: environment.SESSION_HOST_PATH,

@@ -5,7 +5,6 @@ import {
   getDailyCapByHealthScore,
   getWarmupStage,
   isWithinSendingWindow,
-  shouldRest,
   type QueryFn,
 } from './anti-ban';
 
@@ -43,12 +42,6 @@ test('friday lunch block is opt-in', () => {
   assert.equal(isWithinSendingWindow(fridayLunchUtc, { blockFridayLunch: true }), false);
 });
 
-test('rest kicks in every 50 messages', () => {
-  assert.equal(shouldRest(0), false);
-  assert.equal(shouldRest(49), false);
-  assert.equal(shouldRest(50), true);
-  assert.equal(shouldRest(100), true);
-});
 
 interface FakeDeviceRow {
   id: string;
@@ -145,7 +138,7 @@ test('canSendMessage denies a banned device', async () => {
     queryFn: makeFakeQueryFn(device, 0),
   });
   assert.equal(decision.allowed, false);
-  assert.equal(decision.reason, 'device_paused');
+  assert.equal(decision.reason, 'device_banned');
 });
 
 test('canSendMessage allows a brand-new device within warm-up cap', async () => {
@@ -165,7 +158,8 @@ test('canSendMessage allows a brand-new device within warm-up cap', async () => 
     now: new Date('2026-09-24T05:00:00Z'), // within sending window
   });
   assert.equal(decision.allowed, true);
-  assert.equal(decision.dailyCap, 5);
+  // Warm-up cap is 5; the per-day persona factor may only lower it (never above the cap).
+  assert.ok(decision.dailyCap >= 4 && decision.dailyCap <= 5, `cap ${decision.dailyCap}`);
   assert.equal(decision.warmupDay, 1);
 });
 
@@ -209,4 +203,124 @@ test('canSendMessage rejects spammy content even when quota allows it', async ()
   assert.equal(decision.allowed, false);
   assert.equal(decision.reason, 'content_rejected');
   assert.ok(decision.contentReasons && decision.contentReasons.length > 0);
+});
+
+test('canSendMessage refuses proactive sends to a recipient who asked to stop, but still allows replies', async () => {
+  const device: FakeDeviceRow = {
+    id: 'device-optout',
+    tenant_id: 'tenant-1',
+    device_key: 'WAPI-OPTOUT',
+    status: 'online',
+    health_score: 50,
+    created_at: new Date('2026-09-24T04:00:00Z'),
+    warmup_started_at: null,
+    warmup_completed_at: null,
+    paused_until: null,
+  };
+  const base = makeFakeQueryFn(device, 0);
+  const queryFn: QueryFn = async (text, params) =>
+    text.includes('SELECT 1 FROM messages') && text.includes('content ~*')
+      ? { rows: [{ '?column?': 1 }] }
+      : base(text, params);
+  const now = new Date('2026-09-24T05:00:00Z');
+
+  const proactive = await canSendMessage('WAPI-OPTOUT', { queryFn, isProactive: true, recipient: '6281234567890', content: 'Promo baru', now });
+  assert.equal(proactive.allowed, false);
+  assert.equal(proactive.reason, 'recipient_opted_out');
+
+  const reply = await canSendMessage('WAPI-OPTOUT', { queryFn, isProactive: false, recipient: '6281234567890', content: 'Baik, sudah kami catat', now });
+  assert.notEqual(reply.reason, 'recipient_opted_out');
+});
+
+test('proactive sends rest after a burst and are re-queued at the end of the rest; replies are not held back', async () => {
+  const device: FakeDeviceRow = {
+    id: 'device-rest', tenant_id: 'tenant-1', device_key: 'WAPI-REST', status: 'online', health_score: 50,
+    created_at: new Date('2026-09-24T04:00:00Z'), warmup_started_at: null, warmup_completed_at: null, paused_until: null,
+  };
+  const now = new Date('2026-09-24T05:00:00Z');
+  const base = makeFakeQueryFn(device, 0);
+  const queryFn: QueryFn = async (text, params) =>
+    text.includes('LAG(at)')
+      ? { rows: [{ burst_start: new Date(now.getTime() - 10 * 60_000), burst_count: 100, last_at: new Date(now.getTime() - 30_000) }] }
+      : base(text, params);
+
+  const proactive = await canSendMessage('WAPI-REST', { queryFn, isProactive: true, recipient: '6281234567890', content: 'Halo', now });
+  assert.equal(proactive.allowed, false);
+  assert.equal(proactive.reason, 'resting');
+  assert.ok((proactive.retryAfterMs ?? 0) > 3 * 60_000, `retry ${proactive.retryAfterMs}`);
+
+  const reply = await canSendMessage('WAPI-REST', { queryFn, isProactive: false, recipient: '6281234567890', content: 'Baik Kak', now });
+  assert.notEqual(reply.reason, 'resting');
+});
+
+test('outside the number\'s active hours the send is deferred until it wakes up', async () => {
+  const device: FakeDeviceRow = {
+    id: 'device-night', tenant_id: 'tenant-1', device_key: 'WAPI-NIGHT', status: 'online', health_score: 50,
+    created_at: new Date('2026-09-24T04:00:00Z'), warmup_started_at: null, warmup_completed_at: null, paused_until: null,
+  };
+  const decision = await canSendMessage('WAPI-NIGHT', {
+    queryFn: makeFakeQueryFn(device, 0), isProactive: false, content: 'Halo',
+    now: new Date('2026-09-23T20:00:00Z'), // 03:00 WIB
+  });
+  assert.equal(decision.reason, 'outside_sending_window');
+  assert.ok((decision.retryAfterMs ?? 0) >= 3 * 3_600_000, `retry ${decision.retryAfterMs}`);
+});
+
+function urgentFixture(id: string): FakeDeviceRow {
+  return {
+    id, tenant_id: 'tenant-1', device_key: id.toUpperCase(), status: 'online', health_score: 50,
+    created_at: new Date('2026-09-24T04:00:00Z'), warmup_started_at: null, warmup_completed_at: null, paused_until: null,
+  };
+}
+
+test('urgent (OTP) sends skip active hours, rests, opt-out, content rules and artificial delay', async () => {
+  const device = urgentFixture('device-otp');
+  const now = new Date('2026-09-23T20:00:00Z'); // 03:00 WIB, outside any active window
+  const base = makeFakeQueryFn(device, 0);
+  const queryFn: QueryFn = async (text, params) => {
+    if (text.includes('LAG(at)')) return { rows: [{ burst_start: new Date(now.getTime() - 600_000), burst_count: 100, last_at: new Date(now.getTime() - 5_000) }] };
+    if (text.includes('SELECT 1 FROM messages') && text.includes('content ~*')) return { rows: [{ '?column?': 1 }] };
+    return base(text, params);
+  };
+  const otp = { queryFn, isProactive: true, recipient: '6281234567890', content: 'KODE ANDA 123456 JANGAN BERIKAN KE SIAPAPUN', now };
+
+  const normal = await canSendMessage('DEVICE-OTP', { ...otp, priority: 'normal' });
+  assert.equal(normal.allowed, false);
+
+  const urgent = await canSendMessage('DEVICE-OTP', { ...otp, priority: 'urgent' });
+  assert.equal(urgent.allowed, true, `denied: ${urgent.reason}`);
+  assert.equal(urgent.delayMs, 0);
+  assert.equal(urgent.typing.shouldSimulate, false);
+});
+
+test('urgent sends still respect paused/banned devices and the daily cap', async () => {
+  const banned = { ...urgentFixture('device-otp-banned'), status: 'banned' };
+  const b = await canSendMessage('DEVICE-OTP-BANNED', { queryFn: makeFakeQueryFn(banned, 0), priority: 'urgent', isProactive: true });
+  assert.equal(b.reason, 'device_banned');
+
+  const capped = urgentFixture('device-otp-cap');
+  const c = await canSendMessage('DEVICE-OTP-CAP', {
+    queryFn: makeFakeQueryFn(capped, 999), priority: 'urgent', isProactive: true, now: new Date('2026-09-24T05:00:00Z'),
+  });
+  assert.equal(c.allowed, false);
+  assert.equal(c.reason, 'daily_cap_reached');
+});
+
+test('a 24-hour number keeps sending at night, and a flat delay is exactly that delay', async () => {
+  const device = urgentFixture('device-24h');
+  const base = makeFakeQueryFn(device, 0);
+  const queryFn: QueryFn = async (text, params) => {
+    if (text.includes('FROM device_personas WHERE device_id')) {
+      return { rows: [{
+        seed: 's', timezone: 'Asia/Jakarta', wake_hour: 7, sleep_hour: 22, delay_min_ms: 5000, delay_max_ms: 5000,
+        burst_size: 15, rest_min_ms: 300000, rest_max_ms: 600000, typing_ms_per_char: 55, always_on: true,
+      }] };
+    }
+    return base(text, params);
+  };
+  const decision = await canSendMessage('DEVICE-24H', {
+    queryFn, isProactive: false, content: 'Halo Kak', now: new Date('2026-09-23T20:00:00Z'), // 03:00 WIB
+  });
+  assert.equal(decision.allowed, true, `denied: ${decision.reason}`);
+  assert.equal(decision.delayMs, 5000);
 });

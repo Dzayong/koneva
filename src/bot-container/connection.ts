@@ -1,11 +1,12 @@
 import makeWASocket, {
   fetchLatestBaileysVersion,
-  DisconnectReason,
   type WASocket,
   type ConnectionState as BaileysConnectionUpdate,
 } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import { loadSession, bindCredsUpdate } from './session';
+import { classifyDisconnect } from './disconnect';
+import { createProxyAgent, describeProxy } from './proxy';
 import type { BotConfig, ConnectionState } from './types';
 
 const BOT_BROWSER: [string, string, string] = ['Windows', 'Chrome', '10.0.22621'];
@@ -40,11 +41,24 @@ export async function startBotConnection(
     const { version, isLatest } = await fetchLatestBaileysVersion();
     logger.info('Using Baileys version', { botId: config.botId, version, isLatest });
 
+    const agent = createProxyAgent(config.proxyUrl);
+    if (config.proxyUrl) {
+      logger.info('Routing WhatsApp traffic through proxy', {
+        botId: config.botId,
+        proxy: describeProxy(config.proxyUrl),
+      });
+    }
+
     const sock = makeWASocket({
       version,
       auth: state,
       browser: BOT_BROWSER,
       printQRInTerminal: false,
+      // Stay "offline" until a message is actually sent, like a phone whose
+      // owner is not staring at the screen, and skip the full history pull.
+      markOnlineOnConnect: false,
+      syncFullHistory: false,
+      ...(agent ? { agent, fetchAgent: agent } : {}),
     });
 
     sock.ev.on('creds.update', bindCredsUpdate(saveCreds, config.botId, logger));
@@ -88,13 +102,15 @@ export async function startBotConnection(
 
     if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as BoomLike | undefined)?.output?.statusCode;
-      const loggedOut = statusCode === DisconnectReason.loggedOut;
-      connState.lastDisconnectReason =
-        lastDisconnect?.error?.message ?? `status_${String(statusCode ?? 'unknown')}`;
+      const ended = classifyDisconnect(statusCode);
+      connState.disconnectCode = statusCode;
+      connState.lastDisconnectReason = ended.reconnect
+        ? (lastDisconnect?.error?.message ?? `status_${String(statusCode ?? 'unknown')}`)
+        : ended.reason;
 
-      if (loggedOut) {
-        connState.status = 'logged_out';
-        logger.warn('Session logged out, will not reconnect', { botId: config.botId });
+      if (!ended.reconnect) {
+        connState.status = ended.status;
+        logger.warn('Session ended, will not reconnect', { botId: config.botId, code: statusCode, reason: ended.reason });
         await emitState();
         return;
       }
@@ -109,10 +125,12 @@ export async function startBotConnection(
         return;
       }
 
-      const delayMs =
+      const baseDelayMs =
         config.reconnectDelaysMs[connState.reconnectAttempt] ??
         config.reconnectDelaysMs[config.reconnectDelaysMs.length - 1] ??
         60_000;
+      // Jitter so reconnects never land on a fixed, machine-like cadence.
+      const delayMs = Math.round(baseDelayMs * (0.8 + Math.random() * 0.4));
 
       connState.status = 'reconnecting';
       connState.reconnectAttempt += 1;

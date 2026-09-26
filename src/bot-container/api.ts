@@ -11,6 +11,7 @@ import { getHealthReport } from './health';
 import { registry } from './metrics';
 import { ApiError, internalError, tooManyRequestsError, unauthorizedError, validationError } from './errors';
 import type { BotConfig, ConnectionState } from './types';
+import { safeIncludes } from '../shared/utils/secure-compare';
 
 const PHONE_PATTERN = /^\d{8,15}$/;
 
@@ -22,6 +23,7 @@ const sendBodySchema = z.object({
     .regex(PHONE_PATTERN, 'to must be digits only (country code + number, e.g. 6281234567890)'),
   type: z.enum(['text', 'image', 'video', 'audio', 'document']).default('text'),
   content: z.string().trim().min(1, 'content is required').max(4096, 'content exceeds 4096 characters'),
+  priority: z.enum(['normal', 'urgent']).default('normal'),
 });
 
 export interface ApiDependencies {
@@ -33,11 +35,13 @@ export interface ApiDependencies {
 }
 
 function requireApiKey(apiKeys: string[]) {
-  const validKeys = new Set(apiKeys);
   return (req: Request, _res: Response, next: NextFunction): void => {
-    if (validKeys.size === 0) {
-      // No key configured: fail open only in non-production so local dev isn't blocked,
-      // but this should always be set once the API leaves a developer's machine.
+    if (apiKeys.length === 0) {
+      // No key configured: fail open only outside production so local dev isn't blocked.
+      if (process.env.NODE_ENV === 'production') {
+        next(unauthorizedError());
+        return;
+      }
       next();
       return;
     }
@@ -45,7 +49,7 @@ function requireApiKey(apiKeys: string[]) {
     const header = req.header('x-api-key') ?? req.header('authorization');
     const provided = header?.toLowerCase().startsWith('bearer ') ? header.slice(7) : header;
 
-    if (!provided || !validKeys.has(provided)) {
+    if (!safeIncludes(provided, apiKeys)) {
       next(unauthorizedError());
       return;
     }

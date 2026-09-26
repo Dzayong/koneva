@@ -3,6 +3,11 @@ import { getDeviceByKey, getDeliveryMetrics, calculateHealthScore, type QueryFn 
 
 export type { QueryFn };
 import { evaluateContent, type RecipientMessage } from './content-filter';
+import { hasRecipientOptedOut } from '../shared/readiness';
+import {
+  dailyFactor, delayBetweenMessagesMs, evaluateFatigue, getBurstState, getOrCreatePersona,
+  isWithinPersonaWindow, msUntilNextDayWindow, msUntilWindowOpens,
+} from '../shared/persona';
 
 const MIN_SAMPLES_FOR_PAUSE = 10;
 const FALLBACK_CAP_WHEN_UNPROVEN = 5;
@@ -49,15 +54,11 @@ export function getDailyCapByHealthScore(score: number): number | null {
   return tier.maxMessagesPerDay;
 }
 
-const MIN_BASE_DELAY_MS = 15_000;
-const MAX_BASE_DELAY_MS = 45_000;
-const REST_EVERY_N_MESSAGES = 50;
-const MIN_REST_MS = 10 * 60_000;
-const MAX_REST_MS = 15 * 60_000;
-const TYPING_CHANCE = 0.3;
-const MIN_TYPING_MS = 2_000;
-const MAX_TYPING_MS = 5_000;
+const MIN_TYPING_MS = 1_500;
+const MAX_TYPING_MS = 12_000;
+const DEFAULT_TYPING_MS_PER_CHAR = 55;
 const PER_MINUTE_LIMIT = 2;
+const URGENT_PER_MINUTE_LIMIT = 20;
 const PAUSE_DURATION_MS = 24 * 60 * 60_000;
 const DEFAULT_TIMEZONE = 'Asia/Jakarta';
 const JAKARTA_UTC_OFFSET_MS = 7 * 60 * 60_000;
@@ -68,26 +69,17 @@ function randomBetween(min: number, max: number): number {
   return Math.floor(min + Math.random() * (max - min));
 }
 
-export function getBaseDelayMs(): number {
-  return randomBetween(MIN_BASE_DELAY_MS, MAX_BASE_DELAY_MS);
-}
-
-export function shouldRest(messagesSentToday: number): boolean {
-  return messagesSentToday > 0 && messagesSentToday % REST_EVERY_N_MESSAGES === 0;
-}
-
-export function getRestDurationMs(): number {
-  return randomBetween(MIN_REST_MS, MAX_REST_MS);
-}
-
 export interface TypingSimulation {
   shouldSimulate: boolean;
   durationMs: number;
 }
 
-export function getTypingSimulation(): TypingSimulation {
-  const shouldSimulate = Math.random() < TYPING_CHANCE;
-  return { shouldSimulate, durationMs: shouldSimulate ? randomBetween(MIN_TYPING_MS, MAX_TYPING_MS) : 0 };
+// A person always shows "typing…" before sending, and takes longer for longer
+// text; a fixed or occasional indicator is itself a bot signature.
+export function getTypingSimulation(contentLength = 0, msPerChar = DEFAULT_TYPING_MS_PER_CHAR): TypingSimulation {
+  const base = contentLength > 0 ? contentLength * msPerChar : randomBetween(2_000, 5_000);
+  const jittered = base + randomBetween(-400, 1_200);
+  return { shouldSimulate: true, durationMs: Math.min(MAX_TYPING_MS, Math.max(MIN_TYPING_MS, jittered)) };
 }
 
 function getHourAndWeekday(date: Date, timeZone: string): { hour: number; weekday: string } {
@@ -144,7 +136,11 @@ export async function countMessagesSince(
   queryFn: QueryFn,
 ): Promise<number> {
   const { rows } = await queryFn(
-    `SELECT COUNT(*) AS count FROM messages WHERE device_id = $1 AND created_at >= $2`,
+    // Only messages actually sent count toward caps: inbound messages and the
+    // still-queued row being evaluated must not consume the send budget.
+    `SELECT COUNT(*) AS count FROM messages
+     WHERE device_id = $1 AND direction = 'outbound' AND status IN ('sent', 'delivered', 'read')
+       AND COALESCE(sent_at, created_at) >= $2`,
     [deviceId, since],
   );
   const row = rows[0] as { count: string } | undefined;
@@ -170,8 +166,11 @@ async function markWarmupCompleted(deviceId: string, now: Date, queryFn: QueryFn
 export type AntiBanDenialReason =
   | 'device_not_found'
   | 'device_paused'
+  | 'device_banned'
   | 'health_score_too_low'
   | 'daily_cap_reached'
+  | 'resting'
+  | 'recipient_opted_out'
   | 'rate_limit_per_minute'
   | 'outside_sending_window'
   | 'proactive_not_allowed_in_warmup'
@@ -188,9 +187,15 @@ export interface AntiBanDecision {
   dailyCap: number;
   sentToday: number;
   warmupDay: number;
+  /** When a denial is temporary: how long the queue should wait before trying again. */
+  retryAfterMs?: number | undefined;
 }
 
+export type MessagePriority = 'normal' | 'urgent';
+
 export interface CanSendMessageOptions {
+  /** 'urgent' (OTP, transactional) skips pacing, active hours, rests and content rules; caps and pauses still apply. */
+  priority?: MessagePriority | undefined;
   isProactive?: boolean | undefined;
   hasMedia?: boolean | undefined;
   content?: string | undefined;
@@ -207,7 +212,7 @@ export interface CanSendMessageOptions {
 
 function denial(
   reason: AntiBanDenialReason,
-  extra: Partial<Pick<AntiBanDecision, 'healthScore' | 'dailyCap' | 'sentToday' | 'warmupDay'>> = {},
+  extra: Partial<Pick<AntiBanDecision, 'healthScore' | 'dailyCap' | 'sentToday' | 'warmupDay' | 'retryAfterMs'>> = {},
 ): AntiBanDecision {
   return {
     allowed: false,
@@ -218,6 +223,7 @@ function denial(
     dailyCap: extra.dailyCap ?? 0,
     sentToday: extra.sentToday ?? 0,
     warmupDay: extra.warmupDay ?? 0,
+    ...(extra.retryAfterMs !== undefined ? { retryAfterMs: extra.retryAfterMs } : {}),
   };
 }
 
@@ -237,10 +243,20 @@ export async function canSendMessage(
   // POST /api/v1/devices/:key/pause (status only, no pausedUntil) and this
   // module's own health-score auto-pause (status AND pausedUntil). Both
   // must block sending, not just the one that happens to set pausedUntil.
-  const isAdministrativelyPaused = device.status === 'paused' || device.status === 'banned';
+  // A banned number will never send again: fail its messages now instead of re-queueing them forever.
+  if (device.status === 'banned') {
+    return denial('device_banned', { healthScore: device.healthScore });
+  }
+  const isAdministrativelyPaused = device.status === 'paused';
   const isAutoPaused = device.pausedUntil !== null && device.pausedUntil.getTime() > now.getTime();
   if (isAdministrativelyPaused || isAutoPaused) {
     return denial('device_paused', { healthScore: device.healthScore });
+  }
+
+  // Honoring "stop" requests is a hard rule for proactive sends, independent of score.
+  const urgent = options.priority === 'urgent';
+  if (!urgent && options.isProactive && options.recipient && (await hasRecipientOptedOut(device.id, options.recipient, queryFn))) {
+    return denial('recipient_opted_out', { healthScore: device.healthScore });
   }
 
   const healthScore = await calculateHealthScore(deviceKey, queryFn);
@@ -267,31 +283,53 @@ export async function canSendMessage(
     await markWarmupCompleted(device.id, now, queryFn);
   }
 
-  const dailyCap = Math.min(stage.maxMessagesPerDay, healthCap);
+  const persona = await getOrCreatePersona(device.id, queryFn);
+  const dailyCap = Math.max(1, Math.floor(Math.min(stage.maxMessagesPerDay, healthCap) * dailyFactor(persona, now)));
   const sentToday = await countMessagesSince(device.id, startOfDayJakartaUtc(now), queryFn);
 
   if (sentToday >= dailyCap) {
-    return denial('daily_cap_reached', { healthScore, dailyCap, sentToday, warmupDay });
+    return denial('daily_cap_reached', {
+      healthScore, dailyCap, sentToday, warmupDay,
+      retryAfterMs: msUntilNextDayWindow(persona, now) + Math.round(Math.random() * 10 * 60_000),
+    });
   }
 
   const sentLastMinute = await countMessagesSince(device.id, new Date(now.getTime() - 60_000), queryFn);
-  if (sentLastMinute >= PER_MINUTE_LIMIT) {
+  if (sentLastMinute >= (urgent ? URGENT_PER_MINUTE_LIMIT : PER_MINUTE_LIMIT)) {
     return denial('rate_limit_per_minute', { healthScore, dailyCap, sentToday, warmupDay });
   }
 
-  if (!isWithinSendingWindow(now, { timeZone: options.timeZone, blockFridayLunch: options.blockFridayLunch })) {
-    return denial('outside_sending_window', { healthScore, dailyCap, sentToday, warmupDay });
+  const inFridayLunch = options.blockFridayLunch
+    ? !isWithinSendingWindow(now, { timeZone: persona.timezone, blockFridayLunch: true })
+    : false;
+  if (!urgent && (!isWithinPersonaWindow(persona, now) || inFridayLunch)) {
+    return denial('outside_sending_window', {
+      healthScore, dailyCap, sentToday, warmupDay,
+      retryAfterMs: msUntilWindowOpens(persona, now) + Math.round(Math.random() * 10 * 60_000),
+    });
   }
 
-  if (options.isProactive && !stage.proactiveAllowed) {
+  // A person gets tired: after a burst of proactive sends this number rests for a
+  // while. Replies to people who wrote first are never held back by this.
+  if (options.isProactive && !urgent) {
+    const fatigue = evaluateFatigue(persona, await getBurstState(device.id, queryFn), now);
+    if (fatigue.resting && fatigue.restEndsAt) {
+      return denial('resting', {
+        healthScore, dailyCap, sentToday, warmupDay,
+        retryAfterMs: fatigue.restEndsAt.getTime() - now.getTime() + Math.round(Math.random() * 60_000),
+      });
+    }
+  }
+
+  if (!urgent && options.isProactive && !stage.proactiveAllowed) {
     return denial('proactive_not_allowed_in_warmup', { healthScore, dailyCap, sentToday, warmupDay });
   }
 
-  if (options.hasMedia && !stage.mediaAllowed) {
+  if (!urgent && options.hasMedia && !stage.mediaAllowed) {
     return denial('media_not_allowed_in_warmup', { healthScore, dailyCap, sentToday, warmupDay });
   }
 
-  if (options.content !== undefined) {
+  if (!urgent && options.content !== undefined) {
     const evaluation = evaluateContent(options.content, {
       recipient: options.recipient ?? '',
       recipientName: options.recipientName,
@@ -315,8 +353,9 @@ export async function canSendMessage(
     }
   }
 
-  const rest = shouldRest(sentToday) ? getRestDurationMs() : 0;
-  const typing = getTypingSimulation();
+  const typing = urgent
+    ? { shouldSimulate: false, durationMs: 0 }
+    : getTypingSimulation(options.hasMedia ? 0 : (options.content?.length ?? 0), persona.typingMsPerChar);
 
   logger.info('Message send approved', {
     deviceKey,
@@ -329,7 +368,7 @@ export async function canSendMessage(
 
   return {
     allowed: true,
-    delayMs: getBaseDelayMs() + rest,
+    delayMs: urgent ? 0 : delayBetweenMessagesMs(persona),
     typing,
     healthScore,
     dailyCap,

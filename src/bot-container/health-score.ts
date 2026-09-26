@@ -1,6 +1,7 @@
 import type Redis from 'ioredis';
 import { query } from '../shared/database/connection';
 import logger from '../shared/utils/logger';
+import { computeReadiness, getReadinessInputs } from '../shared/readiness';
 
 export type QueryFn = (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
 
@@ -115,95 +116,23 @@ export async function getDeviceByKeyCached(
 
 export interface DeliveryMetrics {
   totalSent: number;
-  delivered: number;
-  replied: number;
-  blocked: number;
-  reported: number;
 }
 
+/** Real outbound sends in the last 30 days; sample size for auto-pause decisions. */
 export async function getDeliveryMetrics(
   deviceId: string,
   queryFn: QueryFn = defaultQueryFn,
 ): Promise<DeliveryMetrics> {
   const { rows } = await queryFn(
-    `SELECT
-       COUNT(*) AS total_sent,
-       COUNT(*) FILTER (WHERE delivered_at IS NOT NULL) AS delivered,
-       COUNT(*) FILTER (WHERE replied_at IS NOT NULL) AS replied,
-       COUNT(*) FILTER (WHERE status = 'blocked' OR blocked_at IS NOT NULL) AS blocked,
-       COUNT(*) FILTER (WHERE reported_at IS NOT NULL) AS reported
+    `SELECT COUNT(*) AS total_sent
      FROM messages
-     WHERE device_id = $1 AND created_at >= now() - make_interval(days => $2::int)`,
+     WHERE device_id = $1 AND direction = 'outbound' AND status IN ('sent', 'delivered', 'read')
+       AND created_at >= now() - make_interval(days => $2::int)`,
     [deviceId, METRICS_WINDOW_DAYS],
   );
 
-  const row = rows[0] as
-    | { total_sent: string; delivered: string; replied: string; blocked: string; reported: string }
-    | undefined;
-
-  return {
-    totalSent: Number(row?.total_sent ?? 0),
-    delivered: Number(row?.delivered ?? 0),
-    replied: Number(row?.replied ?? 0),
-    blocked: Number(row?.blocked ?? 0),
-    reported: Number(row?.reported ?? 0),
-  };
-}
-
-export interface HealthScoreInputs {
-  deviceAgeDays: number;
-  warmupCompleted: boolean;
-  totalSent: number;
-  delivered: number;
-  replied: number;
-  blocked: number;
-  reported: number;
-}
-
-export function computeHealthScore(inputs: HealthScoreInputs): number {
-  let score = 0;
-
-  if (inputs.deviceAgeDays > 30) {
-    score += 20;
-  } else if (inputs.deviceAgeDays > 7) {
-    score += 10;
-  }
-
-  if (inputs.warmupCompleted) {
-    score += 20;
-  }
-
-  if (inputs.totalSent > 0) {
-    const deliveryRate = inputs.delivered / inputs.totalSent;
-    if (deliveryRate > 0.95) {
-      score += 20;
-    } else if (deliveryRate > 0.9) {
-      score += 10;
-    }
-
-    const replyRate = inputs.replied / inputs.totalSent;
-    if (replyRate > 0.3) {
-      score += 15;
-    } else if (replyRate > 0.15) {
-      score += 8;
-    }
-
-    const blockRate = inputs.blocked / inputs.totalSent;
-    if (blockRate < 0.005) {
-      score += 15;
-    } else if (blockRate > 0.02) {
-      score -= 20;
-    }
-
-    const reportRate = inputs.reported / inputs.totalSent;
-    if (reportRate < 0.001) {
-      score += 10;
-    } else if (reportRate > 0.01) {
-      score -= 30;
-    }
-  }
-
-  return Math.max(0, Math.min(100, score));
+  const row = rows[0] as { total_sent: string } | undefined;
+  return { totalSent: Number(row?.total_sent ?? 0) };
 }
 
 export async function calculateHealthScore(
@@ -215,25 +144,21 @@ export async function calculateHealthScore(
     throw new Error(`Device not found: ${deviceKey}`);
   }
 
-  const metrics = await getDeliveryMetrics(device.id, queryFn);
-  const deviceAgeDays = Math.floor((Date.now() - device.createdAt.getTime()) / 86_400_000);
-
-  const score = computeHealthScore({
-    deviceAgeDays,
-    warmupCompleted: device.warmupCompletedAt !== null,
-    totalSent: metrics.totalSent,
-    delivered: metrics.delivered,
-    replied: metrics.replied,
-    blocked: metrics.blocked,
-    reported: metrics.reported,
-  });
+  const inputs = await getReadinessInputs(device, queryFn);
+  const report = computeReadiness(inputs);
 
   await queryFn(`UPDATE devices SET health_score = $1, updated_at = now() WHERE id = $2`, [
-    score,
+    report.score,
     device.id,
   ]);
 
-  logger.debug('Health score recalculated', { deviceKey, deviceId: device.id, score, metrics });
+  logger.debug('Readiness score recalculated', {
+    deviceKey,
+    deviceId: device.id,
+    score: report.score,
+    tier: report.tier,
+    confidence: report.confidence,
+  });
 
-  return score;
+  return report.score;
 }

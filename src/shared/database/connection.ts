@@ -18,7 +18,7 @@ process.env['TZ'] = 'UTC';
 
 const pool = new Pool({
   connectionString: config.database.url,
-  max: 20,
+  max: Number(process.env['DB_POOL_MAX']) > 0 ? Number(process.env['DB_POOL_MAX']) : 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
 });

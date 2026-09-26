@@ -8,6 +8,7 @@ import logger from '../shared/utils/logger';
 import { DockerBotManager } from './docker';
 import { createKubernetesClients, KubernetesBotManager } from './kubernetes';
 import type { BotOrchestrator, DeviceManagerConfig, OrchestrationMode } from './types';
+import { safeEqual } from '../shared/utils/secure-compare';
 
 const createDeviceSchema = z.object({
   tenant_id: z.string().uuid(),
@@ -30,11 +31,13 @@ export function loadDeviceManagerConfig(): DeviceManagerConfig {
     mode: resolveMode(),
     port: config.deviceManager.port,
     adminApiKey: config.adminApiKey,
+    jwtSecret: config.jwt.secret,
     botImage: config.docker.botImage,
     databaseUrl: config.database.url,
     redisUrl: config.redis.url,
     sessionHostPath: config.sessionHostPath,
     dockerNetwork: config.docker.network,
+    botProxyUrl: process.env.WA_PROXY_URL || undefined,
     kubernetes: {
       namespace: config.deviceManager.kubernetes.namespace,
       inCluster: config.deviceManager.kubernetes.inCluster,
@@ -55,7 +58,7 @@ export async function createOrchestrator(managerConfig: DeviceManagerConfig): Pr
 }
 
 function requireAdmin(request: Request, response: Response, next: NextFunction): void {
-  if (request.header('x-admin-key') !== config.adminApiKey) {
+  if (!safeEqual(request.header('x-admin-key'), config.adminApiKey)) {
     response.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid admin key' } });
     return;
   }
@@ -171,7 +174,31 @@ export function createDeviceManagerApp(orchestrator: BotOrchestrator): express.E
       return;
     }
     await orchestrator.deleteBot(parsed.data);
-    await pool.query(`UPDATE devices SET status = 'offline', container_id = NULL WHERE device_key = $1`, [parsed.data]);
+
+    // Hard delete. messages.device_key keeps the history readable, so only the
+    // FK is detached; unsent messages can never be delivered anymore.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const device = (await client.query<{ id: string }>(
+        'SELECT id FROM devices WHERE device_key = $1', [parsed.data],
+      )).rows[0];
+      if (device) {
+        await client.query(
+          `UPDATE messages SET status = 'failed', error_message = 'Device deleted'
+           WHERE device_id = $1 AND status IN ('queued', 'sending')`,
+          [device.id],
+        );
+        await client.query('UPDATE messages SET device_id = NULL WHERE device_id = $1', [device.id]);
+        await client.query('DELETE FROM devices WHERE id = $1', [device.id]);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
     response.status(204).send();
   }));
 

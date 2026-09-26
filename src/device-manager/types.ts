@@ -4,11 +4,13 @@ export interface DeviceManagerConfig {
   mode: OrchestrationMode;
   port: number;
   adminApiKey: string;
+  jwtSecret: string;
   botImage: string;
   databaseUrl: string;
   redisUrl: string;
   sessionHostPath: string;
   dockerNetwork: string;
+  botProxyUrl?: string | undefined;
   kubernetes: KubernetesConfig;
 }
 

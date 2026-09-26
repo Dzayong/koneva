@@ -13,6 +13,7 @@ export type WebhookEventType =
   | 'message.sent'
   | 'message.delivered'
   | 'message.read'
+  | 'message.received'
   | 'message.failed'
   | 'device.status_changed';
 
@@ -22,7 +23,13 @@ export interface WebhookPayload {
   message_id?: string;
   whatsapp_message_id?: string;
   to?: string;
+  from?: string;
+  content?: string;
+  direction?: 'inbound' | 'outbound';
   status?: string;
+  previous_status?: string;
+  reason?: string;
+  code?: number;
   timestamp: string;
 }
 

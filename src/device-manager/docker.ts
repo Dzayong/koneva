@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { BotOrchestrator, BotPodStatus, BotStatefulSetSpec, DeviceManagerConfig } from './types';
@@ -14,10 +14,14 @@ const runCommand: CommandRunner = async (file, args) => {
   return { stdout: result.stdout, stderr: result.stderr };
 };
 
+// Inside a container, localhost is the container itself; point at the host.
+// Rewrites the hostname only, so URLs with credentials (user:pass@localhost) work.
 function containerUrl(url: string): string {
-  return url
-    .replace('://localhost', '://host.docker.internal')
-    .replace('://127.0.0.1', '://host.docker.internal');
+  const parsed = new URL(url);
+  if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+    parsed.hostname = 'host.docker.internal';
+  }
+  return parsed.toString();
 }
 
 export class DockerBotManager implements BotOrchestrator {
@@ -37,24 +41,53 @@ export class DockerBotManager implements BotOrchestrator {
     const deviceSessionPath = path.resolve(this.config.sessionHostPath, spec.deviceKey);
     mkdirSync(deviceSessionPath, { recursive: true, mode: 0o700 });
 
+    let existingEnv: string[] | null = null;
     try {
-      await this.runner('docker', ['inspect', name]);
-      await this.runner('docker', ['start', name]);
-      return { resourceName: name };
+      const { stdout } = await this.runner('docker', ['inspect', '--format', '{{json .Config.Env}}', name]);
+      existingEnv = JSON.parse(stdout) as string[];
     } catch {
       // Container does not exist yet; create it below.
     }
 
+    if (existingEnv) {
+      // Containers created before JWT_SECRET was passed crash-loop on config
+      // validation; restarting them would keep the bad env, so recreate.
+      if (existingEnv.some((entry) => entry.startsWith('JWT_SECRET='))) {
+        await this.runner('docker', ['start', name]);
+        return { resourceName: name };
+      }
+      await this.runner('docker', ['rm', '-f', name]);
+    }
+
+    // The session dir is created here (0700, owned by this process), so run the
+    // bot as the same uid/gid or its non-root user can't write to the mount.
+    const owner = process.getuid && process.getgid ? ['--user', `${process.getuid()}:${process.getgid()}`] : [];
     const { stdout } = await this.runner('docker', [
       'run', '-d', '--name', name,
+      '--restart', 'unless-stopped',
+      '--init',
+      // Hardening: the bot needs no privileges, no writable rootfs, and must not
+      // be able to starve the host if a dependency misbehaves.
+      '--cap-drop', 'ALL',
+      '--security-opt', 'no-new-privileges',
+      '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m',
+      '--memory', '512m', '--memory-swap', '512m',
+      '--pids-limit', '256',
+      '--label', `wa.gateway.network=${this.config.dockerNetwork}`,
+      '--label', `wa.gateway.device=${spec.deviceKey}`,
+      '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3',
+      ...owner,
       '--network', this.config.dockerNetwork,
       '--add-host', 'host.docker.internal:host-gateway',
       '-e', `BOT_ID=${spec.deviceKey}`,
       '-e', `BOT_API_KEYS=${this.config.adminApiKey}`,
       '-e', `ADMIN_API_KEY=${this.config.adminApiKey}`,
+      '-e', `JWT_SECRET=${this.config.jwtSecret}`,
       '-e', `DATABASE_URL=${containerUrl(this.config.databaseUrl)}`,
       '-e', `REDIS_URL=${containerUrl(this.config.redisUrl)}`,
       '-e', 'SESSION_PATH=/app/sessions',
+      '-e', 'DB_POOL_MAX=4',
+      ...(this.config.botProxyUrl ? ['-e', `WA_PROXY_URL=${this.config.botProxyUrl}`] : []),
       '-v', `${deviceSessionPath}:/app/sessions`,
       this.config.botImage,
     ]);
@@ -68,6 +101,10 @@ export class DockerBotManager implements BotOrchestrator {
       const message = error instanceof Error ? error.message : String(error);
       if (!message.includes('No such container')) throw error;
     }
+    // Drop the WhatsApp credentials too; a deleted device must not leave a live session behind.
+    const root = path.resolve(this.config.sessionHostPath);
+    const sessionDir = path.resolve(root, deviceKey);
+    if (sessionDir.startsWith(root + path.sep)) rmSync(sessionDir, { recursive: true, force: true });
   }
 
   async getBotStatus(deviceKey: string): Promise<BotPodStatus | null> {
@@ -97,6 +134,7 @@ export class DockerBotManager implements BotOrchestrator {
   async listBots(): Promise<BotPodStatus[]> {
     const { stdout } = await this.runner('docker', [
       'ps', '-a', '--filter', 'name=wa-bot-', '--format', '{{.Names}}|{{.State}}',
+      '--filter', `network=${this.config.dockerNetwork}`,
     ]);
     return stdout.trim() ? stdout.trim().split('\n').map((line) => {
       const [name = 'unknown', phase = 'unknown'] = line.split('|');
