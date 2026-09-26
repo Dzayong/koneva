@@ -46,6 +46,23 @@ export function computeWebhookSignature(body: string, secret: string): string {
   return crypto.createHmac('sha256', secret).update(body).digest('hex');
 }
 
+export const WEBHOOK_TIMEOUT_MS = 10_000;
+
+/**
+ * Headers for one delivery. `X-Webhook-Secret` predates the others and carries the HMAC hex (not the
+ * secret itself); it is kept so existing receivers keep working. New receivers should use
+ * `X-Webhook-Signature: sha256=<hex>`.
+ */
+export function webhookHeaders(event: string, body: string, secret: string | null): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Webhook-Event': event };
+  if (secret) {
+    const signature = computeWebhookSignature(body, secret);
+    headers['X-Webhook-Secret'] = signature;
+    headers['X-Webhook-Signature'] = `sha256=${signature}`;
+  }
+  return headers;
+}
+
 async function getTenantWebhookConfig(
   tenantId: string,
   queryFn: QueryFn,
@@ -114,12 +131,13 @@ async function dispatchWebhookBody(
 
   for (; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (config.webhookSecret) {
-        headers['X-Webhook-Secret'] = computeWebhookSignature(body, config.webhookSecret);
-      }
-
-      const response = await fetch(config.webhookUrl, { method: 'POST', headers, body });
+      const response = await fetch(config.webhookUrl, {
+        method: 'POST',
+        headers: webhookHeaders(payload.event, body, config.webhookSecret),
+        body,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+      });
       lastStatus = response.status;
       lastBody = await response.text().catch(() => '');
 

@@ -12,6 +12,9 @@ declare module "axios" {
 }
 import type {
   ApiKeyRecord,
+  WebhookLog,
+  WebhookSettings,
+  WebhookTestResult,
   BillingCycle,
   BillingState,
   Invoice,
@@ -476,6 +479,21 @@ class ApiClient {
       "/api/v1/audit", { params: { limit, before }, skipErrorToast: true },
     );
     return response.data.data;
+  }
+
+  // ---- Webhook -------------------------------------------------------------
+
+  async getWebhook(): Promise<WebhookSettings> {
+    return (await this.client.get<ApiSuccess<WebhookSettings>>("/api/v1/tenant/webhook", { skipErrorToast: true })).data.data;
+  }
+  async rotateWebhookSecret(): Promise<string> {
+    return (await this.client.post<ApiSuccess<{ secret: string }>>("/api/v1/tenant/webhook/secret", {}, { skipErrorToast: true })).data.data.secret;
+  }
+  async testWebhook(): Promise<WebhookTestResult> {
+    return (await this.client.post<ApiSuccess<WebhookTestResult>>("/api/v1/tenant/webhook/test", {}, { skipErrorToast: true })).data.data;
+  }
+  async getWebhookLogs(): Promise<WebhookLog[]> {
+    return (await this.client.get<ApiSuccess<WebhookLog[]>>("/api/v1/tenant/webhook/logs", { skipErrorToast: true })).data.data;
   }
 
   // ---- Plans and billing ---------------------------------------------------

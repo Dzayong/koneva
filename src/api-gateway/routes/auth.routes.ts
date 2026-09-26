@@ -90,6 +90,7 @@ router.get('/me', async (request: Request, response: Response) => {
       workspaces: session.workspaces,
       permissions: PERMISSIONS.filter((p) => ROLE_PERMISSIONS[session.role].includes(p)),
       subscription: await getSubscriptionSummary(session.tenant.id),
+      support_contact: config.billing.operatorContact || null,
     },
   });
 });

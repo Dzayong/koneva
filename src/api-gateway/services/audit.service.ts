@@ -24,6 +24,7 @@ const RULES: readonly Rule[] = [
   ['PATCH', /^\/team\/members\/([^/]+)$/, 'team.role_change', 'user', 1],
   ['DELETE', /^\/team\/members\/([^/]+)$/, 'team.remove', 'user', 1],
   ['POST', /^\/billing\/orders$/, 'billing.order', 'invoice', null],
+  ['POST', /^\/tenant\/webhook\/secret$/, 'webhook.secret_rotate', 'workspace', null],
   ['POST', /^\/billing\/student-request$/, 'billing.student_request', 'workspace', null],
   ['POST', /^\/broadcast$/, 'broadcast.create', 'broadcast', null],
   ['POST', /^\/auto-reply-rules$/, 'auto_reply.create', 'rule', null],

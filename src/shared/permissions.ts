@@ -50,6 +50,7 @@ const RULES: readonly Rule[] = [
   [['GET', 'POST'], /^\/billing(\/[^/]+)?$/, 'billing:manage'],
   [['GET'], /^\/tenant$/, 'devices:read'],
   [['PATCH'], /^\/tenant$/, 'webhooks:manage'],
+  [['GET', 'POST'], /^\/tenant\/webhook(\/[^/]+)?$/, 'webhooks:manage'],
   [['POST'], /^\/templates\/[^/]+\/render$/, 'messages:read'],
   [['GET'], /^\/(contacts|templates|auto-reply-rules|analytics|dashboard)(\/[^/]+)*$/, 'messages:read'],
   [ANY_WRITE, /^\/(contacts|templates|auto-reply-rules)(\/[^/]+)*$/, 'content:write'],

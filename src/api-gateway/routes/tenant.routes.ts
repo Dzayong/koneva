@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import pool from '../../shared/database/connection';
 import { validate } from '../middleware/validate';
+import { getWebhookLogs, getWebhookSettings, rotateWebhookSecret, testWebhook } from '../services/webhook.service';
 
 const router = Router();
 const BLOCKED_HOSTS = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|0\.0\.0\.0|\[::1?\])$/i;
@@ -40,5 +41,18 @@ export async function updateTenant(request: Request, response: Response): Promis
 
 router.get('/tenant', getTenant);
 router.patch('/tenant', validate({ body: updateTenantSchema }), updateTenant);
+
+router.get('/tenant/webhook', async (request: Request, response: Response) => {
+  response.json({ success: true, data: await getWebhookSettings(request.tenant!.id) });
+});
+router.post('/tenant/webhook/secret', async (request: Request, response: Response) => {
+  response.json({ success: true, data: { secret: await rotateWebhookSecret(request.tenant!.id) } });
+});
+router.post('/tenant/webhook/test', async (request: Request, response: Response) => {
+  response.json({ success: true, data: await testWebhook(request.tenant!.id) });
+});
+router.get('/tenant/webhook/logs', async (request: Request, response: Response) => {
+  response.json({ success: true, data: await getWebhookLogs(request.tenant!.id) });
+});
 
 export default router;

@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   CreditCard,
+  Webhook,
   History,
   KeyRound,
   LayoutDashboard,
@@ -45,6 +46,7 @@ const groups: Array<{ label: string; items: NavItem[] }> = [
     label: "PENGEMBANG",
     items: [
       { name: "Mulai cepat", href: "/developers/quickstart", icon: Rocket, permission: "messages:send" },
+      { name: "Webhook", href: "/developers/webhooks", icon: Webhook, permission: "webhooks:manage" },
       { name: "Kunci API", href: "/developers/keys", icon: KeyRound, permission: "keys:manage" },
     ],
   },

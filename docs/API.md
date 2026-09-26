@@ -429,30 +429,123 @@ Response (`202`):
 Poll `GET /status` or watch for the `message.sent` / `message.delivered` /
 `message.read` / `message.failed` webhook events (see below) for the outcome.
 
-## Webhook events
+## Webhooks
 
-Dispatched to the tenant's `webhook_url` (from the `tenants` table), signed
-with HMAC-SHA256 over the raw JSON body using `webhook_secret` as the key, in
-an `X-Webhook-Secret` header. Retried at 1s / 5s / 15s; every attempt
-(success or final failure) is logged to `webhook_logs`.
+A webhook is a call from us to your server when something happens: a message is sent, delivered,
+read, fails, someone writes to your number, or the number's state changes. It saves you from polling.
+
+### Set up
+
+1. Save an `http(s)` URL (`PATCH /api/v1/tenant {"webhook_url": "..."}` or Dashboard → Webhook).
+   Private and local addresses are rejected.
+2. Create a signing secret: `POST /api/v1/tenant/webhook/secret` → `{"data":{"secret":"whsec_..."}}`.
+   It is shown **once**; creating a new one replaces the old one immediately. `GET /api/v1/tenant/webhook`
+   returns `{url, secret_set, secret_hint}` (last 4 characters only).
+3. Send a test: `POST /api/v1/tenant/webhook/test` → `{success, status, detail, duration_ms}`. It posts a
+   signed `webhook.test` event and reports your server's answer.
+4. Recent deliveries: `GET /api/v1/tenant/webhook/logs` (event, response status, attempts, time).
+
+All four need the `webhooks:manage` permission (owner, admin, developer).
+
+### Request we send
+
+`POST` with a JSON body and these headers:
+
+| Header | Value |
+|---|---|
+| `Content-Type` | `application/json` |
+| `X-Webhook-Event` | the event name, e.g. `message.delivered` |
+| `X-Webhook-Signature` | `sha256=<hex>`, HMAC-SHA256 of the **raw body** with your secret |
+| `X-Webhook-Secret` | the same hex digest without the prefix (older name, kept for compatibility; it is the signature, not the secret) |
+
+Without a secret no signature headers are sent, so create one before going live.
+
+### Verify the signature
+
+Compute `HMAC_SHA256(secret, raw_body)` as hex, compare with the header in constant time, and reject on
+mismatch. Use the raw bytes: parsing and re-serialising the JSON changes them and breaks the match.
+
+```js
+const expected = crypto.createHmac("sha256", SECRET).update(rawBody).digest("hex");
+const received = (req.get("X-Webhook-Signature") || "").replace("sha256=", "");
+const ok = received.length === expected.length &&
+  crypto.timingSafeEqual(Buffer.from(received), Buffer.from(expected));
+```
+
+```python
+expected = hmac.new(SECRET, raw, hashlib.sha256).hexdigest()
+ok = hmac.compare_digest(header.removeprefix("sha256="), expected)
+```
+
+```php
+$ok = hash_equals(hash_hmac('sha256', $raw, $secret), str_replace('sha256=', '', $sig));
+```
+
+The dashboard page `/developers/webhooks` has complete Express, Flask and PHP receivers to copy.
+
+### Delivery rules
+
+- Answer with a **2xx within 10 seconds**. Anything else (or a timeout) is a failure.
+- Failures are retried 3 times, after 1, 5 and 15 seconds. After that the event is logged as failed and
+  is not sent again.
+- Redirects are not followed; give the final URL.
+- **At-least-once**: an event can arrive twice. Make handlers idempotent, e.g. remember processed
+  `message_id` + `event` pairs.
+- **No ordering guarantee**: `message.read` can arrive before `message.delivered`. Use `timestamp`.
+- Do the heavy work after you answer, so slow processing does not trigger retries.
+
+### Events
+
+| Event | When | Typical use |
+|---|---|---|
+| `message.sent` | Left your number | Mark as sent |
+| `message.delivered` | Reached the recipient's phone | Treat an OTP/notification as delivered |
+| `message.read` | Recipient opened it | Stop follow-up reminders |
+| `message.failed` | Failed after retries | Tell the user or fall back to SMS/email |
+| `message.received` | Someone wrote to your number | Store, reply, or route to support |
+| `device.status_changed` | Number state changed (see the status table above) | Stop sending and alert your team on `banned` / `logged_out` |
+| `webhook.test` | You pressed "Kirim tes" | Answer 200 |
+
+Outbound message events:
 
 ```json
 {
   "event": "message.delivered",
-  "device_key": "WAPI-XXX",
+  "device_key": "WAPI-XXXXXXXX",
   "message_id": "uuid",
-  "whatsapp_message_id": "wamid.xxx",
+  "whatsapp_message_id": "3EB0C767D0A1",
   "to": "6281234567890",
   "status": "delivered",
-  "timestamp": "2026-09-24T20:30:00Z"
+  "timestamp": "2026-09-26T10:30:00.000Z"
 }
 ```
 
-Events: `message.sent`, `message.delivered`, `message.read`, `message.received`,
-`message.failed`, `device.status_changed` (the last one is defined in the
-type but not yet emitted anywhere — see `docs/ARCHITECTURE.md` gaps).
+Inbound (`message.received`) adds `from`, `content` and `direction: "inbound"` instead of `to`:
 
-Inbound `message.received` payloads include `direction: "inbound"`, `from`,
-`content`, `message_id`, `whatsapp_message_id`, and `device_key`. They are also
-stored in `messages` with `status: "received"` and returned by
-`GET /api/v1/messages` alongside outbound messages.
+```json
+{
+  "event": "message.received",
+  "device_key": "WAPI-XXXXXXXX",
+  "message_id": "uuid",
+  "whatsapp_message_id": "A5C1...",
+  "from": "6281234567890",
+  "content": "Halo, pesanan saya sudah sampai?",
+  "direction": "inbound",
+  "status": "received",
+  "timestamp": "2026-09-26T10:31:12.000Z"
+}
+```
+
+`device.status_changed` carries `status`, `previous_status`, `reason` and `code`; see
+[Device status webhook](#device-status-webhook). Inbound messages are also stored and returned by
+`GET /api/v1/messages`.
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| Test says "tidak bisa dihubungi" | URL not reachable from the internet (localhost, firewall, wrong port) |
+| Test shows 401/403 | Your receiver rejects the request; check signature verification uses the **raw body** and the newest secret |
+| Test shows 3xx | Redirects are not followed; use the final URL |
+| Signature never matches | Body was parsed and re-serialised, or an old secret is still deployed after rotating |
+| Events arrive twice | Normal (at-least-once); deduplicate |

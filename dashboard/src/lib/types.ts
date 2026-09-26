@@ -275,6 +275,7 @@ export interface Me {
   workspaces: WorkspaceRef[];
   permissions: Permission[];
   subscription: SubscriptionSummary | null;
+  support_contact: string | null;
 }
 
 export interface AuthResult {
@@ -431,4 +432,13 @@ export interface BillingState {
   plans: PublicPlan[];
   invoices: Invoice[];
   payment: { instructions: string; contact: string | null };
+}
+
+// ---- Webhook ---------------------------------------------------------------
+
+export interface WebhookSettings { url: string | null; secret_set: boolean; secret_hint: string | null }
+export interface WebhookTestResult { success: boolean; status: number | null; detail: string; duration_ms: number }
+export interface WebhookLog {
+  id: string; event_type: string; response_status: number | null; retry_count: number;
+  response_body: string | null; created_at: string;
 }

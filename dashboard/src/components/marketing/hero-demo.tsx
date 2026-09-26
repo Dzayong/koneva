@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { Check, CheckCheck, Clock } from "lucide-react";
-import { useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 const CURL = `curl -X POST https://api.domain-anda.com/api/v1/message/send \\
@@ -20,21 +19,19 @@ const LOOP_AT = READ_AT + 110;
 
 /** Everything derives from one counter, so the demo replays as a loop and needs no per-step timers. */
 export function HeroDemo() {
-  const reduce = useReducedMotion();
   const [tick, setTick] = useState(0);
   useEffect(() => {
-    if (reduce) return;
     const id = setInterval(() => setTick((t) => (t + 1 >= LOOP_AT ? 0 : t + 1)), TICK_MS);
     return () => clearInterval(id);
-  }, [reduce]);
-  const t = reduce ? READ_AT : tick;
+  }, []);
+  const t = tick;
 
   const typed = CURL.slice(0, Math.min(t, TYPED));
   const status = t >= READ_AT ? "read" : t >= SENT_AT ? "sent" : t >= QUEUED_AT ? "queued" : null;
 
   return (
     <div className="relative mx-auto w-full max-w-[560px]">
-      <div aria-hidden className="absolute -inset-6 -z-10 rounded-[2rem] bg-gradient-to-br from-primary/20 via-transparent to-primary/10 blur-2xl" />
+      <div aria-hidden className="absolute -inset-6 -z-10 rounded-[2rem] bg-gradient-to-br from-[var(--brand-from)]/25 via-transparent to-[var(--brand-to)]/20 blur-2xl" />
       {/* Terminal */}
       <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-elevated">
         <div className="flex items-center gap-1.5 border-b border-slate-800 px-4 py-3">
@@ -42,11 +39,11 @@ export function HeroDemo() {
           <span className="ml-3 font-mono text-xs text-slate-500">terminal</span>
         </div>
         <pre aria-label="Contoh permintaan API" className="min-h-[148px] overflow-hidden px-4 py-4 font-mono text-[12.5px] leading-6 whitespace-pre-wrap text-slate-200">
-          <span className="text-emerald-400">$ </span>{typed}
+          <span className="text-cyan-400">$ </span>{typed}
           {t < TYPED && <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse bg-slate-300" />}
         </pre>
         <div className={cn("border-t border-slate-800 px-4 py-3 font-mono text-[12.5px] transition-opacity duration-300", status ? "opacity-100" : "opacity-0")}>
-          <span className="text-slate-500">202 </span><span className="text-emerald-400">{`{ "status": "${status === "queued" ? "queued" : "accepted"}" }`}</span>
+          <span className="text-slate-500">202 </span><span className="text-sky-300">{`{ "status": "${status === "queued" ? "queued" : "accepted"}" }`}</span>
         </div>
       </div>
 

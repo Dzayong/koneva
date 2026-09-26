@@ -52,69 +52,73 @@
   --color-warning: #d97706;
 }
 
-/* Quiet slate canvas, navy structure, emerald reserved for actions. */
+/* Cool white canvas, deep-navy structure, cobalt for actions. Green is kept only for "success/online". */
 :root {
   color-scheme: light;
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #f6f8fc;
+  --foreground: #0b1530;
   --card: #ffffff;
-  --card-foreground: #0f172a;
+  --card-foreground: #0b1530;
   --popover: #ffffff;
-  --popover-foreground: #0f172a;
-  --primary: #047857;
+  --popover-foreground: #0b1530;
+  --primary: #1d4ed8;
   --primary-foreground: #ffffff;
-  --secondary: #eef2f6;
-  --secondary-foreground: #1e293b;
-  --muted: #f1f5f9;
-  --muted-foreground: #526176;
-  --accent: #ecfdf5;
-  --accent-foreground: #065f46;
+  --secondary: #ebf0fa;
+  --secondary-foreground: #1b2a4e;
+  --muted: #eef2f9;
+  --muted-foreground: #4f5f7d;
+  --accent: #eaf1ff;
+  --accent-foreground: #1e3a8a;
   --destructive: #b91c1c;
-  --border: #dce3ec;
-  --input: #cbd5e1;
-  --ring: #059669;
-  --chart-1: #047857;
-  --chart-2: #0284c7;
-  --chart-3: #d97706;
-  --chart-4: #475569;
-  --chart-5: #0d9488;
+  --border: #dbe3f0;
+  --input: #c5d0e3;
+  --ring: #3b82f6;
+  --chart-1: #1d4ed8;
+  --chart-2: #0ea5e9;
+  --chart-3: #f59e0b;
+  --chart-4: #64748b;
+  --chart-5: #14b8a6;
   --radius: 0.75rem;
-  --sidebar: #0f172a;
-  --sidebar-foreground: #cbd5e1;
-  --sidebar-primary: #34d399;
-  --sidebar-primary-foreground: #0f172a;
-  --sidebar-accent: #1e293b;
-  --sidebar-accent-foreground: #f8fafc;
-  --sidebar-border: #293548;
-  --sidebar-ring: #34d399;
+  --sidebar: #0a1a3f;
+  --sidebar-foreground: #c3cfea;
+  --sidebar-primary: #60a5fa;
+  --sidebar-primary-foreground: #06142e;
+  --sidebar-accent: #14285a;
+  --sidebar-accent-foreground: #f4f7ff;
+  --sidebar-border: #1f3468;
+  --sidebar-ring: #60a5fa;
+  --brand-from: #2563eb;
+  --brand-to: #06b6d4;
 }
 
 .dark {
   color-scheme: dark;
-  --background: #101720;
-  --foreground: #e8eef5;
-  --card: #18222f;
-  --card-foreground: #e8eef5;
-  --popover: #1e293b;
-  --popover-foreground: #e8eef5;
-  --primary: #34d399;
-  --primary-foreground: #09251e;
-  --secondary: #243142;
-  --secondary-foreground: #e8eef5;
-  --muted: #202c3b;
-  --muted-foreground: #a7b5c7;
-  --accent: #153c34;
-  --accent-foreground: #a7f3d0;
+  --background: #0a1122;
+  --foreground: #e9eefb;
+  --card: #111b32;
+  --card-foreground: #e9eefb;
+  --popover: #172341;
+  --popover-foreground: #e9eefb;
+  --primary: #60a5fa;
+  --primary-foreground: #06142e;
+  --secondary: #1b2a4b;
+  --secondary-foreground: #e9eefb;
+  --muted: #16223f;
+  --muted-foreground: #a4b3d0;
+  --accent: #14295a;
+  --accent-foreground: #bfdbfe;
   --destructive: #f87171;
-  --border: #334155;
-  --input: #475569;
-  --ring: #34d399;
-  --chart-1: #34d399;
+  --border: #253559;
+  --input: #35496f;
+  --ring: #60a5fa;
+  --chart-1: #60a5fa;
   --chart-2: #38bdf8;
   --chart-3: #fbbf24;
   --chart-4: #94a3b8;
   --chart-5: #2dd4bf;
-  --sidebar: #0c131e;
+  --sidebar: #070e20;
+  --brand-from: #60a5fa;
+  --brand-to: #22d3ee;
 }
 
 @layer base {
@@ -227,9 +231,39 @@
 }
 
 /* Marketing: ticker and page loader */
-@keyframes marquee { to { transform: translateX(-50%); } }
+@keyframes marquee { to { transform: translateX(-25%); } }
 .marquee-track { animation: marquee 32s linear infinite; }
 .marquee:hover .marquee-track { animation-play-state: paused; }
 @keyframes loader-ring { 0% { transform: scale(.8); opacity: .7; } 100% { transform: scale(1.6); opacity: 0; } }
 .loader-ring { animation: loader-ring 1.4s ease-out infinite; }
-@media (prefers-reduced-motion: reduce) { .marquee-track, .loader-ring { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .loader-ring { animation: none; } }
+
+/* Brand gradient for one highlighted phrase per page, never for body text. */
+@utility text-brand-gradient {
+  background-image: linear-gradient(90deg, var(--brand-from), var(--brand-to));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---- Marketing tones -------------------------------------------------------
+   Each landing section re-declares the design tokens, so every component inside
+   (cards, buttons, borders) adapts with no per-component colour logic. --stage is
+   the page background the scroll observer fades to while that section is centred.
+   Reasoning (heuristics, not laws): ink navy = authority, cream = calm and human,
+   mint = safety, sand = warmth and patience, indigo = insight, sky = trust for
+   money decisions, coral = the one warm complement that makes the action stand out. */
+.font-display { font-family: var(--font-fraunces), Georgia, serif; font-optical-sizing: auto; letter-spacing: -0.02em; font-weight: 600; }
+
+.tone-ink { --stage:#0a1224; --background:#0a1224; --foreground:#f2f5fc; --card:#111c38; --card-foreground:#f2f5fc; --border:#24345f; --input:#34467a; --muted:#16224a; --muted-foreground:#a9b7d6; --secondary:#16224a; --secondary-foreground:#f2f5fc; --accent:#1a2a5a; --accent-foreground:#dbe6ff; --primary:#ff7a45; --primary-foreground:#1c0d05; --ring:#ff9a6e; --brand-from:#67e8f9; --brand-to:#93c5fd; }
+.tone-cream { --stage:#faf6ee; --background:#faf6ee; --foreground:#1a2238; --card:#ffffff; --card-foreground:#1a2238; --border:#e6dfd0; --input:#d8cfbb; --muted:#f0eadc; --muted-foreground:#5b6478; --secondary:#efe8d8; --secondary-foreground:#1a2238; --accent:#e8effe; --accent-foreground:#1e3a8a; --primary:#1d4ed8; --primary-foreground:#ffffff; --ring:#3b82f6; }
+.tone-mint { --stage:#e3f3ec; --background:#e3f3ec; --foreground:#0d2a24; --card:#f6fcf9; --card-foreground:#0d2a24; --border:#bfe0d1; --input:#a8d3c0; --muted:#d2ebdf; --muted-foreground:#3d5f55; --secondary:#cfe8dc; --secondary-foreground:#0d2a24; --accent:#d1efe1; --accent-foreground:#065f46; --primary:#0f766e; --primary-foreground:#ffffff; --ring:#14b8a6; }
+.tone-sand { --stage:#fdf0d5; --background:#fdf0d5; --foreground:#2b1a05; --card:#fffaf0; --card-foreground:#2b1a05; --border:#f0d9a8; --input:#e6cb92; --muted:#f8e3b5; --muted-foreground:#6b5427; --secondary:#f6e0ad; --secondary-foreground:#2b1a05; --accent:#fbe3b0; --accent-foreground:#7c2d12; --primary:#b45309; --primary-foreground:#ffffff; --ring:#f59e0b; }
+.tone-indigo { --stage:#171a4a; --background:#171a4a; --foreground:#eef0ff; --card:#20256b; --card-foreground:#eef0ff; --border:#343c8f; --input:#4650a8; --muted:#1f2461; --muted-foreground:#b6bdf0; --secondary:#232972; --secondary-foreground:#eef0ff; --accent:#2b3290; --accent-foreground:#dfe3ff; --primary:#a5b4fc; --primary-foreground:#12154a; --ring:#c7d2fe; }
+.tone-sky { --stage:#e6f0ff; --background:#e6f0ff; --foreground:#0b1a3a; --card:#ffffff; --card-foreground:#0b1a3a; --border:#c3d6f7; --input:#aac3ee; --muted:#d7e5fb; --muted-foreground:#475a80; --secondary:#d3e2fa; --secondary-foreground:#0b1a3a; --accent:#dbe8ff; --accent-foreground:#1e3a8a; --primary:#1d4ed8; --primary-foreground:#ffffff; --ring:#3b82f6; }
+[class*="tone-"] { color: var(--foreground); }
+
+@keyframes caret { 50% { opacity: 0; } }
+.caret { animation: caret 1s steps(1) infinite; }
+/* Ticker keeps running under "reduce motion" on purpose (small, text-only) but is pausable, per WCAG 2.2.2. */
+.marquee[data-paused="true"] .marquee-track { animation-play-state: paused; }

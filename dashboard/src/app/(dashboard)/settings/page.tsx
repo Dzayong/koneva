@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
@@ -64,7 +65,7 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Webhook</CardTitle>
-          <CardDescription>Alamat yang menerima kabar saat pesan terkirim, sampai, dibaca, gagal, atau saat nomor bermasalah (tersambung, terputus, ditolak WhatsApp). Setiap kiriman ditandatangani.</CardDescription>
+          <CardDescription>Alamat yang menerima kabar saat pesan terkirim, sampai, dibaca, gagal, atau saat nomor bermasalah (tersambung, terputus, ditolak WhatsApp). Setiap kiriman ditandatangani. <Link href="/developers/webhooks" className="font-medium text-primary underline underline-offset-2">Panduan, kunci, dan tes webhook</Link></CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (validUrl) save.mutate(webhook.trim()); }}>

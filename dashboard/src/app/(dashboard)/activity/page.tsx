@@ -9,6 +9,7 @@ import { formatDate } from "@/lib/utils";
 
 const ACTION: Record<string, string> = {
   "devices.create": "Menambah nomor",
+  "webhook.secret_rotate": "Membuat kunci webhook baru",
   "devices.pause": "Menjeda nomor",
   "devices.resume": "Melanjutkan nomor",
   "devices.persona_update": "Mengubah pengaturan pengiriman",

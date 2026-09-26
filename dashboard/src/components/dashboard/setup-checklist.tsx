@@ -43,7 +43,7 @@ export function SetupChecklist() {
       { id: "device", title: "Sambungkan nomor WhatsApp", hint: "Tambahkan nomor yang akan dipakai mengirim dan menerima pesan.", done: list.length > 0, href: "/devices?add=1", action: "Tambah nomor" },
       { id: "scan", title: "Pindai kode QR di HP", hint: "Buka WhatsApp di HP, lalu Perangkat tertaut, Tautkan perangkat.", done: list.some((d) => d.status === "online"), href: pending ? `/devices/${pending.device_key}?connect=1` : "/devices", action: pending ? "Tampilkan QR" : "Lihat nomor" },
       { id: "send", title: "Kirim pesan pertama", hint: "Nomor baru belum boleh memulai percakapan selama 2 hari pertama. Kirim pesan ke nomor ini dari HP lain, lalu balas dari sini.", done: (messages?.data ?? []).some((m) => m.direction === "outbound" && ["sent", "delivered", "read"].includes(m.status)), href: "/developers/quickstart", action: "Coba kirim" },
-      { id: "webhook", title: "Pasang webhook", hint: "Terima kabar saat pesan terkirim, dibalas, atau nomor bermasalah.", done: Boolean(tenant.data?.webhook_url), href: "/settings", action: "Atur webhook", optional: true },
+      { id: "webhook", title: "Pasang webhook", hint: "Terima kabar saat pesan terkirim, dibalas, atau nomor bermasalah.", done: Boolean(tenant.data?.webhook_url), href: "/developers/webhooks", action: "Atur webhook", optional: true },
     ];
     if (can("team:manage")) {
       const t = team.data;
@@ -78,7 +78,7 @@ export function SetupChecklist() {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
         <div>
           <h3 id="setup-title" className="text-heading text-lg">Mulai di sini</h3>
-          <p className="text-sm text-muted-foreground">{doneRequired} dari {required.length} langkah wajib selesai</p>
+          <p className="text-sm text-muted-foreground">{doneRequired} dari {required.length} langkah wajib selesai{doneRequired < required.length ? `, sekitar ${Math.max(1, (required.length - doneRequired) * 2)} menit lagi` : ""}</p>
         </div>
         <div className="h-1.5 w-40 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={required.length} aria-valuenow={doneRequired} aria-label="Kemajuan persiapan">
           <motion.div className="h-full rounded-full bg-primary" initial={false} animate={{ width: `${(doneRequired / required.length) * 100}%` }} transition={{ duration: 0.6, ease: "easeOut" }} />

@@ -11,6 +11,7 @@ import { usePermissions } from "@/hooks/use-me";
 import { SidebarNav } from "./sidebar-nav";
 import { ThemeToggle } from "./theme-toggle";
 import { NotificationCenter } from "./notification-center";
+import { HelpButton, TrialChip } from "./header-extras";
 
 const PAGE_TITLES: Record<string, string> = {
   "/": "Ringkasan",
@@ -23,6 +24,8 @@ const PAGE_TITLES: Record<string, string> = {
   "/settings/auto-reply": "Balas otomatis",
   "/developers/quickstart": "Mulai cepat",
   "/developers/keys": "Kunci API",
+  "/developers/webhooks": "Webhook",
+  "/billing": "Tagihan",
   "/team": "Tim",
   "/activity": "Aktivitas",
 };
@@ -73,6 +76,8 @@ export function Header() {
         <Badge variant="outline" className="hidden border-border bg-card px-2.5 py-1 font-medium lg:flex">
           {workspace?.name ?? (legacy ? "Akses API key" : "…")}
         </Badge>
+        <TrialChip />
+        <HelpButton />
         <NotificationCenter />
         <ThemeToggle />
         <div className="flex items-center gap-3">
