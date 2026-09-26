@@ -26,10 +26,13 @@ export function RotatingText() {
     return () => clearTimeout(id);
   }, [n, deleting, word, i]);
 
+  // The longest phrase is laid out invisibly so the headline always occupies the same lines: no jump under the CTA.
+  const longest = WORDS.reduce((a, b) => (b.length > a.length ? b : a), "");
   return (
-    <span className="text-brand-gradient" aria-label={WORDS.join(", ")}>
-      <span aria-hidden>{word.slice(0, n)}</span>
-      <span aria-hidden className="caret ml-0.5 inline-block w-[0.06em] translate-y-[0.06em] bg-current align-baseline" style={{ height: "0.9em", background: "var(--brand-to)" }} />
+    <span className="text-brand-gradient grid lg:inline-grid" aria-label={WORDS.join(", ")}>
+      <span aria-hidden className="invisible col-start-1 row-start-1 whitespace-nowrap select-none">{longest}</span>
+      <span aria-hidden className="col-start-1 row-start-1 whitespace-nowrap">{word.slice(0, n)}
+      <span aria-hidden className="caret keep-motion ml-0.5 inline-block w-[0.06em] translate-y-[0.06em] bg-current align-baseline" style={{ height: "0.9em", background: "var(--brand-to)" }} /></span>
     </span>
   );
 }

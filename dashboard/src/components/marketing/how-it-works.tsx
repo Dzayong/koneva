@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import { KeyRound, Smartphone, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Reveal } from "./reveal";
@@ -35,12 +34,14 @@ export function HowItWorks() {
           <div className="flex items-center gap-1.5 border-b bg-muted/60 px-3 py-2">
             <span className="h-2 w-2 rounded-full bg-border" /><span className="h-2 w-2 rounded-full bg-border" /><span className="h-2 w-2 rounded-full bg-border" />
           </div>
-          <div className="relative aspect-[16/9]">
-            <AnimatePresence mode="popLayout">
-              <motion.img key={STEPS[active]!.img} src={STEPS[active]!.img} alt={STEPS[active]!.title}
-                initial={{ opacity: 0, scale: 1.03 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
-                transition={{ duration: 0.4 }} className="absolute inset-0 h-full w-full object-cover object-top" />
-            </AnimatePresence>
+          {/* All three are mounted up front and cross-faded, so nothing is ever unmounted, blank, or waiting on a fetch. */}
+          <div className="relative aspect-[16/9] bg-muted">
+            {STEPS.map((s, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={s.img} src={s.img} alt={s.title} width={1280} height={720} decoding="async"
+                className={cn("absolute inset-0 h-full w-full object-cover object-top transition-opacity duration-500", active === i ? "opacity-100" : "opacity-0")}
+                aria-hidden={active !== i} />
+            ))}
           </div>
         </div>
       </div>

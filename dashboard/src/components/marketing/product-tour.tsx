@@ -1,6 +1,7 @@
 "use client";
 
-import { useReducedMotion } from "framer-motion";
+import { useRef } from "react";
+import { useInView, useReducedMotion } from "framer-motion";
 import { Reveal } from "./reveal";
 import { cn } from "@/lib/utils";
 
@@ -24,14 +25,17 @@ function Frame({ children }: { children: React.ReactNode }) {
 
 export function ProductTour() {
   const reduce = useReducedMotion();
+  const videoBox = useRef<HTMLDivElement>(null);
+  // The 3 MB clip is not fetched until the tour is about to scroll into view (phones on mobile data).
+  const near = useInView(videoBox, { once: true, margin: "300px" });
   return (
     <div className="space-y-6">
       <Reveal from="pop">
       <Frame>
         {/* Muted, looping and inline so it plays without sound or a fullscreen takeover on phones. */}
-        <video className="aspect-video w-full bg-muted" src="/media/alur-dashboard.webm" poster="/media/ringkasan.png"
-          autoPlay={!reduce} muted loop playsInline preload="metadata" controls={Boolean(reduce)}
-          aria-label="Rekaman layar: mendaftar, menambah nomor, memasang webhook" />
+        <div ref={videoBox}><video className="aspect-video w-full bg-muted" {...(near ? { src: "/media/alur-dashboard.webm" } : {})} poster="/media/ringkasan.png"
+          autoPlay={!reduce} muted loop playsInline preload="none" controls={Boolean(reduce)}
+          aria-label="Rekaman layar: mendaftar, menambah nomor, memasang webhook" /></div>
       </Frame>
       </Reveal>
       <div className="grid gap-6 md:grid-cols-3">

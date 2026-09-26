@@ -101,9 +101,9 @@ export function LandingPage() {
             <motion.p initial="hidden" animate="show" variants={rise} className="mx-auto inline-flex items-center gap-2 rounded-full border bg-card/60 px-3.5 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
               <span className="h-1.5 w-1.5 rounded-full bg-[#67e8f9]" />Jalur non-resmi, risikonya kami jelaskan terbuka
             </motion.p>
-            <motion.h1 initial="hidden" animate="show" custom={1} variants={rise} className="font-display mt-7 text-5xl leading-[1.06] sm:text-6xl md:text-7xl">
-              Kirim <RotatingText />
-              <br />lewat WhatsApp API.
+            <motion.h1 initial="hidden" animate="show" custom={1} variants={rise} className="font-display mt-7 text-4xl leading-[1.08] sm:text-6xl md:text-7xl">
+              Kirim <span className="hidden lg:inline"> </span><RotatingText />
+              <span className="lg:hidden"> </span>lewat WhatsApp API.
             </motion.h1>
             <motion.p initial="hidden" animate="show" custom={2} variants={rise} className="mx-auto mt-7 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
               Pindai QR dengan nomor Anda sendiri, ambil kunci API, kirim. Nomor dijaga dengan pemanasan bertahap, jeda seperti orang, dan skor kesiapan, supaya Anda tahu kondisinya sebelum WhatsApp yang memberi tahu.
@@ -155,7 +155,7 @@ export function LandingPage() {
         </Section>
 
         {/* Cara kerja: cream, sticky scrollytelling */}
-        <Section tone="cream" label="Cara mulai">
+        <Section tone="cream" label="Cara mulai" backdrop={<PhotoBackdrop src="/media/photos/shopowner.jpg" side="left" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
           <Heading eyebrow="Mulai" title="Aktif dalam tiga langkah" />
           <div className="mt-8"><HowItWorks /></div>
         </Section>

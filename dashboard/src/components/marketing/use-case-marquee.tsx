@@ -18,7 +18,7 @@ export function UseCaseMarquee() {
   return (
     <div className="marquee relative flex items-center border-y" data-paused={paused} aria-label="Untuk apa saja">
       <div className="min-w-0 flex-1 overflow-hidden py-4 [mask-image:linear-gradient(to_right,transparent,black_8%,black_92%,transparent)]">
-        <div className="marquee-track flex w-max gap-12">
+        <div className="marquee-track keep-motion flex w-max gap-12">
           {[...ITEMS, ...ITEMS, ...ITEMS, ...ITEMS].map((it, i) => (
             <span key={i} aria-hidden={i >= ITEMS.length} className="flex items-center gap-2 text-base font-medium whitespace-nowrap text-muted-foreground">
               <it.icon className="h-4 w-4 text-primary" />{it.label}
