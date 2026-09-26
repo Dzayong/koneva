@@ -47,7 +47,7 @@ Lingkungan: WSL2 (Linux) di `/home/dzayong/projects/wa-gateway`, Windows di `/mn
   `LD_LIBRARY_PATH=/tmp/pwlibs/root/usr/lib/x86_64-linux-gnu` dan `NODE_PATH=$HOME/.claude/skills/playwright-skill/node_modules`,
   launch dengan `--no-sandbox`. (Libs diekstrak manual dari paket `.deb` karena tidak ada sudo.)
 
-Tes: **243 lulus, 0 gagal** (per commit terakhir + perubahan belum di-commit pada bagian 9).
+Tes: **243 lulus, 0 gagal** (per commit `79e8a49`).
 
 ## 3. Arsitektur (ringkas)
 
@@ -208,7 +208,7 @@ Legenda verifikasi: **LIVE** = terbukti di nomor WhatsApp asli; **STACK** = dija
 - Setelah menguji dengan akun/tenant/perangkat percobaan, **bersihkan datanya** (hapus `messages` dulu sebelum `tenants`
   karena FK; hapus job Redis `queue:messages:<key>*` dan container bot uji).
 
-## 9. Perubahan terakhir yang BELUM di-commit (per laporan ini)
+## 9. Perubahan terbaru (commit `79e8a49`)
 
 Permintaan pemilik: hapus katalog, pindahkan profil ke modul device, ganti nama modul "Nomor" menjadi "Device".
 
@@ -238,6 +238,7 @@ Permintaan pemilik: hapus katalog, pindahkan profil ke modul device, ganti nama 
 ## 11. Riwayat commit (terbaru di atas)
 
 ```
+79e8a49 Remove catalog; device profile tab; rename Nomor module to Device; HANDOFF report
 7ff0d7a KONEVA rebrand with generated logo, media in messages/broadcast, status view counts
 c034bad Catalog: honest notice, share link, purge finished read commands; remove probe
 cccc115 Fix bare 500 on slow catalog calls: raise Next proxy timeout, shorten catalog waits
@@ -259,7 +260,7 @@ c2a76bd Add personal deployment tooling, docs and Kubernetes updates
 ## 12. Langkah berikutnya yang disarankan untuk agent baru
 
 1. Baca bagian 4 dan 7, jalankan `npm test` dan `make ps` untuk memastikan kondisi.
-2. Commit perubahan bagian 9 **hanya jika pemilik meminta**, lalu bangun **Panel Operator** (backlog 1). Mulai dari rencana
+2. Bangun **Panel Operator** (backlog 1). Mulai dari rencana
    singkat (peran super admin di tabel pengguna atau kunci admin lewat sesi, halaman `/operator` terpisah, audit lintas tenant).
 3. Sebelum membangun fitur yang menyentuh WhatsApp, buktikan lewat operasi baca atau nomor uji dan minta izin pemilik.
 4. Perbarui dokumen ini (bagian 4 dan 9) di akhir setiap tahap.
