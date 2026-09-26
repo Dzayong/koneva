@@ -1,5 +1,21 @@
 # Architecture
 
+## Personal single-host deployment
+
+`docker/docker-compose.personal.yml` provides one API Gateway, Device Manager,
+Next.js standalone dashboard, PostgreSQL and Redis on a dedicated bridge network.
+The optional nginx profile exposes the dashboard and tenant API on a single
+origin with Certbot TLS. The dashboard also proxies `/api/v1` directly when nginx
+is disabled. Both patterns require an explicit single trusted proxy hop at the API.
+
+Compose waits for database readiness and successful compiled migrations before
+starting applications. Device Manager builds no images at runtime: the start
+script prebuilds the bot image, then the manager creates labelled per-device
+containers with restart policies, bounded logs and host-owned persistent sessions.
+Redis uses AOF and `noeviction` to preserve BullMQ jobs. Personal ports, volume
+names, network, env file and sessions are separate from development resources.
+See [personal setup](PERSONAL_SETUP.md) for start/stop, backup and TLS workflows.
+
 ## System diagram
 
 ```mermaid
@@ -181,9 +197,8 @@ does not need deployment-mode-specific logic.
 
 ## Known gaps / not yet wired
 
-- **`device.status_changed` webhook** is defined as an event type but never
-  dispatched; nothing currently tells a tenant when their device goes
-  offline/online/banned outside of polling `GET /api/v1/devices/:key`.
+- **`device.status_changed` webhook** is now dispatched on online/offline/banned/logged_out/error
+  and stored in `device_events`; there is still no automatic failover to a standby number.
 - **Media captions.** The `messages` table has no `caption` column; media
   messages send with `content` as the URL and no caption.
 - **Tenant self-service.** No `GET/PATCH /api/v1/tenant` — a tenant can't

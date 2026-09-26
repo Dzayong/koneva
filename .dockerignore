@@ -10,3 +10,11 @@ docker/certbot
 docker/grafana/data
 *.log
 docs
+**/node_modules
+**/.next
+**/.env*
+data
+reports
+*.tar.gz
+docker/nginx/ssl
+docker/nginx/generated

@@ -17,7 +17,10 @@ async function migrate(): Promise<void> {
       'SELECT name FROM _migrations',
     );
     const executedNames = new Set(executed.map((row) => row.name));
-    const migrationsDirectory = path.join(__dirname, '..', 'migrations');
+    // ts-node lives in scripts/, compiled execution lives in dist/scripts/.
+    const migrationsDirectory = fs.existsSync(path.join(__dirname, '..', 'migrations'))
+      ? path.join(__dirname, '..', 'migrations')
+      : path.join(__dirname, '..', '..', 'migrations');
     const files = fs
       .readdirSync(migrationsDirectory)
       .filter((file) => file.endsWith('.sql'))

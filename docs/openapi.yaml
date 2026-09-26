@@ -1,450 +1,179 @@
 openapi: 3.0.3
 info:
-  title: WA Gateway API
-  version: "1.0.0"
-  description: >
-    Public API Gateway for WA Gateway. Every endpoint and response shape
-    here was verified against a running instance (see
-    scripts/integration-test.ts) — this is not written from the spec alone.
+  title: WA Gateway Tenant API
+  version: 1.1.0
+  description: Tenant-scoped API. Public fields use snake_case and timestamps are ISO 8601.
 servers:
   - url: http://localhost:8000
-    description: Local development
-
 security:
   - tenantApiKey: []
-
 paths:
   /health:
-    get:
-      summary: Liveness check
-      security: []
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: ok
-
-  /api/v1/message/send:
+    get: { security: [], summary: Liveness check, responses: { "200": { description: Healthy } } }
+  /api/v1/tenant:
+    get: { summary: Get tenant, responses: { "200": { $ref: '#/components/responses/Success' } } }
+    patch:
+      summary: Update webhook URL
+      requestBody: { $ref: '#/components/requestBodies/TenantUpdate' }
+      responses: { "200": { $ref: '#/components/responses/Success' }, "400": { $ref: '#/components/responses/Error' } }
+  /api/v1/devices:
+    get: { summary: List devices, responses: { "200": { $ref: '#/components/responses/Success' } } }
     post:
-      summary: Queue a message for sending
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SendMessageRequest"
-      responses:
-        "202":
-          description: Accepted into the queue (not yet delivered)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SendMessageResponse"
-        "400":
-          $ref: "#/components/responses/ValidationError"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          description: Device not found for this tenant
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-        "409":
-          description: Device is not online (`DEVICE_OFFLINE`)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-        "429":
-          description: Tenant message quota exceeded (`QUOTA_EXCEEDED`)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-        "503":
-          description: Could not enqueue onto BullMQ (`QUEUE_UNAVAILABLE`)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-
+      summary: Create device
+      requestBody: { $ref: '#/components/requestBodies/DeviceCreate' }
+      responses: { "201": { $ref: '#/components/responses/Success' }, "429": { $ref: '#/components/responses/Error' } }
+  /api/v1/devices/{key}:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' } ]
+    get: { summary: Get device, responses: { "200": { $ref: '#/components/responses/Success' }, "404": { $ref: '#/components/responses/Error' } } }
+    delete: { summary: Delete device, responses: { "200": { $ref: '#/components/responses/Success' }, "404": { $ref: '#/components/responses/Error' } } }
+  /api/v1/devices/{key}/qr:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' } ]
+    get: { summary: Get status and nullable QR, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/devices/{key}/pause:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' } ]
+    post: { summary: Pause device, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/devices/{key}/resume:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' } ]
+    post: { summary: Resume device, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/devices/{key}/stats:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' } ]
+    get: { summary: Per-device message stats, responses: { "200": { $ref: '#/components/responses/Success' } } }
   /api/v1/messages:
     get:
-      summary: List messages for the authenticated tenant
-      description: >
-        Unlike every other endpoint, this returns `{ data, pagination }`
-        directly — no `success` field. That's the real behavior, kept
-        faithful rather than "fixed" here.
+      summary: List and filter messages
       parameters:
-        - name: device_key
-          in: query
-          schema: { type: string, maxLength: 32 }
-        - name: status
-          in: query
-          schema: { $ref: "#/components/schemas/MessageStatus" }
-        - name: limit
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
-        - name: offset
-          in: query
-          schema: { type: integer, minimum: 0, default: 0 }
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/Message" }
-                  pagination:
-                    type: object
-                    properties:
-                      limit: { type: integer }
-                      offset: { type: integer }
-                      total: { type: integer }
-
+        - { name: device_key, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/MessageStatus' } }
+        - { name: direction, in: query, schema: { type: string, enum: [inbound, outbound] } }
+        - { name: search, in: query, schema: { type: string, maxLength: 200 } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Offset' }
+      responses: { "200": { $ref: '#/components/responses/Paginated' } }
   /api/v1/messages/{id}:
-    get:
-      summary: Get one message, with its status history
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean, enum: [true] }
-                  data: { $ref: "#/components/schemas/MessageWithHistory" }
-        "404":
-          description: Message not found (`MESSAGE_NOT_FOUND`)
-
-  /api/v1/devices:
-    get:
-      summary: List the tenant's devices
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean, enum: [true] }
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/Device" }
-
-  /api/v1/devices/{deviceKey}:
-    get:
-      summary: Get one device (includes qr_code)
-      parameters:
-        - $ref: "#/components/parameters/DeviceKey"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean, enum: [true] }
-                  data: { $ref: "#/components/schemas/Device" }
-        "404":
-          description: Device not found (`DEVICE_NOT_FOUND`)
-
-  /api/v1/devices/{deviceKey}/qr:
-    get:
-      summary: Get the current pairing QR code
-      parameters:
-        - $ref: "#/components/parameters/DeviceKey"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean, enum: [true] }
-                  qr_code: { type: string }
-        "409":
-          description: >
-            No QR available right now (`QR_NOT_AVAILABLE`) — device isn't
-            `pending_qr`, e.g. already paired or not started yet.
-
-  /api/v1/devices/{deviceKey}/pause:
+    parameters: [ { $ref: '#/components/parameters/Id' } ]
+    get: { summary: Message detail and status history, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/messages/{id}/retry:
+    parameters: [ { $ref: '#/components/parameters/Id' } ]
+    post: { summary: Retry failed or blocked message, responses: { "202": { $ref: '#/components/responses/Success' }, "409": { $ref: '#/components/responses/Error' } } }
+  /api/v1/message/send:
     post:
-      summary: Administratively pause a device
-      description: >
-        Sets `devices.status = 'paused'`. anti-ban.ts's send gate checks
-        this directly (as well as its own separate auto-pause mechanism) —
-        queued messages for a paused device are denied, not silently sent.
-      parameters:
-        - $ref: "#/components/parameters/DeviceKey"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean, enum: [true] }
-                  data: { $ref: "#/components/schemas/Device" }
-
-  /api/v1/devices/{deviceKey}/resume:
+      summary: Queue one message
+      requestBody: { $ref: '#/components/requestBodies/SendMessage' }
+      responses: { "202": { $ref: '#/components/responses/Success' } }
+  /api/v1/broadcast:
     post:
-      summary: Resume a paused device
-      description: >
-        Sets `devices.status = 'offline'` (not `'online'`) — this un-pauses
-        it and lets the bot-container connection layer take it from there;
-        it does not force an immediate reconnect.
-      parameters:
-        - $ref: "#/components/parameters/DeviceKey"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean, enum: [true] }
-                  data: { $ref: "#/components/schemas/Device" }
-
-  /admin/tenant/create:
+      summary: Queue a message for up to 500 recipients
+      requestBody: { $ref: '#/components/requestBodies/Broadcast' }
+      responses: { "202": { $ref: '#/components/responses/Success' } }
+  /api/v1/contacts:
+    get:
+      summary: List contacts
+      parameters: [ { name: search, in: query, schema: { type: string } }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/Offset' } ]
+      responses: { "200": { $ref: '#/components/responses/Paginated' } }
+    post: { summary: Create contact, requestBody: { $ref: '#/components/requestBodies/Contact' }, responses: { "201": { $ref: '#/components/responses/Success' } } }
+  /api/v1/contacts/import:
     post:
-      summary: Create a tenant (admin only)
-      security: [{ adminApiKey: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name, email]
-              properties:
-                name: { type: string, maxLength: 255 }
-                email: { type: string, format: email }
-                max_devices: { type: integer, default: 3 }
-                quota_messages: { type: integer, default: 10000 }
-      responses:
-        "201":
-          description: Created — `data.api_key` is the tenant's new key
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean, enum: [true] }
-                  data: { $ref: "#/components/schemas/Tenant" }
-
-  /admin/device/create:
-    post:
-      summary: Provision a device (admin only — proxies to Device Manager)
-      description: >
-        Requires the operator's admin key, not a tenant's — there is no
-        tenant-scoped equivalent yet (see docs/ARCHITECTURE.md gaps).
-      security: [{ adminApiKey: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [tenant_id]
-              properties:
-                tenant_id: { type: string, format: uuid }
-                phone_number: { type: string, maxLength: 20 }
-                label: { type: string, maxLength: 100 }
-      responses:
-        "201":
-          description: Container spawn requested
-        "502":
-          description: Device Manager rejected the request (`DEVICE_MANAGER_ERROR`)
-
-  /admin/tenants:
+      summary: Import CSV contacts
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [csv], properties: { csv: { type: string } } } } } }
+      responses: { "201": { $ref: '#/components/responses/Success' } }
+  /api/v1/contacts/{id}:
+    parameters: [ { $ref: '#/components/parameters/Id' } ]
+    get: { summary: Get contact, responses: { "200": { $ref: '#/components/responses/Success' } } }
+    patch: { summary: Update contact, requestBody: { $ref: '#/components/requestBodies/Contact' }, responses: { "200": { $ref: '#/components/responses/Success' } } }
+    delete: { summary: Delete contact, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/auto-reply-rules:
     get:
-      summary: List all tenants with device/message counts (admin only)
-      security: [{ adminApiKey: [] }]
-      responses:
-        "200":
-          description: OK
-
-  /admin/devices:
+      summary: List auto-reply rules
+      parameters: [ { name: device_key, in: query, schema: { type: string } }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/Offset' } ]
+      responses: { "200": { $ref: '#/components/responses/Paginated' } }
+    post: { summary: Create rule, requestBody: { $ref: '#/components/requestBodies/AutoReply' }, responses: { "201": { $ref: '#/components/responses/Success' } } }
+  /api/v1/auto-reply-rules/{id}:
+    parameters: [ { $ref: '#/components/parameters/Id' } ]
+    get: { summary: Get rule, responses: { "200": { $ref: '#/components/responses/Success' } } }
+    patch: { summary: Update rule, requestBody: { $ref: '#/components/requestBodies/AutoReply' }, responses: { "200": { $ref: '#/components/responses/Success' } } }
+    delete: { summary: Delete rule, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/auto-reply-rules/{id}/toggle:
+    parameters: [ { $ref: '#/components/parameters/Id' } ]
+    post: { summary: Toggle rule, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/templates:
     get:
-      summary: List all devices, optionally filtered by status (admin only)
-      security: [{ adminApiKey: [] }]
-      parameters:
-        - name: status
-          in: query
-          schema: { $ref: "#/components/schemas/DeviceStatus" }
-      responses:
-        "200":
-          description: OK
-
-  /admin/stats:
+      summary: List templates
+      parameters: [ { name: search, in: query, schema: { type: string } }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/Offset' } ]
+      responses: { "200": { $ref: '#/components/responses/Paginated' } }
+    post: { summary: Create template, requestBody: { $ref: '#/components/requestBodies/Template' }, responses: { "201": { $ref: '#/components/responses/Success' } } }
+  /api/v1/templates/{id}:
+    parameters: [ { $ref: '#/components/parameters/Id' } ]
+    get: { summary: Get template, responses: { "200": { $ref: '#/components/responses/Success' } } }
+    patch: { summary: Update template, requestBody: { $ref: '#/components/requestBodies/Template' }, responses: { "200": { $ref: '#/components/responses/Success' } } }
+    delete: { summary: Delete template, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/templates/{id}/render:
+    parameters: [ { $ref: '#/components/parameters/Id' } ]
+    post: { summary: Render template, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/analytics/overview:
+    get: { summary: Analytics overview, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/analytics/daily:
     get:
-      summary: Aggregate stats across all tenants (admin only)
-      security: [{ adminApiKey: [] }]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean, enum: [true] }
-                  data:
-                    type: object
-                    properties:
-                      total_tenants: { type: integer }
-                      total_devices: { type: integer }
-                      messages_today: { type: integer }
-                      success_rate: { type: number }
-
+      summary: Daily analytics
+      parameters: [ { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 90, default: 30 } } ]
+      responses: { "200": { $ref: '#/components/responses/Success' } }
+  /api/v1/dashboard/stats:
+    get: { summary: Homepage aggregate stats, responses: { "200": { $ref: '#/components/responses/Success' } } }
 components:
   securitySchemes:
-    tenantApiKey:
-      type: apiKey
-      in: header
-      name: apikey
-    adminApiKey:
-      type: apiKey
-      in: header
-      name: x-admin-key
-
+    tenantApiKey: { type: apiKey, in: header, name: apikey }
   parameters:
-    DeviceKey:
-      name: deviceKey
-      in: path
-      required: true
-      schema: { type: string, minLength: 1, maxLength: 32 }
-
+    DeviceKey: { name: key, in: path, required: true, schema: { type: string, maxLength: 32 } }
+    Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+    Offset: { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
   responses:
-    ValidationError:
-      description: Request failed validation
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorBody" }
-    Unauthorized:
-      description: Missing or invalid apikey header
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorBody" }
-
+    Success: { description: Success, content: { application/json: { schema: { $ref: '#/components/schemas/Success' } } } }
+    Paginated: { description: Paginated success, content: { application/json: { schema: { $ref: '#/components/schemas/Paginated' } } } }
+    Error: { description: Error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  requestBodies:
+    TenantUpdate: { required: true, content: { application/json: { schema: { type: object, properties: { webhook_url: { type: string, format: uri, nullable: true } } } } } }
+    DeviceCreate: { required: true, content: { application/json: { schema: { type: object, properties: { phone_number: { type: string }, label: { type: string } } } } } }
+    SendMessage: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SendMessage' } } } }
+    Broadcast: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Broadcast' } } } }
+    Contact: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ContactInput' } } } }
+    AutoReply: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AutoReplyInput' } } } }
+    Template: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/TemplateInput' } } } }
   schemas:
-    ErrorBody:
+    Success:
       type: object
-      properties:
-        success: { type: boolean, enum: [false] }
-        error:
-          type: object
-          properties:
-            code: { type: string }
-            message: { type: string }
-
-    DeviceStatus:
-      type: string
-      enum: [offline, starting, pending_qr, online, paused, banned, error]
-
-    MessageStatus:
-      type: string
-      enum: [queued, sending, sent, delivered, read, failed, blocked]
-
-    SendMessageRequest:
+      required: [success, data]
+      properties: { success: { type: boolean, enum: [true] }, data: { nullable: true } }
+    Paginated:
       type: object
-      required: [device_key, to, message]
-      properties:
-        device_key: { type: string, maxLength: 32 }
-        to:
-          type: string
-          description: E.164-ish, `^\+?[1-9]\d{6,19}$`
-        message: { type: string, minLength: 1, maxLength: 4096 }
-        external_id: { type: string, maxLength: 64 }
-
-    SendMessageResponse:
-      type: object
+      required: [success, data, pagination]
       properties:
         success: { type: boolean, enum: [true] }
-        message_id: { type: string, format: uuid }
-        status: { type: string, enum: [queued] }
-
-    Tenant:
+        data: { type: array, items: { type: object } }
+        pagination:
+          type: object
+          required: [total, limit, offset, has_more]
+          properties: { total: { type: integer }, limit: { type: integer }, offset: { type: integer }, has_more: { type: boolean } }
+    Error:
       type: object
+      required: [success, error]
       properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        email: { type: string }
-        api_key: { type: string }
-        webhook_url: { type: string, nullable: true }
-        webhook_secret: { type: string, nullable: true }
-        max_devices: { type: integer }
-        quota_messages: { type: integer }
-        used_messages: { type: integer }
-        status: { type: string, enum: [active, suspended, deleted] }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-
-    Device:
+        success: { type: boolean, enum: [false] }
+        error: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string } } }
+    MessageStatus: { type: string, enum: [queued, sending, sent, delivered, read, failed, blocked, received] }
+    SendMessage:
       type: object
-      properties:
-        id: { type: string, format: uuid }
-        device_key: { type: string }
-        phone_number: { type: string, nullable: true }
-        label: { type: string, nullable: true }
-        status: { $ref: "#/components/schemas/DeviceStatus" }
-        health_score: { type: integer, minimum: 0, maximum: 100 }
-        qr_code: { type: string, nullable: true }
-        last_connected: { type: string, format: date-time, nullable: true }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-
-    Message:
+      required: [device_key, to, message]
+      properties: { device_key: { type: string }, to: { type: string }, message: { type: string, maxLength: 4096 }, external_id: { type: string } }
+    Broadcast:
       type: object
-      properties:
-        id: { type: string, format: uuid }
-        tenant_id: { type: string, format: uuid }
-        device_id: { type: string, format: uuid }
-        device_key: { type: string }
-        to_number: { type: string }
-        content: { type: string }
-        type: { type: string, enum: [text, image, document, video, audio] }
-        status: { $ref: "#/components/schemas/MessageStatus" }
-        external_id: { type: string, nullable: true }
-        whatsapp_message_id: { type: string, nullable: true }
-        error_message: { type: string, nullable: true }
-        created_at: { type: string, format: date-time }
-        sent_at: { type: string, format: date-time, nullable: true }
-        delivered_at: { type: string, format: date-time, nullable: true }
-        read_at: { type: string, format: date-time, nullable: true }
-
-    MessageWithHistory:
-      allOf:
-        - $ref: "#/components/schemas/Message"
-        - type: object
-          properties:
-            status_history:
-              type: array
-              items:
-                type: object
-                properties:
-                  status: { type: string }
-                  created_at: { type: string, format: date-time }
+      required: [device_key, recipients, message]
+      properties: { device_key: { type: string }, recipients: { type: array, minItems: 1, maxItems: 500, items: { type: string } }, message: { type: string } }
+    ContactInput:
+      type: object
+      properties: { phone_number: { type: string }, name: { type: string, nullable: true }, tags: { type: array, items: { type: string } }, notes: { type: string, nullable: true } }
+    AutoReplyInput:
+      type: object
+      properties: { device_key: { type: string }, trigger_type: { type: string, enum: [keyword, regex, all] }, trigger_pattern: { type: string }, response_type: { type: string, enum: [text, template] }, response_content: { type: string }, delay_ms: { type: integer }, is_active: { type: boolean } }
+    TemplateInput:
+      type: object
+      properties: { name: { type: string }, content: { type: string }, is_active: { type: boolean } }

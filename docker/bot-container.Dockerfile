@@ -23,7 +23,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 
 RUN addgroup -S -g 10001 botcontainer && adduser -S -D -H -u 10001 -G botcontainer botcontainer \
-  && mkdir -p /app/sessions && chown -R botcontainer:botcontainer /app
+  && mkdir -p /app/sessions && chown botcontainer:botcontainer /app /app/sessions
 
 USER botcontainer
 

@@ -1,0 +1,129 @@
+{
+  "baseURL": "http://localhost:3000",
+  "mockDataOnly": true,
+  "checks": [
+    {
+      "name": "desktop-login",
+      "path": "/login",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 1440,
+      "contentWidth": 1440,
+      "reducedMotion": false,
+      "buttonTransition": "0.15s"
+    },
+    {
+      "name": "desktop-welcome",
+      "path": "/welcome",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 1440,
+      "contentWidth": 1440,
+      "reducedMotion": false,
+      "buttonTransition": "0.15s"
+    },
+    {
+      "name": "desktop-dashboard",
+      "path": "/",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 1440,
+      "contentWidth": 1440,
+      "reducedMotion": false,
+      "buttonTransition": "0.15s"
+    },
+    {
+      "name": "desktop-devices",
+      "path": "/devices",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 1440,
+      "contentWidth": 1440,
+      "reducedMotion": false,
+      "buttonTransition": "0.15s"
+    },
+    {
+      "name": "desktop-analytics",
+      "path": "/analytics",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 1440,
+      "contentWidth": 1440,
+      "reducedMotion": false,
+      "buttonTransition": "0.15s"
+    },
+    {
+      "name": "mobile-login",
+      "path": "/login",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 390,
+      "contentWidth": 390,
+      "reducedMotion": false,
+      "buttonTransition": "0.15s"
+    },
+    {
+      "name": "mobile-welcome",
+      "path": "/welcome",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 390,
+      "contentWidth": 390,
+      "reducedMotion": false,
+      "buttonTransition": "0.15s"
+    },
+    {
+      "name": "mobile-dashboard",
+      "path": "/",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 390,
+      "contentWidth": 390,
+      "reducedMotion": false,
+      "buttonTransition": "0.15s"
+    },
+    {
+      "name": "mobile-devices",
+      "path": "/devices",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 390,
+      "contentWidth": 390,
+      "reducedMotion": false,
+      "buttonTransition": "0.15s"
+    },
+    {
+      "name": "mobile-analytics",
+      "path": "/analytics",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 390,
+      "contentWidth": 390,
+      "reducedMotion": false,
+      "buttonTransition": "0.15s"
+    },
+    {
+      "name": "desktop-reduced-motion",
+      "path": "/devices",
+      "font": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "weight": "500",
+      "numerals": "tabular-nums",
+      "viewport": 1440,
+      "contentWidth": 1440,
+      "reducedMotion": true,
+      "buttonTransition": "1e-05s"
+    }
+  ],
+  "runningAnimations": 0,
+  "errors": []
+}

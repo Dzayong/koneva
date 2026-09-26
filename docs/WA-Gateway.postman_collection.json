@@ -1,0 +1,59 @@
+{
+  "info": { "name": "WA Gateway Tenant API", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+  "auth": { "type": "apikey", "apikey": [
+    { "key": "key", "value": "apikey", "type": "string" },
+    { "key": "value", "value": "{{apiKey}}", "type": "string" },
+    { "key": "in", "value": "header", "type": "string" }
+  ]},
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" },
+    { "key": "apiKey", "value": "replace-me" },
+    { "key": "deviceKey", "value": "WAPI-DEVICE" },
+    { "key": "id", "value": "00000000-0000-0000-0000-000000000000" }
+  ],
+  "item": [
+    { "name": "Tenant", "item": [
+      { "name": "Get", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/tenant" } },
+      { "name": "Update", "request": { "method": "PATCH", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"webhook_url\":null}"}, "url":"{{baseUrl}}/api/v1/tenant" } }
+    ]},
+    { "name": "Devices", "item": [
+      { "name": "List", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/devices" } },
+      { "name": "Create", "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"label\":\"Sales\"}"}, "url":"{{baseUrl}}/api/v1/devices" } },
+      { "name": "Detail", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/devices/{{deviceKey}}" } },
+      { "name": "QR", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/devices/{{deviceKey}}/qr" } },
+      { "name": "Stats", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/devices/{{deviceKey}}/stats" } },
+      { "name": "Pause", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/devices/{{deviceKey}}/pause" } },
+      { "name": "Resume", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/devices/{{deviceKey}}/resume" } },
+      { "name": "Delete", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/devices/{{deviceKey}}" } }
+    ]},
+    { "name": "Messages", "item": [
+      { "name": "List filtered", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/messages?direction=inbound&search=halo&limit=20&offset=0" } },
+      { "name": "Send", "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"device_key\":\"{{deviceKey}}\",\"to\":\"628123456789\",\"message\":\"Halo\"}"}, "url":"{{baseUrl}}/api/v1/message/send" } },
+      { "name": "Detail", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/messages/{{id}}" } },
+      { "name": "Retry", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/messages/{{id}}/retry" } },
+      { "name": "Broadcast", "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"device_key\":\"{{deviceKey}}\",\"recipients\":[\"628123456789\"],\"message\":\"Halo semua\"}"}, "url":"{{baseUrl}}/api/v1/broadcast" } }
+    ]},
+    { "name": "Contacts", "item": [
+      { "name": "List", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/contacts?search=vip&limit=20&offset=0" } },
+      { "name": "Create", "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"phone_number\":\"628123456789\",\"name\":\"Budi\",\"tags\":[\"vip\"]}"}, "url":"{{baseUrl}}/api/v1/contacts" } },
+      { "name": "Update", "request": { "method": "PATCH", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"notes\":\"Follow up\"}"}, "url":"{{baseUrl}}/api/v1/contacts/{{id}}" } },
+      { "name": "Delete", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/contacts/{{id}}" } },
+      { "name": "Import", "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"csv\":\"phone_number,name,tags\\n628123456789,Budi,vip|sales\"}"}, "url":"{{baseUrl}}/api/v1/contacts/import" } }
+    ]},
+    { "name": "Rules, Templates, Analytics", "item": [
+      { "name": "List rules", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/auto-reply-rules?limit=20&offset=0" } },
+      { "name": "Create rule", "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"device_key\":\"{{deviceKey}}\",\"trigger_type\":\"keyword\",\"trigger_pattern\":\"harga\",\"response_content\":\"Halo\"}"}, "url":"{{baseUrl}}/api/v1/auto-reply-rules" } },
+      { "name": "Update rule", "request": { "method": "PATCH", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"delay_ms\":5000}"}, "url":"{{baseUrl}}/api/v1/auto-reply-rules/{{id}}" } },
+      { "name": "Toggle rule", "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/auto-reply-rules/{{id}}/toggle" } },
+      { "name": "Delete rule", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/auto-reply-rules/{{id}}" } },
+      { "name": "List templates", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/templates?limit=20&offset=0" } },
+      { "name": "Create template", "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"name\":\"Greeting\",\"content\":\"{Halo|Hi} {nama}\"}"}, "url":"{{baseUrl}}/api/v1/templates" } },
+      { "name": "Update template", "request": { "method": "PATCH", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"name\":\"Greeting 2\"}"}, "url":"{{baseUrl}}/api/v1/templates/{{id}}" } },
+      { "name": "Render template", "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}], "body":{"mode":"raw","raw":"{\"variables\":{\"nama\":\"Ayu\"}}"}, "url":"{{baseUrl}}/api/v1/templates/{{id}}/render" } },
+      { "name": "Delete template", "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/templates/{{id}}" } },
+      { "name": "Overview", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/analytics/overview" } },
+      { "name": "Daily", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/analytics/daily?days=30" } },
+      { "name": "Dashboard stats", "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/dashboard/stats" } }
+    ]}
+  ]
+}

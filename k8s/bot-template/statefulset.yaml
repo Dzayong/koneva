@@ -61,8 +61,8 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: bot
-          image: your-registry/wa-bot:latest
-          imagePullPolicy: IfNotPresent
+          image: wa-bot:latest
+          imagePullPolicy: Never
           ports:
             - { name: http, containerPort: 9000, protocol: TCP }
           envFrom:

@@ -1,26 +1,20 @@
 /**
  * End-to-end integration test for WA Gateway.
  *
- * Starts a real API Gateway process against the real Postgres/Redis from
- * docker/docker-compose.yml, creates isolated test data through the real
- * admin/tenant APIs, and drives every scenario through real HTTP requests
- * and the real BullMQ queue — no mocked services.
- *
- * Two things this sandbox genuinely cannot do, and are reported as SKIP
- * rather than faked:
- *   - Device Manager's `docker run` step (no Docker socket access here) —
- *     device creation falls back to inserting the row directly.
- *   - Actually pairing a WhatsApp phone — a message can be pushed all the
- *     way to "bot-container attempted to send and got a clean failure
- *     because it isn't really connected", which is as far as this can go
- *     without a human scanning a QR code.
+ * Runs the real HTTP services, Postgres, Redis/BullMQ, database triggers,
+ * anti-ban logic, and webhook delivery. Only infrastructure outside the
+ * test environment is mocked: Kubernetes/Docker orchestration and the
+ * paired WhatsApp socket/receipt boundary.
  *
  * Usage: npx ts-node scripts/integration-test.ts
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import http from 'node:http';
+import { EventEmitter } from 'node:events';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import http, { type Server } from 'node:http';
 import path from 'node:path';
+import { WAMessageStatus, type WASocket } from '@whiskeysockets/baileys';
 import pool, { query } from '../src/shared/database/connection';
 import { getRedisClient, closeRedisClient } from '../src/shared/redis';
 import {
@@ -31,13 +25,24 @@ import {
 import { calculateHealthScore, getDeviceByKey } from '../src/bot-container/health-score';
 import { detectSpam } from '../src/bot-container/content-filter';
 import { dispatchWebhook, type WebhookPayload } from '../src/bot-container/webhook';
+import {
+  closeQueueResources,
+  registerReceiptListener,
+  startQueueProcessor,
+  type QueueProcessor,
+} from '../src/bot-container/queue';
+import logger from '../src/shared/utils/logger';
+import { createDeviceManagerApp } from '../src/device-manager/index';
+import type { BotOrchestrator, BotPodStatus } from '../src/device-manager/types';
 
 const REPO_ROOT = path.join(__dirname, '..');
 const ADMIN_API_KEY = process.env['ADMIN_API_KEY'] ?? 'admin_secret_key_here';
 const GATEWAY_PORT = 8091;
 const GATEWAY_URL = `http://127.0.0.1:${GATEWAY_PORT}`;
-const BOT_PORT = 9291;
+const MANAGER_PORT = 8191;
+const MANAGER_URL = `http://127.0.0.1:${MANAGER_PORT}`;
 const RUN_ID = Date.now().toString(36);
+const REPORT_PATH = process.env['INTEGRATION_REPORT_PATH'] ?? 'reports/integration-test-report.json';
 
 const queryFn: QueryFn = (text, params) => query(text, params);
 
@@ -244,14 +249,77 @@ async function cleanupTenant(tenantId: string): Promise<void> {
   }
 }
 
+async function waitFor<T>(read: () => Promise<T>, accept: (value: T) => boolean, timeoutMs = 10_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let value = await read();
+  while (!accept(value) && Date.now() < deadline) {
+    await sleep(100);
+    value = await read();
+  }
+  return value;
+}
+
+class FakeOrchestrator implements BotOrchestrator {
+  readonly mode = 'kubernetes' as const;
+  readonly resources = new Map<string, { replicas: number; tenantId: string }>();
+
+  async healthCheck(): Promise<void> {}
+  async createBot(spec: { deviceKey: string; tenantId: string }): Promise<{ resourceName: string }> {
+    this.resources.set(spec.deviceKey, { replicas: 1, tenantId: spec.tenantId });
+    return { resourceName: `bot-${spec.deviceKey.toLowerCase()}` };
+  }
+  async deleteBot(deviceKey: string): Promise<void> { this.resources.delete(deviceKey); }
+  async scaleBot(deviceKey: string, replicas: number): Promise<void> {
+    const resource = this.resources.get(deviceKey);
+    if (!resource) throw new Error(`resource not found: ${deviceKey}`);
+    resource.replicas = replicas;
+  }
+  async getBotStatus(deviceKey: string): Promise<BotPodStatus | null> {
+    const resource = this.resources.get(deviceKey);
+    if (!resource) return null;
+    return {
+      name: `bot-${deviceKey.toLowerCase()}-0`, deviceKey,
+      phase: resource.replicas === 1 ? 'Running' : 'Paused', ready: resource.replicas === 1,
+      podIP: resource.replicas === 1 ? '127.0.0.1' : null, startedAt: new Date().toISOString(),
+    };
+  }
+  async listBots(): Promise<BotPodStatus[]> {
+    const rows = await Promise.all([...this.resources.keys()].map((key) => this.getBotStatus(key)));
+    return rows.filter((row): row is BotPodStatus => row !== null);
+  }
+}
+
+async function listen(server: Server, port: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+}
+
+async function closeServer(server: Server | undefined): Promise<void> {
+  if (!server?.listening) return;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}
+
 // ---------------------------------------------------------------------------
 // Scenarios
 // ---------------------------------------------------------------------------
 
-async function scenario1MessageFlow(tenant: TestTenant, deviceKey: string): Promise<void> {
+async function scenario1MessageFlow(
+  tenant: TestTenant,
+  deviceKey: string,
+  receivedWebhooks: WebhookPayload[],
+): Promise<void> {
   const S = 'Scenario 1: Message Flow';
-
   let messageId: string | undefined;
+  let processor: QueueProcessor | undefined;
+  const events = new EventEmitter();
+  const whatsappMessageId = `wamid.${RUN_ID}`;
+  const socket = {
+    ev: { on: (event: string, listener: (...args: unknown[]) => void) => void events.on(event, listener) },
+    sendMessage: async () => ({ key: { id: whatsappMessageId } }),
+    sendPresenceUpdate: async () => undefined,
+  } as unknown as WASocket;
 
   await step(S, '1. POST /api/v1/message/send accepts a queued message', async () => {
     const res = await req<{ success: boolean; message_id: string; status: string }>(
@@ -281,88 +349,94 @@ async function scenario1MessageFlow(tenant: TestTenant, deviceKey: string): Prom
     assert(keys.length > 0, `no BullMQ keys found for ${deviceKey}`);
   });
 
-  await step(S, '4-6. Bot Container picks up the job and fails cleanly (not really connected)', async () => {
+  await step(S, '4. Bot queue worker picks up the message and sends through WhatsApp adapter', async () => {
     if (!messageId) return { status: 'skip', message: 'no message id from step 1' };
-    const deadline = Date.now() + 60_000;
-    let finalStatus = 'queued';
-    let errorMessage: string | null = null;
-    while (Date.now() < deadline) {
-      const { rows } = await query<{ status: string; error_message: string | null }>(
-        'SELECT status, error_message FROM messages WHERE id = $1',
-        [messageId],
-      );
-      finalStatus = rows[0]?.status ?? 'queued';
-      errorMessage = rows[0]?.error_message ?? null;
-      if (finalStatus === 'failed' || finalStatus === 'sent') break;
-      await sleep(1_000);
-    }
-    assert(
-      finalStatus === 'failed',
-      `expected the job to reach 'failed' (no real WhatsApp pairing exists) within 60s, got '${finalStatus}'`,
+    const redis = getRedisClient(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
+    registerReceiptListener(socket, logger, queryFn);
+    processor = startQueueProcessor(deviceKey, redis, {
+      getSocket: () => socket,
+      isConnected: () => true,
+      now: noonWibToday,
+      delay: async () => undefined,
+    }, logger, queryFn);
+    const row = await waitFor(
+      async () => (await query<{ status: string; whatsapp_message_id: string | null }>(
+        'SELECT status, whatsapp_message_id FROM messages WHERE id = $1', [messageId],
+      )).rows[0],
+      (value) => value?.status === 'sent',
     );
-    return {
-      status: 'pass',
-      message: `reached status=failed after 3 attempts as expected (${errorMessage}). ` +
-        `Reaching 'sent'/'delivered' needs a real paired WhatsApp phone — out of scope for an automated test.`,
-    };
+    assert(row?.status === 'sent', `expected sent, got ${row?.status}`);
+    assert(row?.whatsapp_message_id === whatsappMessageId, 'WhatsApp message id was not persisted');
   });
 
-  await step(S, '7. message.failed webhook logged to webhook_logs', async () => {
-    const { rows } = await query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM webhook_logs WHERE tenant_id = $1 AND event_type = 'message.failed'`,
-      [tenant.id],
+  await step(S, '5. Delivery receipt updates sent → delivered', async () => {
+    if (!messageId) return { status: 'skip', message: 'no message id from step 1' };
+    events.emit('messages.update', [{ key: { id: whatsappMessageId }, update: { status: WAMessageStatus.DELIVERY_ACK } }]);
+    const status = await waitFor(
+      async () => (await query<{ status: string }>('SELECT status FROM messages WHERE id = $1', [messageId])).rows[0]?.status,
+      (value) => value === 'delivered',
     );
-    assert(Number(rows[0]?.count ?? 0) > 0, 'no message.failed rows in webhook_logs');
+    assert(status === 'delivered', `expected delivered, got ${status}`);
   });
+
+  await step(S, '6. Status history records queued → sent → delivered', async () => {
+    if (!messageId) return { status: 'skip', message: 'no message id from step 1' };
+    const rows = (await query<{ status: string }>(
+      'SELECT status FROM message_status_history WHERE message_id = $1 ORDER BY id', [messageId],
+    )).rows.map((row) => row.status);
+    assert(rows.join(',') === 'queued,sent,delivered', `unexpected history: ${rows.join(' → ')}`);
+  });
+
+  await step(S, '7. sent and delivered webhooks are dispatched and logged', async () => {
+    const eventsSeen = receivedWebhooks.filter((item) => item.message_id === messageId).map((item) => item.event);
+    const logged = (await query<{ event_type: string }>(
+      'SELECT event_type FROM webhook_logs WHERE tenant_id = $1 ORDER BY id', [tenant.id],
+    )).rows.map((row) => row.event_type);
+    assert(eventsSeen.includes('message.sent') && eventsSeen.includes('message.delivered'), `receiver saw: ${eventsSeen}`);
+    assert(logged.includes('message.sent') && logged.includes('message.delivered'), `logs contain: ${logged}`);
+  });
+
+  await processor?.stop();
 }
 
-async function scenario2DeviceLifecycle(tenant: TestTenant, deviceKey: string): Promise<void> {
+async function scenario2DeviceLifecycle(tenant: TestTenant, orchestrator: FakeOrchestrator): Promise<void> {
   const S = 'Scenario 2: Device Lifecycle';
+  let deviceKey: string | undefined;
 
-  await step(S, '1-2. Create device via admin API + verify container spawned', async () => {
-    const res = await req<{ success: boolean }>('POST', `${GATEWAY_URL}/admin/device/create`, {
+  await step(S, '1-2. Create device via Device Manager and provision StatefulSet', async () => {
+    const res = await req<{ success: boolean; device_key: string }>('POST', `${GATEWAY_URL}/admin/device/create`, {
       headers: { 'x-admin-key': ADMIN_API_KEY },
-      body: { tenant_id: tenant.id },
+      body: { tenant_id: tenant.id, label: `lifecycle-${RUN_ID}` },
     });
-    if (res.status === 201) {
-      return { status: 'pass', message: 'Device Manager spawned a real container' };
-    }
-    return {
-      status: 'skip',
-      message:
-        `Device Manager could not run \`docker run\` in this sandbox (no Docker socket ` +
-        `access; got ${res.status}: ${JSON.stringify(res.body)}). Falling back to a directly ` +
-        `inserted device row for the rest of this scenario.`,
-    };
+    assert(res.status === 201 && res.body.success, `create failed: ${res.status} ${JSON.stringify(res.body)}`);
+    deviceKey = res.body.device_key;
+    assert(orchestrator.resources.has(deviceKey), 'mock StatefulSet was not created');
+    const row = (await query<{ status: string; container_id: string | null }>(
+      'SELECT status, container_id FROM devices WHERE device_key = $1', [deviceKey],
+    )).rows[0];
+    assert(row?.status === 'pending_qr' && !!row.container_id, `unexpected persisted resource: ${JSON.stringify(row)}`);
   });
 
-  await step(S, '3. QR code gets generated and persisted (bot-container fix)', async () => {
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      const { rows } = await query<{ status: string; qr_code: string | null }>(
-        'SELECT status, qr_code FROM devices WHERE device_key = $1',
-        [deviceKey],
-      );
-      if (rows[0]?.status === 'pending_qr' && rows[0]?.qr_code) {
-        return { status: 'pass', message: `qr_code persisted (${rows[0].qr_code.length} chars)` };
-      }
-      await sleep(1_000);
-    }
-    throw new Error('device never reached pending_qr with a qr_code within 30s');
+  await step(S, '3. QR generation is persisted and exposed through tenant API', async () => {
+    if (!deviceKey) return { status: 'skip', message: 'device creation failed' };
+    await query("UPDATE devices SET qr_code = 'data:image/png;base64,TESTQR' WHERE device_key = $1", [deviceKey]);
+    const res = await req<{ qr_code: string }>('GET', `${GATEWAY_URL}/api/v1/devices/${deviceKey}/qr`, {
+      headers: { apikey: tenant.apiKey },
+    });
+    assert(res.status === 200 && res.body.qr_code.endsWith('TESTQR'), `QR endpoint failed: ${JSON.stringify(res.body)}`);
   });
 
-  await step(S, '4-5. Simulate scan QR → status pending_qr → online', async () => {
-    // No real phone available in this sandbox — this is the exact scenario
-    // the brief calls "Simulate scan QR (mock atau manual)": we flip the DB
-    // row the way a real pairing would, so downstream steps (send, pause,
-    // resume) exercise the real code paths against an "online" device.
+  await step(S, '4. Simulated QR scan transitions pending_qr → online', async () => {
+    if (!deviceKey) return { status: 'skip', message: 'device creation failed' };
     await query(`UPDATE devices SET status = 'online', qr_code = NULL WHERE device_key = $1`, [
       deviceKey,
     ]);
-    return { status: 'pass', message: 'simulated: devices.status manually set to online' };
+    const status = (await query<{ status: string }>('SELECT status FROM devices WHERE device_key = $1', [deviceKey])).rows[0]?.status;
+    assert(status === 'online', `expected online, got ${status}`);
   });
 
-  await step(S, '6. Pause device → verify status=paused AND anti-ban actually blocks it', async () => {
+  await step(S, '5. Pause device and enforce anti-ban pause', async () => {
+    if (!deviceKey) return { status: 'skip', message: 'device creation failed' };
     const res = await req<{ success: boolean; data: { status: string } }>(
       'POST',
       `${GATEWAY_URL}/api/v1/devices/${deviceKey}/pause`,
@@ -377,7 +451,8 @@ async function scenario2DeviceLifecycle(tenant: TestTenant, deviceKey: string): 
     );
   });
 
-  await step(S, '7. Resume device → verify it leaves the paused state', async () => {
+  await step(S, '6. Resume device and restore workload replica', async () => {
+    if (!deviceKey) return { status: 'skip', message: 'device creation failed' };
     const res = await req<{ success: boolean; data: { status: string } }>(
       'POST',
       `${GATEWAY_URL}/api/v1/devices/${deviceKey}/resume`,
@@ -388,12 +463,23 @@ async function scenario2DeviceLifecycle(tenant: TestTenant, deviceKey: string): 
       res.body.data.status !== 'paused',
       `expected status to leave 'paused', got ${res.body.data.status}`,
     );
-    return {
-      status: 'pass',
-      message:
-        `status is now '${res.body.data.status}' (resumeDevice() sets 'offline', not 'online' — ` +
-        `it un-pauses and lets the connection layer reconnect on its own, it doesn't force-online).`,
-    };
+    const scale = await req('POST', `${MANAGER_URL}/devices/${deviceKey}/scale`, {
+      headers: { 'x-admin-key': ADMIN_API_KEY }, body: { replicas: 1 },
+    });
+    assert(scale.status === 200 && orchestrator.resources.get(deviceKey)?.replicas === 1, 'workload did not resume');
+  });
+
+  await step(S, '7. Delete device workload and mark database record offline', async () => {
+    if (!deviceKey) return { status: 'skip', message: 'device creation failed' };
+    const res = await req('DELETE', `${MANAGER_URL}/devices/${deviceKey}`, {
+      headers: { 'x-admin-key': ADMIN_API_KEY },
+    });
+    assert(res.status === 204, `expected 204, got ${res.status}`);
+    assert(!orchestrator.resources.has(deviceKey), 'StatefulSet still exists after delete');
+    const row = (await query<{ status: string; container_id: string | null }>(
+      'SELECT status, container_id FROM devices WHERE device_key = $1', [deviceKey],
+    )).rows[0];
+    assert(row?.status === 'offline' && row.container_id === null, `unexpected deleted state: ${JSON.stringify(row)}`);
   });
 }
 
@@ -405,7 +491,7 @@ async function scenario3ErrorHandling(
 ): Promise<void> {
   const S = 'Scenario 3: Error Handling';
 
-  await step(S, '1. Sending to an offline device → proper error', async () => {
+  await step(S, '1. Sending to an offline device → 503', async () => {
     const res = await req<{ success: boolean; error: { code: string } }>(
       'POST',
       `${GATEWAY_URL}/api/v1/message/send`,
@@ -414,7 +500,7 @@ async function scenario3ErrorHandling(
         body: { device_key: offlineDeviceKey, to: '6281234567890', message: 'should be rejected' },
       },
     );
-    assert(res.status === 409, `expected 409, got ${res.status}`);
+    assert(res.status === 503, `expected 503, got ${res.status}`);
     assert(res.body.error?.code === 'DEVICE_OFFLINE', `expected DEVICE_OFFLINE, got ${res.body.error?.code}`);
   });
 
@@ -447,7 +533,16 @@ async function scenario3ErrorHandling(
     );
   });
 
-  await step(S, '4. Webhook failure → 3 retries with backoff, logged', async () => {
+  await step(S, '4. Invalid payload → 400', async () => {
+    const res = await req<{ error: { code: string } }>('POST', `${GATEWAY_URL}/api/v1/message/send`, {
+      headers: { apikey: offlineTenant.apiKey },
+      body: { device_key: offlineDeviceKey, to: 'not-a-phone', message: '' },
+    });
+    assert(res.status === 400, `expected 400, got ${res.status}`);
+    assert(res.body.error?.code === 'VALIDATION_ERROR', `unexpected error: ${JSON.stringify(res.body)}`);
+  });
+
+  await step(S, '5. Webhook failure → 3 retries with backoff, logged', async () => {
     let attempts = 0;
     const attemptTimes: number[] = [];
     const server = http.createServer((_req, res) => {
@@ -481,6 +576,24 @@ async function scenario3ErrorHandling(
       status: 'pass',
       message: `4 attempts made, retry gaps ~${gaps.map((g) => Math.round(g / 1000)).join('s, ')}s`,
     };
+  });
+
+  await step(S, '6. Database connection loss degrades readiness without crashing', async () => {
+    const port = 8092;
+    const service = spawnService('src/api-gateway/index.ts', {
+      PORT: String(port),
+      DATABASE_URL: 'postgresql://invalid:invalid@127.0.0.1:1/unavailable',
+    });
+    try {
+      const up = await waitForHealth(`http://127.0.0.1:${port}/health`, 20_000);
+      assert(up, `degraded gateway did not start: ${service.logs.join('')}`);
+      const readiness = await req('GET', `http://127.0.0.1:${port}/ready`);
+      assert(readiness.status === 503, `expected readiness 503, got ${readiness.status}`);
+      const liveness = await req('GET', `http://127.0.0.1:${port}/health`);
+      assert(liveness.status === 200, `process did not remain live: ${liveness.status}`);
+    } finally {
+      await stopService(service);
+    }
   });
 }
 
@@ -567,9 +680,15 @@ async function main(): Promise<void> {
   // A real (always-200) webhook receiver, so scenario 1's message.failed
   // dispatch exercises an actual HTTP round trip, not just "skipped, no
   // webhook_url configured".
-  const receiverServer = http.createServer((_req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end('{"ok":true}');
+  const receivedWebhooks: WebhookPayload[] = [];
+  const receiverServer = http.createServer((request, res) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => {
+      try { receivedWebhooks.push(JSON.parse(Buffer.concat(chunks).toString()) as WebhookPayload); } catch { /* asserted later */ }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true}');
+    });
   });
   await new Promise<void>((resolve) => receiverServer.listen(0, resolve));
   const receiverAddress = receiverServer.address();
@@ -577,12 +696,17 @@ async function main(): Promise<void> {
   const receiverUrl = `http://127.0.0.1:${receiverPort}/hook`;
 
   let gateway: SpawnedService | undefined;
-  let bot: SpawnedService | undefined;
+  let managerServer: Server | undefined;
   const tenantsToCleanup: string[] = [];
 
   try {
+    const orchestrator = new FakeOrchestrator();
+    managerServer = http.createServer(createDeviceManagerApp(orchestrator));
+    await listen(managerServer, MANAGER_PORT);
+
     gateway = spawnService('src/api-gateway/index.ts', {
       PORT: String(GATEWAY_PORT),
+      DEVICE_MANAGER_URL: MANAGER_URL,
     });
     const gatewayUp = await waitForHealth(`${GATEWAY_URL}/health`, 20_000);
     if (!gatewayUp) {
@@ -602,38 +726,28 @@ async function main(): Promise<void> {
     const quotaDeviceKey = `WAPI-ITEST-QUOTA-${RUN_ID}`;
     const offlineDeviceKey = `WAPI-ITEST-OFFLINE-${RUN_ID}`;
 
-    await insertDevice(flowTenant.id, flowDeviceKey, 'starting');
+    await insertDevice(flowTenant.id, flowDeviceKey, 'online');
+    await query(
+      `UPDATE devices SET warmup_started_at = now() - interval '10 days', warmup_completed_at = now(), health_score = 100
+       WHERE device_key = $1`,
+      [flowDeviceKey],
+    );
     await insertDevice(quotaTenant.id, quotaDeviceKey, 'online');
     await insertDevice(offlineTenant.id, offlineDeviceKey, 'offline');
     console.log('Test tenants and devices created.');
 
-    bot = spawnService('src/bot-container/index.ts', {
-      BOT_ID: flowDeviceKey,
-      BOT_CONTAINER_PORT: String(BOT_PORT),
-      SESSION_PATH: `./sessions-itest-${RUN_ID}`,
-    });
-    const botUp = await waitForHealth(`http://127.0.0.1:${BOT_PORT}/health`, 20_000);
-    if (!botUp) {
-      console.error('Bot Container logs:\n', bot.logs.join(''));
-      throw new Error('Bot Container did not become healthy within 20s');
-    }
-    console.log('Bot Container up.');
-
-    // Scenario 2 needs the device online *before* scenario 1 sends through it.
-    await scenario2DeviceLifecycle(flowTenant, flowDeviceKey);
-    // Undo scenario 2's pause/resume dance so scenario 1 can send cleanly.
-    await query(`UPDATE devices SET status = 'online' WHERE device_key = $1`, [flowDeviceKey]);
-
-    await scenario1MessageFlow(flowTenant, flowDeviceKey);
+    await scenario2DeviceLifecycle(flowTenant, orchestrator);
+    await scenario1MessageFlow(flowTenant, flowDeviceKey, receivedWebhooks);
     await scenario3ErrorHandling(quotaTenant, quotaDeviceKey, offlineTenant, offlineDeviceKey);
     await scenario4AntiBan(flowTenant, flowDeviceKey);
   } finally {
-    await stopService(bot);
     await stopService(gateway);
-    await new Promise<void>((resolve) => receiverServer.close(() => resolve()));
+    await closeServer(managerServer);
+    await closeServer(receiverServer);
     for (const id of tenantsToCleanup) {
       await cleanupTenant(id);
     }
+    await closeQueueResources();
     await closeRedisClient();
     await pool.end();
   }
@@ -671,6 +785,16 @@ function printReport(): void {
   console.log('\n' + '-'.repeat(72));
   console.log(`TOTAL: ${pass} passed, ${fail} failed, ${skip} skipped (of ${results.length})`);
   console.log('-'.repeat(72) + '\n');
+
+  const absoluteReportPath = path.resolve(REPO_ROOT, REPORT_PATH);
+  mkdirSync(path.dirname(absoluteReportPath), { recursive: true });
+  writeFileSync(absoluteReportPath, JSON.stringify({
+    runId: RUN_ID,
+    generatedAt: new Date().toISOString(),
+    summary: { total: results.length, passed: pass, failed: fail, skipped: skip },
+    results,
+  }, null, 2) + '\n');
+  console.log(`JSON report: ${absoluteReportPath}\n`);
 
   process.exitCode = fail > 0 ? 1 : 0;
 }

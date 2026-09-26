@@ -1,0 +1,150 @@
+{
+  "runId": "muga3izq",
+  "generatedAt": "2026-09-25T01:25:28.685Z",
+  "summary": {
+    "total": 23,
+    "passed": 23,
+    "failed": 0,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "scenario": "Scenario 2: Device Lifecycle",
+      "step": "1-2. Create device via Device Manager and provision StatefulSet",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 2: Device Lifecycle",
+      "step": "3. QR generation is persisted and exposed through tenant API",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 2: Device Lifecycle",
+      "step": "4. Simulated QR scan transitions pending_qr → online",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 2: Device Lifecycle",
+      "step": "5. Pause device and enforce anti-ban pause",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 2: Device Lifecycle",
+      "step": "6. Resume device and restore workload replica",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 2: Device Lifecycle",
+      "step": "7. Delete device workload and mark database record offline",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 1: Message Flow",
+      "step": "1. POST /api/v1/message/send accepts a queued message",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 1: Message Flow",
+      "step": "2. Message row exists with status=queued",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 1: Message Flow",
+      "step": "3. BullMQ job exists in queue:messages:{device_key}",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 1: Message Flow",
+      "step": "4. Bot queue worker picks up the message and sends through WhatsApp adapter",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 1: Message Flow",
+      "step": "5. Delivery receipt updates sent → delivered",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 1: Message Flow",
+      "step": "6. Status history records queued → sent → delivered",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 1: Message Flow",
+      "step": "7. sent and delivered webhooks are dispatched and logged",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 3: Error Handling",
+      "step": "1. Sending to an offline device → 503",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 3: Error Handling",
+      "step": "2. Invalid API key → 401",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 3: Error Handling",
+      "step": "3. Quota exceeded → 429",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 3: Error Handling",
+      "step": "4. Invalid payload → 400",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 3: Error Handling",
+      "step": "5. Webhook failure → 3 retries with backoff, logged",
+      "status": "pass",
+      "message": "4 attempts made, retry gaps ~1s, 5s, 15s"
+    },
+    {
+      "scenario": "Scenario 3: Error Handling",
+      "step": "6. Database connection loss degrades readiness without crashing",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 4: Anti-Ban Integration",
+      "step": "1. Warm-up protocol active for a new device (day 1 cap = 5)",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 4: Anti-Ban Integration",
+      "step": "2. Per-minute rate limit (max 2/min) is enforced",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 4: Anti-Ban Integration",
+      "step": "3. Content filter blocks spam",
+      "status": "pass",
+      "message": "ok"
+    },
+    {
+      "scenario": "Scenario 4: Anti-Ban Integration",
+      "step": "4. Health score calculation reflects real message history",
+      "status": "pass",
+      "message": "health score = 65 after 10/10 delivered"
+    }
+  ]
+}

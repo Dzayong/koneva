@@ -17,7 +17,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations
 RUN addgroup -S -g 10001 wagateway && adduser -S -D -H -u 10001 -G wagateway wagateway \
-    && chown -R wagateway:wagateway /app
+    && chown wagateway:wagateway /app
 USER wagateway
 
 FROM runtime AS api-gateway

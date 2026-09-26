@@ -13,29 +13,260 @@ instance (`scripts/integration-test.ts`), not written from a spec alone.
 own key); admin routes (`/admin/*`) take an `x-admin-key` header
 (`ADMIN_API_KEY`) — these are two different secrets, don't mix them up.
 
-**Response envelope**: `{ success, data }` everywhere, *except*
-`GET /api/v1/messages` which returns `{ data, pagination }` directly — no
-`success` field. That inconsistency is real, kept faithful rather than
-smoothed over.
+**Response envelope**: successful single-resource responses use
+`{ success: true, data }`. Paginated lists use
+`{ success: true, data, pagination: { total, limit, offset, has_more } }`.
+Errors use `{ success: false, error: { code, message } }`. Legacy top-level
+fields on send and QR responses remain temporarily for frontend compatibility.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | POST | `/api/v1/message/send` | tenant | 202 = queued, not delivered |
-| GET | `/api/v1/messages` | tenant | `{data, pagination}`, no date-range filter |
+| GET | `/api/v1/messages` | tenant | filters: `device_key`, `status`, `direction`, `search` |
 | GET | `/api/v1/messages/:id` | tenant | includes `status_history` |
+| POST | `/api/v1/messages/:id/retry` | tenant | retry failed/blocked messages |
+| POST | `/api/v1/broadcast` | tenant | queue up to 500 recipients |
 | GET | `/api/v1/devices` | tenant | |
+| POST | `/api/v1/devices` | tenant | create a device for the authenticated tenant; 429 at `max_devices` |
 | GET | `/api/v1/devices/:key` | tenant | includes `qr_code` |
-| GET | `/api/v1/devices/:key/qr` | tenant | 409 if not `pending_qr` |
+| GET | `/api/v1/devices/:key/qr` | tenant | always 200 for an owned device; includes status and nullable QR |
 | POST | `/api/v1/devices/:key/pause` | tenant | sets `status='paused'`, actually blocks sending |
 | POST | `/api/v1/devices/:key/resume` | tenant | sets `status='offline'`, not `'online'` |
+| DELETE | `/api/v1/devices/:key` | tenant | delete the authenticated tenant's device workload |
+| GET | `/api/v1/devices/:key/activity` | tenant | daily sent/received, active hours, streak, today's window, fatigue |
+| GET/PATCH | `/api/v1/devices/:key/persona` | tenant | per-number pacing: 24-hour mode, fixed or random delay |
+| GET | `/api/v1/devices/:key/events` | tenant | timeline of status changes (online, offline, banned, logged_out, error) |
+| GET | `/api/v1/devices/:key/health` | tenant | readiness score (0-100) with per-factor breakdown and recommendations |
+| GET | `/api/v1/tenant` | tenant | authenticated tenant profile and quota usage |
+| PATCH | `/api/v1/tenant` | tenant | update the tenant webhook URL |
+| POST/GET | `/api/v1/contacts` | tenant | create or list tenant contacts |
+| GET/PATCH/DELETE | `/api/v1/contacts/:id` | tenant | contact CRUD, tenant scoped |
+| POST | `/api/v1/contacts/import` | tenant | CSV import/upsert (`{ "csv": "..." }`) |
+| POST/GET | `/api/v1/templates` | tenant | create or list message templates |
+| GET/PATCH/DELETE | `/api/v1/templates/:id` | tenant | template CRUD, tenant scoped |
+| POST | `/api/v1/templates/:id/render` | tenant | resolve spintax and variables |
+| GET | `/api/v1/analytics/overview` | tenant | message, delivery, response-time and device summary |
+| GET | `/api/v1/analytics/daily` | tenant | daily series; `days` is 1–90, default 30 |
+| GET | `/api/v1/dashboard/stats` | tenant | homepage aggregate statistics |
+| GET | `/api/v1/devices/:key/stats` | tenant | per-device message statistics |
+| GET/POST | `/api/v1/auto-reply-rules` | tenant | list or create auto-reply rules |
+| GET/PATCH/DELETE | `/api/v1/auto-reply-rules/:id` | tenant | rule CRUD, tenant scoped |
+| POST | `/api/v1/auto-reply-rules/:id/toggle` | tenant | toggle a rule's active state |
 | POST | `/admin/tenant/create` | admin | returns the new `api_key` |
 | POST | `/admin/device/create` | admin | proxies to Device Manager's `docker run` |
 | GET | `/admin/tenants` | admin | with device/message counts |
 | GET | `/admin/devices` | admin | optional `?status=` filter |
 | GET | `/admin/stats` | admin | |
 
-No tenant-scoped device creation, tenant self-info, or webhook
-config exists yet — see `docs/ARCHITECTURE.md` "Known gaps".
+### Tenant self-service devices
+
+`POST /api/v1/devices`
+
+- Auth: `apikey` (tenant)
+- Body: `{ "phone_number"?: string, "label"?: string }`
+- Response (`201`): `{ "success": true, "data": { "device_key": string, "status": "starting" } }`
+- Returns `429` when the tenant has reached `max_devices`.
+
+`DELETE /api/v1/devices/:deviceKey`
+
+- Auth: `apikey` (tenant)
+- Response: `{ "success": true }`
+- Returns `404` when the device does not exist or belongs to another tenant.
+
+`GET /api/v1/devices/:deviceKey/qr`
+
+- Auth: `apikey` (tenant)
+- Response: `{ "success": true, "device_key": string, "status": string, "qr_code": string | null, "has_qr": boolean }`
+- Returns `200` for every status when the device belongs to the tenant. A QR code that is not currently available is represented by `qr_code: null` and `has_qr: false`.
+
+### Tenant profile
+
+`GET /api/v1/tenant`
+
+- Auth: `apikey` (tenant)
+- Response: `{ "success": true, "data": { "id", "name", "email", "api_key", "webhook_url", "max_devices", "quota_messages", "used_messages", "status", "created_at", "updated_at" } }`
+- The webhook secret is not returned.
+
+`PATCH /api/v1/tenant`
+
+- Auth: `apikey` (tenant)
+- Body: `{ "webhook_url": string | null }`
+- Only HTTP and HTTPS URLs are accepted; `null` clears the webhook URL.
+- Response uses the same `{ "success": true, "data": tenant }` envelope as the GET endpoint.
+
+### Contacts
+
+Contacts are isolated by the authenticated tenant. `POST /api/v1/contacts` accepts
+`phone_number`, optional `name`, `tags` and `notes`. `GET /api/v1/contacts`
+supports `search`, `limit`, and `offset`. CSV import is JSON-based and accepts a
+`csv` string whose header contains `phone_number` (also accepts `phone` or
+`number`); optional columns are `name`, `tags`, and `notes`. Tags use `|` or `;`
+inside the CSV cell. Existing phone numbers are updated during import.
+
+### Message templates
+
+Templates contain `name`, `content`, and optional `is_active`. Content supports
+spintax (`{Halo|Hi|Hey}`) and named variables (`{nama}`, `{tanggal}`). Responses
+include the detected `variables`. `POST /api/v1/templates/:id/render` accepts
+`{ "variables": { "nama": "Ayu" } }` and returns rendered content.
+
+### Analytics
+
+`GET /api/v1/analytics/overview` returns `total_messages`, percentage
+`delivery_rate`, `avg_response_time` in seconds, and `active_devices`.
+`GET /api/v1/analytics/daily?days=30` returns zero-filled daily totals with
+inbound, outbound, delivered, and read counts.
+
+### Auto-reply
+
+Bot containers load active `auto_reply_rules` for their device at startup.
+Trigger types are case-insensitive `keyword`, `regex`, and `all`. Responses may
+be plain text or templates, use the rule delay together with anti-ban controls,
+and are recorded in `messages` plus `auto_reply_logs` (`sent`, `blocked`, or
+`failed`). CRUD changes publish a device-specific Redis signal, so the relevant
+bot reloads active rules without a restart. Rule creation verifies that the
+target device belongs to the authenticated tenant; update, toggle, and deletion
+are also tenant scoped.
+
+
+
+## Accounts, sessions and roles
+
+People sign in to the console with an account; systems call the API with a key. The two are separate
+credentials. Both reach the same `/api/v1` routes, and every route checks a permission.
+
+**Sign up** creates a personal account and a workspace with you as `owner`. A new workspace is a trial
+(1 number, 200 messages) until an operator raises the limits.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/auth/signup` | `{ email, password (10+ chars), name, workspace_name?, accept_terms: true }`. Terms include that this service connects through an unofficial channel. 10 per hour per IP. |
+| POST | `/auth/login` | `{ email, password }`. Five wrong attempts lock that email and IP for 15 minutes. |
+| POST | `/auth/logout` | Revokes the session in the `Authorization` header. |
+| GET | `/auth/me` | Current user, workspace, role and permission list. |
+
+A session token (`wgs_...`) goes in `Authorization: Bearer <token>`. It lasts 14 days and extends while you
+keep working. If you belong to several workspaces, select one with the `x-workspace` header (workspace id).
+`GET /api/v1/tenant` never returns the legacy tenant key to a signed-in person.
+
+**Roles**
+
+| Role | Can do |
+|---|---|
+| `owner` | Everything, including billing and the team |
+| `admin` | Everything except billing |
+| `developer` | Read and connect numbers, send messages, manage webhooks and content, manage API keys. Cannot delete numbers, manage the team or billing |
+| `viewer` | Read numbers and messages only. Cannot see the QR code |
+
+A route with no permission rule is denied. The QR code counts as a write-level permission because whoever
+scans it controls the number.
+
+
+### API keys with limited access
+
+Create keys for your systems instead of sharing a person's access. Manage them signed in (`keys:manage`):
+developers, admins and owners can; a key cannot create keys.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/v1/keys` | Lists keys (name, prefix, scopes, last used). Never returns the key itself. |
+| POST | `/api/v1/keys` | `{ name, scopes: [...], expires_in_days? }`. The key (`wgk_...`) is shown **once**. |
+| POST | `/api/v1/keys/:id/rotate` | `{ overlap_hours? }` (default 24). Issues a new key; the old one keeps working for the overlap so you can redeploy without downtime. |
+| DELETE | `/api/v1/keys/:id` | Revokes immediately. |
+
+Send a key as `apikey: wgk_...` or `Authorization: Bearer wgk_...`. Available scopes: `devices:read`,
+`devices:write`, `devices:delete`, `messages:read`, `messages:send`, `content:write`, `webhooks:manage`. You
+can only grant scopes your own role has, and at most 20 keys can be active. A key that only sends OTP needs
+only `messages:send`.
+
+### Team and invitations
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | `/api/v1/team` | owner, admin | Members and pending invitations. |
+| POST | `/api/v1/team/invitations` | owner, admin | `{ email, role }`. Returns a link (`/invite/wgi_...`) to share yourself. Works once, for that email only, and expires in 48 hours. Admins can invite developers and viewers; only owners invite admins. |
+| DELETE | `/api/v1/team/invitations/:id` | owner, admin | Revokes a pending link. |
+| PATCH | `/api/v1/team/members/:id` | owner, admin | `{ role }`. Not for yourself. Admins cannot change admins or owners. |
+| DELETE | `/api/v1/team/members/:id` | owner, admin | Removes someone from the workspace. |
+| GET | `/auth/invitations/:token` | public | Workspace, role and a masked email, so the person knows what they are accepting. |
+| POST | `/auth/invitations/:token/accept` | public | New person: `{ name, password, accept_terms: true }`. Someone who already has an account signs in first and sends their session token; the email must match the invitation. |
+
+### Audit log
+
+`GET /api/v1/audit?limit=50&before=<time>` (owner, admin) lists who did what: number created, paused or
+deleted, pacing changed, webhook changed, keys created, rotated or revoked, team changes, broadcasts and
+auto-reply changes. Message sends are not listed; use the message log for those.
+
+
+### Roles for a number (presets)
+
+Instead of tuning delays by hand, pick what a number is for: `GET /api/v1/presets` lists them and
+`POST /api/v1/devices/:key/preset` with `{ "preset": "customer_service" | "notifications" | "careful_marketing" }`
+applies one. Each number keeps small variations of its own, so two numbers on the same preset do not share
+one rhythm. Editing pacing by hand afterwards makes the number `custom`.
+
+| Preset | For | Behaviour |
+|---|---|---|
+| `customer_service` | Answering customers | 24 hours, random delay 5-60 s |
+| `notifications` | Reminders and notices | 24 hours, delay 1-5 s, long runs. Use `priority: "urgent"` for OTP |
+| `careful_marketing` | Messages to opted-in contacts | About 08:00-20:00, delay 20-90 s, frequent rests |
+
+### New numbers and replies
+
+A number in its first two days cannot start conversations (warm-up). Answering someone who wrote to the
+number in the last 24 hours is a reply, not outreach, so it is allowed from day one, within the daily
+limit. A message that has to wait stays `queued` and `error_message` says why (for example
+`proactive_not_allowed_in_warmup`); it is sent automatically once allowed.
+
+### Urgent messages (OTP)
+
+`POST /api/v1/message/send` accepts `"priority": "urgent"` for time-critical messages such as OTP.
+Urgent messages use their own queue, are sent without artificial delay, and skip active hours,
+rests and content rules. They still respect a paused or banned number and the daily cap, and they
+are never deferred: if refused, the message is marked `failed` right away and a `message.failed`
+webhook is sent, because a late OTP is useless.
+
+A new number is capped by warm-up (about 4-5 messages on day 1), so a fresh number is not ready for
+OTP traffic. Templated, high-volume OTP sending to many strangers is the pattern WhatsApp is most
+likely to treat as automated; volume and risk on your own numbers are your responsibility.
+
+### Pacing per number (persona)
+
+Every number has its own habits, drawn once and kept: active hours, delay between messages, how long
+a burst of sends lasts before it rests, and typing speed. Change them with `PATCH /api/v1/devices/:key/persona`:
+
+| Field | Meaning |
+|---|---|
+| `always_on` | `true` keeps the number active 24 hours. When `false`, replies outside active hours are refused and logged as blocked. |
+| `delay_ms` | Fixed delay, e.g. `5000` for exactly 5 seconds. Cannot be combined with min/max. |
+| `delay_min_ms` / `delay_max_ms` | Random delay between the two, e.g. `5000` and `100000`. Range 1 s to 10 min. |
+| `burst_size`, `rest_min_ms`, `rest_max_ms` | Sends in one run before resting, and how long the rest lasts (1-120 min). |
+| `wake_hour`, `sleep_hour`, `timezone` | Active hours when `always_on` is `false`. |
+
+The delay is the total time to send, including reading and typing. Rests apply to proactive sends only;
+replies to people who wrote first are never held back.
+
+### Device status webhook
+
+When a number's state settles, a `device.status_changed` webhook is sent and the change is stored
+(see `GET /api/v1/devices/:key/events`):
+
+```json
+{ "event": "device.status_changed", "device_key": "WAPI-XXX", "status": "banned",
+  "previous_status": "online", "reason": "forbidden_403", "code": 403,
+  "timestamp": "2026-09-25T17:42:55.254Z" }
+```
+
+| `status` | Meaning | What to do |
+|---|---|---|
+| `online` | Connected | Nothing |
+| `offline` | Could not reconnect after several attempts | Check the phone's internet, then resume the device |
+| `logged_out` | Unlinked from the phone or invalidated (401) | Scan a new QR |
+| `banned` | WhatsApp refused the account (403), likely banned or restricted | Stop sending; messages to this number fail immediately with `device_banned` |
+| `error` | Session unusable (`connection_replaced`, `bad_session`, `multidevice_mismatch`) | Close other sessions using the same number, or re-pair |
+
+WhatsApp does not tell us why an account is refused, so `banned` means "suspected". This service uses an
+unofficial connection; WhatsApp states that unofficial apps can lead to a temporary or permanent ban.
 
 ## Bot Container (internal)
 
@@ -196,6 +427,11 @@ an `X-Webhook-Secret` header. Retried at 1s / 5s / 15s; every attempt
 }
 ```
 
-Events: `message.sent`, `message.delivered`, `message.read`,
+Events: `message.sent`, `message.delivered`, `message.read`, `message.received`,
 `message.failed`, `device.status_changed` (the last one is defined in the
 type but not yet emitted anywhere — see `docs/ARCHITECTURE.md` gaps).
+
+Inbound `message.received` payloads include `direction: "inbound"`, `from`,
+`content`, `message_id`, `whatsapp_message_id`, and `device_key`. They are also
+stored in `messages` with `status: "received"` and returned by
+`GET /api/v1/messages` alongside outbound messages.

@@ -1,0 +1,148 @@
+name: ${PERSONAL_PROJECT:-wa-personal}
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: 10m, max-file: "3" }
+x-env: &env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://${DB_USER:-wagateway}:${DB_PASSWORD:?Set DB_PASSWORD}@postgres:5432/${DB_NAME:-wagateway}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+  ADMIN_API_KEY: ${ADMIN_API_KEY:?Set ADMIN_API_KEY}
+  DEVICE_MANAGER_URL: http://device-manager:8001
+  DEVICE_MANAGER_PORT: 8001
+  BOT_IMAGE: ${PERSONAL_PROJECT:-wa-personal}-bot:local
+  BOT_DOCKER_NETWORK: ${BOT_DOCKER_NETWORK:-wa-gateway-personal}
+  SESSION_HOST_PATH: ${SESSION_HOST_PATH:?Use scripts/start-personal.sh}
+  ORCHESTRATOR: docker
+  TRUST_PROXY_HOPS: "1"
+  WA_PROXY_URL: ${WA_PROXY_URL:-}
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-wagateway}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-wagateway}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    ports: ["127.0.0.1:${DB_PORT:-55432}:5432"]
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    environment: { REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD}" }
+    command: [sh, -c, 'exec redis-server --appendonly yes --appendfsync everysec --maxmemory 256mb --maxmemory-policy noeviction --requirepass "$${REDIS_PASSWORD}"']
+    volumes: [redis_data:/data]
+    ports: ["127.0.0.1:${REDIS_PORT:-56379}:6379"]
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping | grep -q PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  migrate:
+    image: ${PERSONAL_PROJECT:-wa-personal}-api:local
+    build: { context: .., dockerfile: docker/app.Dockerfile, target: api-gateway }
+    environment: *env
+    command: [node, dist/scripts/migrate.js]
+    depends_on: { postgres: { condition: service_healthy } }
+    restart: "no"
+    logging: *logging
+  api-gateway:
+    image: ${PERSONAL_PROJECT:-wa-personal}-api:local
+    build: { context: .., dockerfile: docker/app.Dockerfile, target: api-gateway }
+    environment: { <<: *env, PORT: 8000 }
+    ports: ["${APP_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-18000}:8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    init: true
+    logging: *logging
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+  device-manager:
+    image: ${PERSONAL_PROJECT:-wa-personal}-manager:local
+    build: { context: .., dockerfile: docker/app.Dockerfile, target: device-manager }
+    environment: { <<: *env, PORT: 8001, DOCKER_SOCKET: /var/run/docker.sock }
+    user: "${PERSONAL_UID:?Use start script}:${PERSONAL_GID:?Use start script}"
+    group_add: ["${DOCKER_GID:?Use start script}"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same absolute path on host and manager; Docker binds on the HOST.
+      - ${SESSION_HOST_PATH}:${SESSION_HOST_PATH}
+    ports: ["127.0.0.1:${MANAGER_PORT:-18001}:8001"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    init: true
+    logging: *logging
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+  dashboard:
+    image: ${PERSONAL_PROJECT:-wa-personal}-dashboard:local
+    build: { context: .., dockerfile: docker/dashboard.Dockerfile }
+    ports: ["${APP_BIND_ADDRESS:-127.0.0.1}:${DASHBOARD_PORT:-13000}:3000"]
+    depends_on: { api-gateway: { condition: service_healthy } }
+    restart: unless-stopped
+    init: true
+    logging: *logging
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+  bot-image:
+    image: ${PERSONAL_PROJECT:-wa-personal}-bot:local
+    build: { context: .., dockerfile: docker/bot-container.Dockerfile }
+    profiles: [build-only]
+    # Image build target only. Device Manager starts one bot per device.
+  nginx:
+    image: nginx:stable-alpine
+    profiles: [with-nginx]
+    ports: ["${HTTP_PORT:-80}:80", "${HTTPS_PORT:-443}:443"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/generated:/etc/nginx/personal:ro
+      - ./nginx/ssl:/etc/letsencrypt:ro
+      - ./nginx/www:/var/www/certbot:ro
+    depends_on: { dashboard: { condition: service_healthy } }
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1/nginx-health']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  certbot:
+    image: certbot/certbot:latest
+    profiles: [certbot-only]
+    volumes:
+      - ./nginx/ssl:/etc/letsencrypt
+      - ./nginx/www:/var/www/certbot
+    # One-shot task: scripts/ssl-personal.sh issues/renews and reloads nginx.
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+networks:
+  default:
+    name: ${BOT_DOCKER_NETWORK:-wa-gateway-personal}

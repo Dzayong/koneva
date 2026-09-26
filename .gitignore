@@ -2,6 +2,13 @@ node_modules/
 dist/
 .env
 .env.production
+.env.personal
+.env.personal.*
+!.env.personal.example
+data/personal/
+docker/nginx/generated/
+docker/nginx/ssl/
+docker/nginx/www/
 *.log
 sessions/
 .DS_Store
@@ -10,3 +17,6 @@ backups/
 docker/certbot/conf/
 docker/certbot/www/
 docker/grafana/data/
+
+# Archives can contain .env files; never track them.
+*.tar.gz

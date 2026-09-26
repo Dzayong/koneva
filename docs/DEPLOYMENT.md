@@ -3,6 +3,70 @@
 This guide deploys PostgreSQL, Redis, three API Gateway replicas behind Nginx,
 one Device Manager, dynamic bot containers, TLS renewal, monitoring, and backup.
 
+## Local deployment with Kind
+
+The `wa-gateway` namespace intentionally enforces the Kubernetes Pod Security
+`restricted` profile. Do not remove those labels to work around admission
+errors. API Gateway, Device Manager, bot, PostgreSQL, and Redis pods declare a
+non-root UID/GID, `RuntimeDefault` seccomp, disabled privilege escalation, and
+drop all Linux capabilities.
+
+Build the two local images and load them into the `wa-gateway` Kind cluster:
+
+```bash
+docker build -f docker/app.Dockerfile --target api-gateway \
+  -t wa-gateway-api:latest .
+docker build -f docker/bot-container.Dockerfile -t wa-bot:latest .
+kind load docker-image --name wa-gateway wa-gateway-api:latest wa-bot:latest
+```
+
+Both Deployments explicitly select their entrypoint (`api-gateway/index.js` or
+`device-manager/index.js`), so a stale image CMD cannot start the wrong service.
+The Device Manager reuses the application image. Both Deployments use
+`imagePullPolicy: Never`, so the images must be present on every Kind node.
+Dynamic bot workloads use the `BOT_IMAGE=wa-bot:latest` ConfigMap value.
+
+Review `k8s/secrets.yaml` before use. Its `CHANGE_ME` values are only suitable
+for an isolated disposable development cluster. Then run the verification
+script from any directory:
+
+```bash
+./scripts/verify-kind.sh
+```
+
+For a clean-room verification that deletes and recreates only the
+`wa-gateway` namespace:
+
+```bash
+./scripts/verify-kind.sh --recreate
+```
+
+The script refuses non-Kind contexts, loads local images, applies resources in
+dependency order, fails on PodSecurity warnings, waits for both Deployments,
+and checks these endpoints through temporary port forwards:
+
+```text
+http://127.0.0.1:18000/health  # {"status":"ok"}
+http://127.0.0.1:18001/health  # {"status":"ok","mode":"kubernetes"}
+```
+
+Ports 18000/18001 avoid collisions with local dev services. Override them with
+`API_LOCAL_PORT=8000 MANAGER_LOCAL_PORT=8001` when the standard ports are free.
+
+Useful diagnostics:
+
+```bash
+kubectl get pods -n wa-gateway -o wide
+kubectl get events -n wa-gateway --sort-by=.lastTimestamp
+kubectl describe deployment api-gateway device-manager -n wa-gateway
+docker exec wa-gateway-control-plane crictl images
+```
+
+`ErrImageNeverPull` means the exact image name/tag is absent from the Kind
+node. Rebuild and rerun `kind load docker-image`. A Deployment with zero pods
+and `FailedCreate` events usually means the pod template violates namespace
+admission policy; do not infer an image problem until a pod has been admitted.
+
 ## Prerequisites
 
 - Ubuntu/Debian server with at least 4 CPU cores, 8 GB RAM, and 50 GB free disk.
