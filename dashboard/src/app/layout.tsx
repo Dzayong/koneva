@@ -4,6 +4,7 @@ import "./globals.css";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { SITE } from "@/lib/site";
 import { Toaster } from "@/components/ui/sonner";
 
 const inter = Inter({
@@ -27,8 +28,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "WA Gateway Dashboard",
-  description: "WhatsApp API Gateway management dashboard",
+  metadataBase: new URL(SITE.url),
+  title: { default: SITE.title, template: "%s · WA Gateway" },
+  description: SITE.description,
+  applicationName: SITE.name,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

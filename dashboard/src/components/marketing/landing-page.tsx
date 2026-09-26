@@ -1,28 +1,32 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion, useScroll, useTransform, type Variants } from "framer-motion";
 import { ArrowRight, BellRing, CheckCheck, Gauge, ShieldCheck, Smartphone, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CycleToggle, PlanCards } from "@/components/billing/plan-cards";
+import { Faq } from "@/components/marketing/faq";
 import { HeroDemo } from "@/components/marketing/hero-demo";
 import { HowItWorks } from "@/components/marketing/how-it-works";
 import { PhotoBackdrop } from "@/components/marketing/photo-backdrop";
-import { SiteFooter } from "@/components/marketing/site-footer";
 import { ProductTour } from "@/components/marketing/product-tour";
 import { ReadinessRing } from "@/components/marketing/readiness-ring";
+import { Reveal, Stagger, StaggerItem, type RevealFrom } from "@/components/marketing/reveal";
 import { RotatingText } from "@/components/marketing/rotating-text";
+import { SiteFooter } from "@/components/marketing/site-footer";
 import { Stage } from "@/components/marketing/stage";
 import { UseCaseMarquee } from "@/components/marketing/use-case-marquee";
 import { WarmupFlow } from "@/components/marketing/warmup-flow";
+import { useAuth } from "@/hooks/use-auth";
 import { usePublicPlans } from "@/hooks/use-billing";
+import { track } from "@/lib/track";
 import type { BillingCycle } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const rise: Variants = {
   hidden: { opacity: 0, y: 14 },
-  show: (i: number = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.08, duration: 0.4, ease: "easeOut" } }),
+  show: (i: number = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.08, duration: 0.6, ease: [0.22, 1, 0.36, 1] } }),
 };
 
 // Every claim maps to a shipped backend capability.
@@ -33,27 +37,36 @@ const FEATURES = [
   { icon: BellRing, title: "Webhook bertanda tangan", text: "Kabar dikirim ke server Anda dengan tanda tangan HMAC yang bisa diverifikasi, termasuk saat nomor bermasalah.", span: "" },
   { icon: Gauge, title: "Skor kesiapan nomor", text: "Lihat sekilas nomor mana yang sehat, sebelum WhatsApp yang memberi tahu Anda.", span: "" },
 ] as const;
+const ZIGZAG: RevealFrom[] = ["left", "up", "right"];
 
-function Heading({ eyebrow, title, text }: { eyebrow: string; title: string; text?: string }) {
+function Heading({ eyebrow, title, text, as: Tag = "h2" }: { eyebrow: string; title: string; text?: string; as?: "h1" | "h2" }) {
   return (
-    <motion.div initial="hidden" whileInView="show" viewport={{ once: true, margin: "-80px" }} variants={rise} className="max-w-3xl">
+    <Reveal className="max-w-3xl">
       <p className="text-xs font-semibold tracking-[0.16em] text-primary uppercase">{eyebrow}</p>
-      <h2 className="font-display mt-3 text-4xl leading-[1.1] md:text-5xl">{title}</h2>
+      <Tag className="font-display mt-3 text-4xl leading-[1.1] md:text-5xl">{title}</Tag>
       {text && <p className="mt-4 text-lg text-muted-foreground">{text}</p>}
-    </motion.div>
+    </Reveal>
   );
 }
 
-function Section({ tone, id, className, backdrop, children }: { tone: string; id?: string; className?: string; backdrop?: React.ReactNode; children: React.ReactNode }) {
+function Section({ tone, id, className, backdrop, children, label }: { tone: string; id?: string; className?: string; backdrop?: React.ReactNode; children: React.ReactNode; label?: string }) {
   return (
-    <section id={id} data-tone className={cn(`tone-${tone} relative scroll-mt-4 overflow-hidden`, className)}>
+    <section id={id} aria-label={label} data-tone className={cn(`tone-${tone} relative scroll-mt-4 overflow-hidden`, className)}>
       {backdrop}
       <div className="relative mx-auto max-w-7xl px-6 py-24 md:py-32">{children}</div>
     </section>
   );
 }
 
-export default function WelcomePage() {
+/** "Masuk" for visitors, "Buka dashboard" for people who are already signed in. */
+function AuthLink() {
+  const { isAuthenticated } = useAuth();
+  return isAuthenticated === true
+    ? <Button asChild><Link href="/dashboard">Buka dashboard</Link></Button>
+    : <Button asChild variant="outline"><Link href="/login" onClick={() => track("cta_login")}>Masuk</Link></Button>;
+}
+
+export function LandingPage() {
   const reduce = useReducedMotion();
   const plans = usePublicPlans();
   const [cycle, setCycle] = useState<BillingCycle>("monthly");
@@ -62,23 +75,26 @@ export default function WelcomePage() {
   const demoY = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : -70]);
   const glowScale = useTransform(scrollYProgress, [0, 1], [1, reduce ? 1 : 1.5]);
 
+  useEffect(() => { track("view"); }, []);
+
   return (
     <Stage>
       <main className="relative overflow-x-clip">
-        {/* Hero: ink navy = authority; coral action = the one warm complement */}
-        <section ref={heroRef} data-tone className="tone-ink relative overflow-hidden">
+        {/* Hero: ink navy = authority; the coral action is the one warm complement */}
+        <section ref={heroRef} data-tone aria-label="Pengantar" className="tone-ink relative overflow-hidden">
           <PhotoBackdrop src="/media/photos/skyline-night.jpg" side="full" className="!top-auto h-[70%]" />
           <motion.div aria-hidden style={{ scale: glowScale }} className="pointer-events-none absolute top-[38%] left-1/2 h-[620px] w-[900px] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(37,99,235,0.38),rgba(6,182,212,0.12)_55%,transparent)] blur-2xl" />
           <div aria-hidden className="absolute inset-x-0 top-0 h-[560px] [background-image:radial-gradient(rgba(148,163,255,0.22)_1px,transparent_1px)] [background-size:24px_24px] [mask-image:radial-gradient(ellipse_at_top,black_25%,transparent_70%)]" />
           <header className="relative mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#2563eb] to-[#06b6d4] shadow-md"><Zap className="h-5 w-5 text-white" /></div>
+            <Link href="/" className="flex items-center gap-3" aria-label="WA Gateway, beranda">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#2563eb] to-[#06b6d4] shadow-md"><Zap className="h-5 w-5 text-white" /></span>
               <span className="text-lg font-semibold">WA Gateway</span>
-            </div>
-            <div className="flex items-center gap-2">
+            </Link>
+            <nav aria-label="Utama" className="flex items-center gap-1 sm:gap-2">
               <Button asChild variant="ghost" className="hidden sm:inline-flex"><a href="#harga">Harga</a></Button>
-              <Button asChild variant="outline"><Link href="/login">Masuk</Link></Button>
-            </div>
+              <Button asChild variant="ghost" className="hidden sm:inline-flex"><Link href="/docs">Dokumentasi</Link></Button>
+              <AuthLink />
+            </nav>
           </header>
 
           <div className="relative mx-auto max-w-5xl px-6 pt-14 pb-10 text-center md:pt-24">
@@ -93,7 +109,7 @@ export default function WelcomePage() {
               Pindai QR dengan nomor Anda sendiri, ambil kunci API, kirim. Nomor dijaga dengan pemanasan bertahap, jeda seperti orang, dan skor kesiapan, supaya Anda tahu kondisinya sebelum WhatsApp yang memberi tahu.
             </motion.p>
             <motion.div initial="hidden" animate="show" custom={3} variants={rise} className="mt-9 flex flex-wrap items-center justify-center gap-3">
-              <Button asChild size="lg" className="h-12 px-7 text-base font-semibold"><Link href="/signup">Coba gratis 14 hari <ArrowRight className="ml-1" /></Link></Button>
+              <Button asChild size="lg" className="h-12 px-7 text-base font-semibold"><Link href="/signup" onClick={() => track("cta_signup")}>Coba gratis 14 hari <ArrowRight className="ml-1" /></Link></Button>
               <Button asChild variant="outline" size="lg" className="h-12 px-7 text-base"><a href="#tur">Lihat cara kerjanya</a></Button>
             </motion.div>
             <motion.p initial="hidden" animate="show" custom={4} variants={rise} className="mt-4 text-xs text-muted-foreground">Tanpa kartu kredit. Tidak ada jaminan bebas blokir, dan kami tidak menjanjikannya.</motion.p>
@@ -103,66 +119,76 @@ export default function WelcomePage() {
             <HeroDemo />
           </motion.div>
           <UseCaseMarquee />
+          <div aria-hidden className="h-24" />
         </section>
 
         {/* Tur produk: cream = tenang, manusiawi */}
-        <Section tone="cream" id="tur" backdrop={<PhotoBackdrop src="/media/photos/florist.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[560px]" />}>
+        <Section tone="cream" id="tur" label="Tampilan produk" backdrop={<PhotoBackdrop src="/media/photos/florist.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[560px]" />}>
           <Heading eyebrow="Tampilan asli" title="Dari daftar sampai siap kirim, sekitar 5 menit" text="Bukan mockup. Anda dituntun satu langkah demi satu langkah, tanpa perlu membaca dokumentasi dulu." />
           <div className="mt-12"><ProductTour /></div>
         </Section>
 
-        {/* Perlindungan: mint = rasa aman */}
-        <Section tone="mint" id="features" backdrop={<PhotoBackdrop src="/media/photos/support.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
+        {/* Perlindungan: mint = rasa aman. Kartu masuk zig-zag dari kiri, bawah, kanan. */}
+        <Section tone="mint" id="features" label="Fitur" backdrop={<PhotoBackdrop src="/media/photos/support.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
           <Heading eyebrow="Keamanan nomor" title="Dibuat untuk keandalan, bukan sekadar kecepatan" />
-          <div className="mt-12 grid gap-5 md:grid-cols-3">
+          <Stagger className="mt-12 grid gap-5 md:grid-cols-3" step={0.09}>
             {FEATURES.map((f, i) => (
-              <motion.div key={f.title} initial="hidden" whileInView="show" viewport={{ once: true, margin: "-60px" }} custom={i} variants={rise}
-                className={cn("group rounded-2xl border bg-card p-7 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-elevated", f.span)}>
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-secondary"><f.icon className="h-5 w-5 text-primary" /></div>
+              <StaggerItem key={f.title} from={ZIGZAG[i % 3]} className={cn("group rounded-2xl border bg-card p-7 shadow-card transition-all duration-300 hover:-translate-y-1 hover:shadow-elevated", f.span)}>
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-secondary transition-transform duration-300 group-hover:scale-110"><f.icon className="h-5 w-5 text-primary" /></div>
                 <h3 className="font-display mt-6 text-2xl">{f.title}</h3>
                 <p className="mt-2 text-muted-foreground">{f.text}</p>
-              </motion.div>
+              </StaggerItem>
             ))}
-          </div>
+          </Stagger>
         </Section>
 
         {/* Pemanasan: sand = hangat, sabar, bertahap */}
-        <Section tone="sand" backdrop={<PhotoBackdrop src="/media/photos/seller.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[560px]" />}>
+        <Section tone="sand" label="Pemanasan nomor" backdrop={<PhotoBackdrop src="/media/photos/seller.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[560px]" />}>
           <Heading eyebrow="Pemanasan" title="Nomor baru dilatih dulu, bukan langsung dipakai penuh" text="Batas kirim naik bertahap. Balasan ke orang yang menulis lebih dulu selalu diperbolehkan sejak hari pertama." />
           <div className="mt-12"><WarmupFlow /></div>
         </Section>
 
         {/* Skor: indigo = analitis, wawasan */}
-        <Section tone="indigo" backdrop={<PhotoBackdrop src="/media/photos/analytics.jpg" side="right" blend="mix-blend-luminosity" className="!bottom-auto h-[520px]" />}>
+        <Section tone="indigo" label="Skor kesiapan" backdrop={<PhotoBackdrop src="/media/photos/analytics.jpg" side="right" blend="mix-blend-luminosity" className="!bottom-auto h-[520px]" />}>
           <Heading eyebrow="Skor kesiapan" title="Lihat kesehatan nomor, bukan menebak" text="Lima faktor dengan bobot yang jelas. Kalau datanya belum cukup, skor bilang belum yakin, bukan berpura-pura pasti." />
-          <div className="mt-12"><ReadinessRing /></div>
+          <Reveal from="pop" className="mt-12"><ReadinessRing /></Reveal>
         </Section>
 
-        {/* Cara kerja: cream lagi, sticky scrollytelling */}
-        <Section tone="cream">
+        {/* Cara kerja: cream, sticky scrollytelling */}
+        <Section tone="cream" label="Cara mulai">
           <Heading eyebrow="Mulai" title="Aktif dalam tiga langkah" />
           <div className="mt-8"><HowItWorks /></div>
         </Section>
 
         {/* Harga: sky = kepercayaan untuk keputusan uang. Angka muncul setelah operator menetapkan final. */}
         {plans.data && plans.data.length > 0 && (
-          <Section tone="sky" id="harga" backdrop={<PhotoBackdrop src="/media/photos/homeoffice.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
+          <Section tone="sky" id="harga" label="Paket dan harga" backdrop={<PhotoBackdrop src="/media/photos/homeoffice.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
             <div className="flex flex-wrap items-end justify-between gap-4">
               <Heading eyebrow="Paket" title="Harga yang jelas, tanpa kejutan" text="Percobaan gratis 14 hari saat mendaftar. Pembayaran dikonfirmasi manual oleh penyedia layanan." />
-              <CycleToggle value={cycle} onChange={setCycle} />
+              <Reveal from="left"><CycleToggle value={cycle} onChange={setCycle} /></Reveal>
             </div>
-            <div className="mt-10"><PlanCards plans={plans.data} cycle={cycle} /></div>
+            <Reveal from="pop" className="mt-10"><PlanCards plans={plans.data} cycle={cycle} /></Reveal>
           </Section>
         )}
 
-        {/* Penutup: kembali ke ink + coral */}
-        <section data-tone className="tone-ink">
-          <div className="mx-auto max-w-4xl px-6 py-28 text-center md:py-36">
-            <motion.h2 initial="hidden" whileInView="show" viewport={{ once: true }} variants={rise} className="font-display text-4xl leading-[1.1] md:text-6xl">Siap mengirim pesan pertama?</motion.h2>
-            <p className="mx-auto mt-5 max-w-xl text-lg text-muted-foreground">Buat akun, sambungkan nomor, dan mulai mengirim dalam hitungan menit.</p>
-            <Button asChild size="lg" className="mt-9 h-12 px-8 text-base font-semibold"><Link href="/signup">Buat akun gratis <ArrowRight className="ml-1" /></Link></Button>
+        {/* FAQ: jawaban jujur, juga terbaca mesin pencari dan asisten AI lewat data terstruktur */}
+        <Section tone="cream" id="faq" label="Pertanyaan umum">
+          <div className="grid gap-10 lg:grid-cols-[1fr_1.7fr] lg:gap-16">
+            <div className="lg:sticky lg:top-24 lg:self-start">
+              <Heading eyebrow="Pertanyaan umum" title="Yang biasanya ditanyakan sebelum mendaftar" text="Jawaban jujur, termasuk soal risiko. Belum ketemu? Baca dokumentasi API." />
+              <Reveal delay={0.1}><Button asChild variant="outline" className="mt-6"><Link href="/docs">Buka dokumentasi <ArrowRight className="ml-1" /></Link></Button></Reveal>
+            </div>
+            <Faq />
           </div>
+        </Section>
 
+        {/* Penutup: kembali ke ink + coral */}
+        <section data-tone aria-label="Mulai sekarang" className="tone-ink">
+          <div className="mx-auto max-w-4xl px-6 py-28 text-center md:py-36">
+            <Reveal><h2 className="font-display text-4xl leading-[1.1] md:text-6xl">Siap mengirim pesan pertama?</h2></Reveal>
+            <Reveal delay={0.1}><p className="mx-auto mt-5 max-w-xl text-lg text-muted-foreground">Buat akun, sambungkan nomor, dan mulai mengirim dalam hitungan menit.</p></Reveal>
+            <Reveal from="pop" delay={0.2}><Button asChild size="lg" className="mt-9 h-12 px-8 text-base font-semibold"><Link href="/signup" onClick={() => track("cta_signup")}>Buat akun gratis <ArrowRight className="ml-1" /></Link></Button></Reveal>
+          </div>
         </section>
         <SiteFooter />
       </main>

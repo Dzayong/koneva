@@ -6,8 +6,9 @@ import { cn } from "@/lib/utils";
 
 const CURL = `curl -X POST https://api.domain-anda.com/api/v1/message/send \\
   -H "Authorization: Bearer wgk_••••••••" \\
-  -d '{"to":"628123456789",
-       "content":"Kode OTP Anda: 482913",
+  -d '{"device_key":"WAPI-XXXXXXXX",
+       "to":"628123456789",
+       "message":"Kode OTP Anda: 482913",
        "priority":"urgent"}'`;
 
 const TICK_MS = 30;

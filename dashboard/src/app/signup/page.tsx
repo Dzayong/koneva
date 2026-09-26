@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
-import { AuthShell, TERMS_TEXT } from "@/components/auth/auth-shell";
+import { AuthShell, TermsLabel } from "@/components/auth/auth-shell";
 import { PasswordInput } from "@/components/auth/password-input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,7 +36,7 @@ export default function SignupPage() {
         ...(workspace.trim() ? { workspace_name: workspace.trim() } : {}),
         accept_terms: true,
       });
-      loginWithSession(result, "/?welcome=1");
+      loginWithSession(result, "/dashboard?welcome=1");
     } catch (err) {
       const failure = apiFailure(err);
       setError(
@@ -79,7 +79,7 @@ export default function SignupPage() {
             </div>
             <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm leading-snug">
               <input id="terms" type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--primary)]" checked={terms} onChange={(e) => setTerms(e.target.checked)} required />
-              <span>{TERMS_TEXT}</span>
+              <span><TermsLabel /></span>
             </label>
             {error && (
               <p role="alert" className="text-sm text-destructive">

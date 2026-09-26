@@ -19,10 +19,10 @@ export function WarmupFlow() {
       {STAGES.map((s, i) => (
         <motion.div
           key={s.days}
-          initial={reduce ? false : { opacity: 0, y: 16 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-60px" }}
-          transition={{ duration: 0.3, delay: i * 0.12, ease: "easeOut" }}
+          initial={reduce ? false : { opacity: 0, y: 32, scale: 0.95 }}
+          whileInView={{ opacity: 1, y: 0, scale: 1 }}
+          viewport={{ once: true, margin: "0px 0px -12% 0px" }}
+          transition={{ duration: 0.7, delay: i * 0.12, ease: [0.22, 1, 0.36, 1] }}
           className="relative rounded-2xl border bg-card p-5 shadow-card"
         >
           <div className="relative z-10 flex h-9 w-9 items-center justify-center rounded-full border bg-background">

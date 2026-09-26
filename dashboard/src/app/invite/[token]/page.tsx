@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { use, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { AuthShell, TERMS_TEXT } from "@/components/auth/auth-shell";
+import { AuthShell, TermsLabel } from "@/components/auth/auth-shell";
 import { PasswordInput } from "@/components/auth/password-input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,7 +46,7 @@ export default function InvitePage(props: { params: Promise<{ token: string }> }
         const result = await api.acceptInvitation(token);
         api.setSession(api.getSession()!, result.joined.id);
         queryClient.clear();
-        router.push("/");
+        router.push("/dashboard");
         return;
       }
       const result = await api.acceptInvitation(token, { name: name.trim(), password, accept_terms: true });
@@ -108,7 +108,7 @@ export default function InvitePage(props: { params: Promise<{ token: string }> }
                 </div>
                 <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm leading-snug">
                   <input id="terms" type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--primary)]" checked={terms} onChange={(e) => setTerms(e.target.checked)} required />
-                  <span>{TERMS_TEXT}</span>
+                  <span><TermsLabel /></span>
                 </label>
               </>
             )}

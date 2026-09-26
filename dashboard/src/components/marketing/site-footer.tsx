@@ -6,8 +6,9 @@ import { usePublicInfo } from "@/hooks/use-billing";
 import { PhotoBackdrop } from "./photo-backdrop";
 
 const COLUMNS = [
-  { title: "Produk", links: [{ label: "Tampilan asli", href: "#tur" }, { label: "Keamanan nomor", href: "#features" }, { label: "Paket dan harga", href: "#harga" }] },
-  { title: "Mulai", links: [{ label: "Coba gratis 14 hari", href: "/signup" }, { label: "Masuk", href: "/login" }] },
+  { title: "Produk", links: [{ label: "Tampilan asli", href: "/#tur" }, { label: "Keamanan nomor", href: "/#features" }, { label: "Paket dan harga", href: "/#harga" }, { label: "Pertanyaan umum", href: "/#faq" }] },
+  { title: "Mulai", links: [{ label: "Coba gratis 14 hari", href: "/signup" }, { label: "Masuk", href: "/login" }, { label: "Dokumentasi API", href: "/docs" }] },
+  { title: "Legal", links: [{ label: "Syarat dan Ketentuan", href: "/syarat" }, { label: "Kebijakan Privasi", href: "/privasi" }] },
 ];
 
 /** Formal footer: identity, navigation, contact, and the disclosure a customer should read before paying. */
@@ -17,7 +18,7 @@ export function SiteFooter() {
     <footer data-tone className="tone-ink relative overflow-hidden border-t">
       <PhotoBackdrop src="/media/photos/skyline-day.jpg" side="full" className="opacity-60" />
       <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-[#0a1224] via-[#0a1224]/80 to-[#0a1224]" />
-      <div className="relative mx-auto grid max-w-7xl gap-10 px-6 py-14 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
+      <div className="relative mx-auto grid max-w-7xl gap-10 px-6 py-14 md:grid-cols-[1.4fr_1fr_1fr_1fr_1.2fr]">
         <div>
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#2563eb] to-[#06b6d4]"><Zap className="h-4 w-4 text-white" /></div>

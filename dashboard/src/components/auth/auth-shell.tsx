@@ -16,5 +16,14 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-export const TERMS_TEXT =
-  "Saya paham layanan ini terhubung ke WhatsApp lewat jalur tidak resmi, sehingga nomor saya bisa dibatasi atau diblokir oleh WhatsApp, dan saya bertanggung jawab atas pesan yang saya kirim.";
+/** Consent line with links that open in a new tab (and do not toggle the checkbox they sit inside). */
+export function TermsLabel() {
+  const link = "font-medium text-primary underline underline-offset-2";
+  return (
+    <>
+      Saya paham layanan ini terhubung ke WhatsApp lewat jalur tidak resmi, sehingga nomor saya bisa dibatasi atau diblokir oleh WhatsApp, dan saya bertanggung jawab atas pesan yang saya kirim. Saya menyetujui{" "}
+      <a href="/syarat" target="_blank" rel="noopener noreferrer" className={link} onClick={(e) => e.stopPropagation()}>Syarat dan Ketentuan</a> serta{" "}
+      <a href="/privasi" target="_blank" rel="noopener noreferrer" className={link} onClick={(e) => e.stopPropagation()}>Kebijakan Privasi</a>.
+    </>
+  );
+}

@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
+import { useReducedMotion } from "framer-motion";
+import { Reveal } from "./reveal";
 import { cn } from "@/lib/utils";
 
 const SHOTS = [
@@ -25,28 +26,23 @@ export function ProductTour() {
   const reduce = useReducedMotion();
   return (
     <div className="space-y-6">
+      <Reveal from="pop">
       <Frame>
         {/* Muted, looping and inline so it plays without sound or a fullscreen takeover on phones. */}
         <video className="aspect-video w-full bg-muted" src="/media/alur-dashboard.webm" poster="/media/ringkasan.png"
           autoPlay={!reduce} muted loop playsInline preload="metadata" controls={Boolean(reduce)}
           aria-label="Rekaman layar: mendaftar, menambah nomor, memasang webhook" />
       </Frame>
+      </Reveal>
       <div className="grid gap-6 md:grid-cols-3">
         {SHOTS.map((s, i) => (
-          <motion.figure
-            key={s.src}
-            initial={reduce ? false : { opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.3, delay: (i % 2) * 0.1 }}
-            className={cn("space-y-3", s.className)}
-          >
+          <Reveal key={s.src} as="figure" from={i % 2 === 0 ? "left" : "right"} delay={(i % 2) * 0.08} className={cn("space-y-3", s.className)}>
             <Frame>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={s.src} alt={s.title} loading="lazy" className="w-full" />
             </Frame>
             <figcaption><p className="font-medium">{s.title}</p><p className="text-sm text-muted-foreground">{s.text}</p></figcaption>
-          </motion.figure>
+          </Reveal>
         ))}
       </div>
     </div>

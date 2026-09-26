@@ -4,6 +4,7 @@ import { z } from 'zod';
 import config from '../../shared/config';
 import pool from '../../shared/database/connection';
 import { validate } from '../middleware/validate';
+import { getSiteStats } from '../services/site-stats.service';
 import { ServiceError } from '../services/service-error';
 import { createOwnerForTenant } from '../services/account.service';
 import {
@@ -53,6 +54,9 @@ const planPatch = z.object({
   price_is_final: z.boolean().optional(), published: z.boolean().optional(),
 }).strict();
 
+router.get('/site-stats', async (request, response) => {
+  response.json({ success: true, data: await getSiteStats(Number(request.query['days'] ?? 30)) });
+});
 router.get('/plans', async (_request, response) => {
   response.json({ success: true, data: await listPlans(pool, { publishedOnly: false }) });
 });

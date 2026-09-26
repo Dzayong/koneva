@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { animate, motion, useInView, useReducedMotion } from "framer-motion";
 
 // Weights match src/shared/readiness.ts. Values are an example, not real data.
 const FACTORS = [
@@ -13,6 +14,18 @@ const FACTORS = [
 const SCORE = FACTORS.reduce((a, f) => a + f.value, 0);
 const R = 54;
 const C = 2 * Math.PI * R;
+
+function CountUp({ to, reduce }: { to: number; reduce: boolean | null }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true });
+  const [n, setN] = useState(reduce ? to : 0);
+  useEffect(() => {
+    if (!inView || reduce) return;
+    const controls = animate(0, to, { duration: 1.4, ease: "easeOut", onUpdate: (v) => setN(Math.round(v)) });
+    return () => controls.stop();
+  }, [inView, reduce, to]);
+  return <span ref={ref}>{n}</span>;
+}
 
 export function ReadinessRing() {
   const reduce = useReducedMotion();
@@ -31,7 +44,7 @@ export function ReadinessRing() {
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-5xl font-semibold tracking-tight">{SCORE}</span>
+          <span className="text-5xl font-semibold tracking-tight tabular-nums"><CountUp to={SCORE} reduce={reduce} /></span>
           <span className="text-xs text-muted-foreground">dari 100 · contoh</span>
         </div>
       </div>

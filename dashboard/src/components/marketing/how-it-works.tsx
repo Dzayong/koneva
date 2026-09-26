@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { KeyRound, Smartphone, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Reveal } from "./reveal";
 
 const STEPS = [
   { icon: KeyRound, title: "Buat akun", text: "Daftar dengan email dan langsung mendapat workspace uji coba 14 hari. Dashboard menunjukkan langkah berikutnya.", img: "/media/ringkasan.png" },
@@ -46,9 +47,11 @@ export function HowItWorks() {
       <div>
         {STEPS.map((s, i) => (
           <div key={s.title} ref={(el) => { refs.current[i] = el; }} data-index={i} className="flex min-h-[46vh] flex-col justify-center py-8 md:min-h-[62vh]">
+            <Reveal from="right">
             <span className={cn("font-display text-6xl transition-colors duration-300", active === i ? "text-primary" : "text-muted-foreground/40")}>0{i + 1}</span>
             <h3 className="font-display mt-3 flex items-center gap-2 text-3xl"><s.icon className="h-6 w-6 text-primary" />{s.title}</h3>
             <p className="mt-3 max-w-md text-lg text-muted-foreground">{s.text}</p>
+            </Reveal>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={s.img} alt={s.title} loading="lazy" className="mt-6 rounded-xl border shadow-card md:hidden" />
           </div>

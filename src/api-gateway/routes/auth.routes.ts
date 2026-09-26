@@ -7,6 +7,7 @@ import { getRedisClient } from '../../shared/redis';
 import { validate } from '../middleware/validate';
 import { login, resolveSession, revokeSession, sha256, signup } from '../services/account.service';
 import { acceptInvitation, previewInvitation } from '../services/team.service';
+import { recordSiteEvent } from '../services/site-stats.service';
 import { getSubscriptionSummary } from '../services/billing.service';
 import { recordAudit } from '../services/audit.service';
 import { ServiceError } from '../services/service-error';
@@ -50,6 +51,7 @@ router.post('/signup', limited(60 * 60_000, 10), validate({ body: signupSchema }
   if (!config.signup.enabled) throw new ServiceError(403, 'SIGNUP_DISABLED', 'Sign-up is currently closed');
   const body = request.validated!.body as z.infer<typeof signupSchema>;
   const result = await signup(body, meta(request));
+  void recordSiteEvent('signup').catch(() => undefined);
   response.status(201).json({ success: true, data: result });
 });
 

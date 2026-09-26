@@ -14,7 +14,7 @@ import { NotificationCenter } from "./notification-center";
 import { HelpButton, TrialChip } from "./header-extras";
 
 const PAGE_TITLES: Record<string, string> = {
-  "/": "Ringkasan",
+  "/dashboard": "Ringkasan",
   "/devices": "Nomor",
   "/messages": "Pesan",
   "/broadcast": "Broadcast",

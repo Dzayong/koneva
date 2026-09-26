@@ -33,7 +33,7 @@ const groups: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "WORKSPACE",
     items: [
-      { name: "Ringkasan", href: "/", icon: LayoutDashboard },
+      { name: "Ringkasan", href: "/dashboard", icon: LayoutDashboard },
       { name: "Nomor", href: "/devices", icon: Smartphone, permission: "devices:read" },
       { name: "Pesan", href: "/messages", icon: MessageSquare, permission: "messages:read" },
       { name: "Broadcast", href: "/broadcast", icon: Radio, permission: "messages:send" },
@@ -94,7 +94,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                 // Longest matching href wins, so /settings/auto-reply doesn't also light up "Pengaturan".
                 const isActive =
                   navigation
-                    .filter((n) => (n.href === "/" ? pathname === "/" : pathname.startsWith(n.href)))
+                    .filter((n) => pathname.startsWith(n.href))
                     .sort((a, b) => b.href.length - a.href.length)[0]?.href === item.href;
                 return (
                   <Link

@@ -27,13 +27,13 @@ export function useAuth() {
       api.clearSession();
       api.setApiKey(apiKey);
       queryClient.clear();
-      router.push("/");
+      router.push("/dashboard");
     },
     [router, queryClient],
   );
 
   const loginWithSession = useCallback(
-    (result: AuthResult, destination = "/") => {
+    (result: AuthResult, destination = "/dashboard") => {
       api.clearApiKey();
       api.setSession(result.token, result.workspaces[0]?.id);
       queryClient.clear();
