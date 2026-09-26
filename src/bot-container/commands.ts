@@ -34,7 +34,7 @@ export class Reschedule extends Error {
  * WhatsApp never answered looks like an empty catalog. Seen live on a real Business number (60 s, empty).
  * Give up earlier and say so instead of showing a false "no products".
  */
-export const CATALOG_DEADLINE_MS = 35_000;
+export const CATALOG_DEADLINE_MS = 20_000;
 async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   try {

@@ -89,10 +89,10 @@ router.patch('/devices/:key/business', validate({ params: deviceParams, body: bu
   response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'business.update', request.validated!.body) });
 });
 router.get('/devices/:key/catalog', validate({ params: deviceParams, query: catalogQuery }), async (request: Request, response: Response) => {
-  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'catalog.list', request.validated!.query, 45_000) });
+  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'catalog.list', request.validated!.query, 26_000) });
 });
 router.get('/devices/:key/collections', validate({ params: deviceParams }), async (request: Request, response: Response) => {
-  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'collections.list', {}, 45_000) });
+  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'collections.list', {}, 26_000) });
 });
 router.post('/devices/:key/products', validate({ params: deviceParams, body: productCreateSchema }), async (request: Request, response: Response) => {
   response.status(201).json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'product.create', request.validated!.body, 40_000) });
@@ -103,7 +103,7 @@ router.patch('/devices/:key/products/:id', validate({ params: productParams, bod
 });
 router.delete('/devices/:key/products/:id', validate({ params: productParams }), async (request: Request, response: Response) => {
   const p = request.validated!.params as z.infer<typeof productParams>;
-  response.json({ success: true, data: await runCommand(request.tenant!.id, p.key, 'product.delete', { id: p.id }, 45_000) });
+  response.json({ success: true, data: await runCommand(request.tenant!.id, p.key, 'product.delete', { id: p.id }, 26_000) });
 });
 
 export default router;

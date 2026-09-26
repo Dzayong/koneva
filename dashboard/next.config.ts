@@ -3,6 +3,8 @@ import path from "node:path";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // The default 30 s proxy limit turned slow-but-valid API calls (asking a number for its catalog) into a bare 500.
+  experimental: { proxyTimeout: 70_000 },
   async rewrites() {
     return process.env.INTERNAL_API_URL ? [
       { source: "/api/v1/:path*", destination: `${process.env.INTERNAL_API_URL}/api/v1/:path*` },
