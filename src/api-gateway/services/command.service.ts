@@ -91,6 +91,20 @@ export async function listCommands(tenantId: string, deviceKey: string, type: Co
   )).rows;
 }
 
+/**
+ * Read results (business profile, catalog) hold personal data such as the shop's email and address, so
+ * they are dropped after a day; status posts keep 30 days of history for the daily limit and the history list.
+ */
+export async function purgeOldCommands(): Promise<number> {
+  const reads = await pool.query(
+    `DELETE FROM device_commands WHERE type <> 'status.post' AND finished_at < now() - interval '1 day'`,
+  );
+  const posts = await pool.query(
+    `DELETE FROM device_commands WHERE type = 'status.post' AND finished_at < now() - interval '30 days'`,
+  );
+  return (reads.rowCount ?? 0) + (posts.rowCount ?? 0);
+}
+
 export async function cancelCommand(tenantId: string, deviceKey: string, id: string): Promise<CommandRow> {
   const row = (await pool.query<CommandRow>(
     `UPDATE device_commands SET status = 'cancelled', finished_at = now()

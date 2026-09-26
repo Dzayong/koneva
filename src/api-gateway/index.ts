@@ -22,6 +22,7 @@ import authRoutes from './routes/auth.routes';
 import keysRoutes from './routes/keys.routes';
 import auditRoutes from './routes/audit.routes';
 import teamRoutes from './routes/team.routes';
+import { purgeOldCommands } from './services/command.service';
 import businessRoutes from './routes/business.routes';
 import billingRoutes from './routes/billing.routes';
 import publicRoutes from './routes/public.routes';
@@ -110,6 +111,9 @@ const runSweep = (): void => {
     })
     .catch((error: unknown) => logger.error('Subscription sweep failed', { error: error instanceof Error ? error.message : String(error) }));
 };
+const runPurge = (): void => { void purgeOldCommands().catch((error: unknown) => logger.error('Command purge failed', { error: error instanceof Error ? error.message : String(error) })); };
+setTimeout(runPurge, 45_000).unref();
+setInterval(runPurge, 60 * 60_000).unref();
 setTimeout(runSweep, 30_000).unref();
 setInterval(runSweep, 60 * 60_000).unref();
 

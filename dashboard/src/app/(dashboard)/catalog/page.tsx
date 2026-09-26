@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { EyeOff, Loader2, Pencil, Plus, Store, Trash2 } from "lucide-react";
+import { Copy, EyeOff, ExternalLink, Loader2, Pencil, Plus, Store, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { useDevices } from "@/hooks/use-devices";
 import { useBusiness, useCatalog, useDeleteProduct, useSaveProduct, useUpdateBusiness } from "@/hooks/use-business";
 import { usePermissions } from "@/hooks/use-me";
 import { businessErrorText } from "@/lib/business-errors";
+import { copyText } from "@/lib/clipboard";
 import type { BusinessHoursDay, BusinessProfile, CatalogProduct, ProductInput } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -191,6 +192,23 @@ function ProfileForm({ deviceKey, profile, canEdit }: { deviceKey: string; profi
   );
 }
 
+/** WhatsApp's own catalog link opens the catalog inside the app; it works even though the catalog cannot be read through a linked device. */
+function CatalogLink({ phone }: { phone: string | null | undefined }) {
+  const digits = (phone ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  const link = `https://wa.me/c/${digits}`;
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">Tautan katalog WhatsApp</p>
+        <p className="truncate font-mono text-xs text-muted-foreground">{link}</p>
+      </div>
+      <Button size="sm" variant="outline" onClick={async () => { const ok = await copyText(link); if (ok) toast.success("Tautan tersalin"); else toast.error("Tidak bisa menyalin otomatis"); }}><Copy className="mr-1.5 h-3.5 w-3.5" />Salin</Button>
+      <Button size="sm" variant="outline" asChild><a href={link} target="_blank" rel="noopener noreferrer"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Buka</a></Button>
+    </div>
+  );
+}
+
 export default function CatalogPage() {
   const { can, isLoading: permsLoading } = usePermissions();
   const { data: devices, isLoading } = useDevices();
@@ -227,8 +245,9 @@ export default function CatalogPage() {
           ) : (
             <>
               <p role="note" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-                <strong>Eksperimental.</strong> Profil bisnis sudah teruji berjalan. Katalog produk bergantung pada jawaban WhatsApp untuk sesi perangkat tertaut, dan pada satu nomor uji WhatsApp tidak menjawab permintaan katalog. Bila gagal, kami tampilkan alasannya, bukan katalog kosong palsu.
+                <strong>Terbatas.</strong> Profil bisnis sudah teruji berjalan. Katalog produk saat ini tidak dijawab WhatsApp untuk perangkat tertaut (kami uji 8 variasi permintaan di nomor bisnis yang katalognya ada, semuanya tanpa jawaban; laporan pengembang lain juga menyebut hal serupa). Sampai itu berubah, kelola produk di aplikasi WhatsApp Business dan gunakan tautan katalog di bawah untuk dibagikan.
               </p>
+              <CatalogLink phone={(devices ?? []).find((d) => d.device_key === deviceKey)?.phone_number ?? business.data.profile?.wid?.split("@")[0]} />
               <div role="tablist" aria-label="Bagian" className="inline-flex rounded-lg border bg-muted p-1">
                 {([["produk", "Produk"], ["profil", "Profil bisnis"]] as const).map(([id, label]) => (
                   <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={cn("rounded-md px-4 py-1.5 text-sm font-medium", tab === id ? "bg-background shadow-sm" : "text-muted-foreground")}>{label}</button>

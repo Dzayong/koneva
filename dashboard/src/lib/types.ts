@@ -465,6 +465,7 @@ export interface DeviceCommand {
   error: string | null; run_at: string; created_at: string; finished_at: string | null;
 }
 export interface BusinessProfile {
+  wid?: string | null;
   description?: string | null; address?: string | null; email?: string | null; website?: string[] | null;
 }
 export interface BusinessInfo { is_business: boolean; profile: BusinessProfile | null }

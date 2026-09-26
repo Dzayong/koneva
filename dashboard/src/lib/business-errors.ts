@@ -7,7 +7,7 @@ const TEXT: Record<string, string> = {
   DEVICE_BANNED: "Nomor ini diblokir WhatsApp, jadi tidak bisa dipakai.",
   STATUS_LIMIT: "Batas status hari ini sudah tercapai (maksimal 3 per nomor per hari). Coba lagi besok.",
   NO_AUDIENCE: "Belum ada kontak yang bisa melihat status ini. Saling berkirim pesan dulu, atau isi daftar nomor.",
-  CATALOG_TIMEOUT: "WhatsApp tidak menjawab permintaan katalog dalam waktu wajar. Ini bisa terjadi bila akun belum punya katalog aktif. Coba lagi nanti.",
+  CATALOG_TIMEOUT: "WhatsApp tidak menjawab permintaan katalog dari perangkat tertaut. Katalog Anda tetap aman dan bisa dikelola di aplikasi WhatsApp Business di HP. Ini keterbatasan dari WhatsApp, bukan kesalahan data Anda.",
   INTERRUPTED: "Terhenti karena nomor dimulai ulang. Buat ulang bila perlu.",
 };
 
