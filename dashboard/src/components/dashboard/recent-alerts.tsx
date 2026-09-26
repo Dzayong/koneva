@@ -31,7 +31,7 @@ export function RecentAlerts({ devices }: { devices: Device[] }) {
                 <li key={device.id}>
                   <Link
                     href={`/devices/${device.device_key}`}
-                    className="flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-accent"
+                    className="flex items-start gap-3 rounded-xl border p-3 transition-colors hover:bg-accent"
                   >
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
                     <div className="min-w-0">

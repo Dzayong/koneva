@@ -2,7 +2,7 @@ import { SidebarNav } from "./sidebar-nav";
 
 export function Sidebar() {
   return (
-    <aside className="hidden w-64 shrink-0 border-r bg-card md:flex">
+    <aside className="sticky top-0 hidden h-dvh shrink-0 border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex md:w-64">
       <SidebarNav />
     </aside>
   );

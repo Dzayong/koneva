@@ -19,9 +19,9 @@ export function usePauseDevice() {
     onSuccess: (device: Device) => {
       queryClient.invalidateQueries({ queryKey: ["devices"] });
       queryClient.invalidateQueries({ queryKey: ["devices", device.device_key] });
-      toast.success("Device paused");
+      toast.success("Nomor dijeda");
     },
-    onError: () => toast.error("Failed to pause device"),
+    onError: () => toast.error("Gagal menjeda nomor"),
   });
 }
 
@@ -32,9 +32,9 @@ export function useResumeDevice() {
     onSuccess: (device: Device) => {
       queryClient.invalidateQueries({ queryKey: ["devices"] });
       queryClient.invalidateQueries({ queryKey: ["devices", device.device_key] });
-      toast.success("Device resumed");
+      toast.success("Nomor dilanjutkan");
     },
-    onError: () => toast.error("Failed to resume device"),
+    onError: () => toast.error("Gagal melanjutkan nomor"),
   });
 }
 
@@ -44,9 +44,9 @@ export function useCreateDevice() {
     mutationFn: (data: CreateDeviceRequest) => api.createDevice(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["devices"] });
-      toast.success("Device created", { description: "Scan the QR code to connect it." });
+      toast.success("Nomor dibuat", { description: "Pindai kode QR untuk menyambungkannya." });
     },
-    onError: () => toast.error("Failed to create device"),
+    // Error is rendered inline in the form (with the server's message).
   });
 }
 
@@ -54,10 +54,12 @@ export function useDeleteDevice() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (deviceKey: string) => api.deleteDevice(deviceKey),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["devices"] });
-      toast.success("Device deleted");
+    onSuccess: (_, deviceKey) => {
+      // Drop the detail cache first: invalidating the ["devices"] prefix would refetch it and 404.
+      queryClient.removeQueries({ queryKey: ["devices", deviceKey] });
+      queryClient.invalidateQueries({ queryKey: ["devices"], exact: true });
+      toast.success("Nomor dihapus");
     },
-    onError: () => toast.error("Failed to delete device"),
+    onError: () => toast.error("Gagal menghapus nomor"),
   });
 }

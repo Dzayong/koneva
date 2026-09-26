@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useReducedMotion } from "framer-motion";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { format, isAfter, isSameDay, subDays } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { useMessages } from "@/hooks/use-messages";
 const DAYS = 7;
 
 export function MessagesChart() {
+  const reduceMotion = useReducedMotion();
   // api-gateway has no date-range filter yet, so this samples the latest
   // page of messages and buckets it client-side — accurate for the last
   // `limit` messages, not a true 7-day aggregate for high-volume tenants.
@@ -47,20 +49,14 @@ export function MessagesChart() {
         ) : (
           <ResponsiveContainer width="100%" height={256}>
             <AreaChart data={chartData}>
-              <defs>
-                <linearGradient id="messageVolume" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+              <CartesianGrid strokeDasharray="2 4" className="stroke-border" />
               <XAxis dataKey="date" fontSize={12} tickLine={false} axisLine={false} />
               <YAxis fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: "var(--popover)",
                   border: "1px solid var(--border)",
-                  borderRadius: "var(--radius)",
+                  borderRadius: "0.75rem",
                   color: "var(--popover-foreground)",
                 }}
               />
@@ -68,8 +64,10 @@ export function MessagesChart() {
                 type="monotone"
                 dataKey="count"
                 stroke="var(--primary)"
-                fill="url(#messageVolume)"
-                strokeWidth={2}
+                fill="var(--primary)"
+                fillOpacity={0.12}
+                strokeWidth={1.5}
+                isAnimationActive={!reduceMotion}
               />
             </AreaChart>
           </ResponsiveContainer>

@@ -11,19 +11,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { MessageStatusBadge } from "@/components/messages/message-status-badge";
+import { MessageDetail, MessageRow, messageNumber } from "@/components/messages/message-item";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { useContactNames } from "@/hooks/use-contacts";
 import { useDevices } from "@/hooks/use-devices";
 import { useMessages } from "@/hooks/use-messages";
-import { formatDate, formatPhoneNumber, truncate } from "@/lib/utils";
 import type { MessageStatus } from "@/lib/types";
 
 const PAGE_SIZE = 20;
@@ -31,10 +24,13 @@ const ALL = "all";
 
 export default function MessagesPage() {
   const { data: devices } = useDevices();
+  const contactNames = useContactNames();
   const [deviceKey, setDeviceKey] = useState<string>(ALL);
   const [status, setStatus] = useState<string>(ALL);
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const { data, isLoading, isPlaceholderData } = useMessages({
     device_key: deviceKey === ALL ? undefined : deviceKey,
@@ -48,8 +44,14 @@ export default function MessagesPage() {
   const filtered = useMemo(() => {
     if (!search.trim()) return data?.data ?? [];
     const needle = search.replace(/\D/g, "");
-    return (data?.data ?? []).filter((m) => m.to_number.includes(needle));
+    return (data?.data ?? []).filter((m) => {
+      const number = m.direction === "inbound" ? m.from_number : m.to_number;
+      return number?.includes(needle) ?? false;
+    });
   }, [data, search]);
+
+  // Default to the first message on wide screens so the detail pane is never empty.
+  const selected = filtered.find((m) => m.id === selectedId) ?? filtered[0] ?? null;
 
   const total = data?.pagination.total ?? 0;
   const page = Math.floor(offset / PAGE_SIZE) + 1;
@@ -60,7 +62,7 @@ export default function MessagesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Messages</h2>
+        <h2 className="text-heading">Messages</h2>
         <p className="text-muted-foreground">History and delivery status across all devices</p>
       </div>
 
@@ -105,7 +107,7 @@ export default function MessagesPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL}>All statuses</SelectItem>
-            {(["queued", "sending", "sent", "delivered", "read", "failed", "blocked"] as const).map(
+            {(["queued", "sending", "sent", "delivered", "read", "failed", "blocked", "received"] as const).map(
               (s) => (
                 <SelectItem key={s} value={s}>
                   {s}
@@ -116,53 +118,60 @@ export default function MessagesPage() {
         </Select>
       </div>
 
-      <div className="rounded-lg border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>To</TableHead>
-              <TableHead>Content</TableHead>
-              <TableHead>Device</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Timestamp</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              Array.from({ length: 5 }).map((_, i) => (
-                <TableRow key={i}>
-                  <TableCell colSpan={5}>
-                    <Skeleton className="h-8 w-full" />
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : filtered.length > 0 ? (
-              filtered.map((message) => (
-                <TableRow key={message.id}>
-                  <TableCell>{formatPhoneNumber(message.to_number)}</TableCell>
-                  <TableCell className="max-w-xs">{truncate(message.content, 60)}</TableCell>
-                  <TableCell className="text-muted-foreground">{message.device_key}</TableCell>
-                  <TableCell>
-                    <MessageStatusBadge status={message.status} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate(message.created_at)}
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={5} className="h-40 text-center">
-                  <div className="flex flex-col items-center gap-2">
-                    <MessageSquare className="h-8 w-8 text-muted-foreground" />
-                    <p className="text-muted-foreground">No messages found</p>
-                  </div>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+      <div className="grid overflow-hidden rounded-2xl border bg-card shadow-card lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div className="max-h-[70vh] overflow-y-auto lg:border-r">
+          {isLoading ? (
+            <div className="space-y-px">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-20 w-full rounded-none" />
+              ))}
+            </div>
+          ) : filtered.length > 0 ? (
+            <ul>
+              {filtered.map((message) => (
+                <MessageRow
+                  key={message.id}
+                  message={message}
+                  selected={selected?.id === message.id}
+                  contactName={contactNames.get(messageNumber(message).replace(/\D/g, ""))}
+                  onSelect={() => {
+                    setSelectedId(message.id);
+                    if (window.innerWidth < 1024) setSheetOpen(true);
+                  }}
+                />
+              ))}
+            </ul>
+          ) : (
+            <div className="flex flex-col items-center gap-2 py-16">
+              <MessageSquare className="h-8 w-8 text-muted-foreground" />
+              <p className="text-muted-foreground">No messages found</p>
+            </div>
+          )}
+        </div>
+
+        <div className="hidden p-6 lg:block">
+          {selected ? (
+            <MessageDetail
+              message={selected}
+              contactName={contactNames.get(messageNumber(selected).replace(/\D/g, ""))}
+            />
+          ) : (
+            <p className="py-16 text-center text-sm text-muted-foreground">Select a message to read it.</p>
+          )}
+        </div>
       </div>
+
+      <Sheet open={sheetOpen && !!selected} onOpenChange={setSheetOpen}>
+        <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto p-6 lg:hidden">
+          <SheetTitle className="sr-only">Message</SheetTitle>
+          {selected && (
+            <MessageDetail
+              message={selected}
+              contactName={contactNames.get(messageNumber(selected).replace(/\D/g, ""))}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
 
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <p>

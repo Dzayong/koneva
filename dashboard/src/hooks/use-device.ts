@@ -1,3 +1,4 @@
+import { isAxiosError } from "axios";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { DEVICE_REFETCH_INTERVAL_MS, QR_REFETCH_INTERVAL_MS } from "@/lib/constants";
@@ -14,8 +15,18 @@ export function useDevice(deviceKey: string) {
 export function useDeviceQR(deviceKey: string, enabled: boolean) {
   return useQuery({
     queryKey: ["devices", deviceKey, "qr"],
-    queryFn: () => api.getDeviceQR(deviceKey),
+    // 409 QR_NOT_AVAILABLE is the normal "not generated yet / already connected"
+    // answer, not a failure: resolve to null and keep polling.
+    queryFn: async () => {
+      try {
+        return await api.getDeviceQR(deviceKey);
+      } catch (error) {
+        if (isAxiosError(error) && error.response?.status === 409) return null;
+        throw error;
+      }
+    },
     refetchInterval: enabled ? QR_REFETCH_INTERVAL_MS : false,
+    retry: false,
     enabled,
   });
 }

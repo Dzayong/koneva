@@ -1,7 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
+import { useReducedMotion } from "framer-motion";
+import { CheckCheck, MessageSquare, Smartphone, Timer } from "lucide-react";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -13,8 +17,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { StatGrid, StatsCard } from "@/components/dashboard/stats-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAnalyticsDaily, useAnalyticsOverview } from "@/hooks/use-analytics";
 import { useMessages } from "@/hooks/use-messages";
 import { useDevices } from "@/hooks/use-devices";
 import { getHealthConfig, getMessageStatusConfig } from "@/lib/utils";
@@ -28,11 +34,21 @@ const STATUS_COLORS: Record<MessageStatus, string> = {
   read: "#2563eb",
   failed: "#dc2626",
   blocked: "#b91c1c",
+  received: "#0891b2",
 };
 
+function formatSeconds(seconds: number): string {
+  if (seconds <= 0) return "—";
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  return `${(seconds / 60).toFixed(1)}m`;
+}
+
 export default function AnalyticsPage() {
-  // Sampled from the latest page, same honest caveat as the main dashboard
-  // chart — api-gateway has no aggregate/date-range analytics endpoint yet.
+  const reduceMotion = useReducedMotion();
+  // Overview + daily series are true server-side aggregates; the status pie and
+  // per-device bars below are still sampled from the latest 100 messages.
+  const { data: overview, isLoading: overviewLoading } = useAnalyticsOverview();
+  const { data: daily, isLoading: dailyLoading } = useAnalyticsDaily(14);
   const { data: messages, isLoading } = useMessages({ limit: 100, offset: 0 });
   const { data: devices, isLoading: devicesLoading } = useDevices();
 
@@ -51,6 +67,7 @@ export default function AnalyticsPage() {
   const deliveryRateByDevice = useMemo(() => {
     const byDevice = new Map<string, { total: number; delivered: number }>();
     for (const m of messages?.data ?? []) {
+      if (m.direction === "inbound") continue;
       const entry = byDevice.get(m.device_key) ?? { total: 0, delivered: 0 };
       entry.total += 1;
       if (["sent", "delivered", "read"].includes(m.status)) entry.delivered += 1;
@@ -65,12 +82,74 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Analytics</h2>
+        <h2 className="text-heading">Analytics</h2>
         <p className="text-muted-foreground">
-          Sampled from the latest 100 messages — not a true historical aggregate (no
-          date-range endpoint exists yet).
+          Totals and the 14-day trend cover all messages; the breakdowns below sample the latest 100.
         </p>
       </div>
+
+      <StatGrid>
+        <StatsCard
+          index={0}
+          title="Total Messages"
+          value={(overview?.total_messages ?? 0).toLocaleString()}
+          icon={MessageSquare}
+          description="Inbound + outbound"
+          isLoading={overviewLoading}
+        />
+        <StatsCard
+          index={1}
+          title="Delivery Rate"
+          value={`${Number(overview?.delivery_rate ?? 0).toFixed(1)}%`}
+          icon={CheckCheck}
+          description="Outbound delivered or read"
+          isLoading={overviewLoading}
+        />
+        <StatsCard
+          index={2}
+          title="Avg Response"
+          value={formatSeconds(Number(overview?.avg_response_time ?? 0))}
+          icon={Timer}
+          description="Time to reply to inbound"
+          isLoading={overviewLoading}
+        />
+        <StatsCard
+          index={3}
+          title="Active Devices"
+          value={overview?.active_devices ?? 0}
+          icon={Smartphone}
+          description={`of ${devices?.length ?? 0} total`}
+          isLoading={overviewLoading}
+        />
+      </StatGrid>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Messages, last 14 days</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {dailyLoading ? (
+            <Skeleton className="h-64 w-full" />
+          ) : (
+            <ResponsiveContainer width="100%" height={256}>
+              <AreaChart data={daily ?? []}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                <XAxis
+                  dataKey="date"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(d: string) => d.slice(5, 10)}
+                />
+                <YAxis fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip />
+                <Area type="monotone" dataKey="outbound" name="Outbound" stackId="1" stroke="var(--chart-1)" strokeWidth={1.5} fill="var(--chart-1)" fillOpacity={0.08} isAnimationActive={!reduceMotion} animationDuration={300} />
+                <Area type="monotone" dataKey="inbound" name="Inbound" stackId="1" stroke="var(--chart-2)" strokeWidth={1.5} fill="var(--chart-2)" fillOpacity={0.08} isAnimationActive={!reduceMotion} animationDuration={300} />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -92,6 +171,8 @@ export default function AnalyticsPage() {
                     cx="50%"
                     cy="50%"
                     outerRadius={90}
+                    isAnimationActive={!reduceMotion}
+                    animationDuration={300}
                     // recharts' PieLabelRenderProps doesn't carry the typed
                     // data payload through — this is display-only formatting.
                     label={(props: unknown) => {
@@ -132,7 +213,7 @@ export default function AnalyticsPage() {
                     unit="%"
                   />
                   <Tooltip formatter={(v: unknown) => [`${String(v)}%`, "Delivery rate"]} />
-                  <Bar dataKey="rate" fill="var(--primary)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="rate" fill="var(--chart-1)" radius={[2, 2, 0, 0]} isAnimationActive={!reduceMotion} animationDuration={300} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -154,9 +235,9 @@ export default function AnalyticsPage() {
               {devices.map((d) => {
                 const config = getHealthConfig(d.health_score);
                 return (
-                  <div key={d.id} className="rounded-lg border p-3 text-center">
+                  <div key={d.id} className="rounded-2xl border p-3 text-center">
                     <p className="truncate text-sm font-medium">{d.label || d.device_key}</p>
-                    <p className={`text-2xl font-bold ${config.color}`}>{d.health_score}</p>
+                    <p className={`text-2xl font-semibold tabular-nums ${config.color}`}>{d.health_score}</p>
                     <p className="text-xs text-muted-foreground">{config.label}</p>
                   </div>
                 );

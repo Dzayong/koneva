@@ -1,22 +1,80 @@
-"use client";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isAxiosError } from "axios";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
+import type { ContactListParams, CreateContactRequest } from "@/lib/types";
 
-import { useCallback, useState } from "react";
-import { addContacts, type Contact, getContacts, removeContact } from "@/lib/contacts";
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (isAxiosError(error)) {
+    const code = error.response?.data?.error?.code;
+    if (code === "VALIDATION_ERROR") return "Check the phone number format (e.g. +6281234567890).";
+    return error.response?.data?.error?.message ?? fallback;
+  }
+  return fallback;
+}
 
-export function useContacts() {
-  // Lazy initializer: getContacts() already returns [] during SSR (no
-  // `window`) and the real localStorage contents on client mount — no
-  // effect needed, and no hydration mismatch since this list has no
-  // meaningful server-rendered value to mismatch against.
-  const [contacts, setContacts] = useState<Contact[]>(() => getContacts());
+export function useContacts(params: ContactListParams = {}) {
+  return useQuery({
+    queryKey: ["contacts", params],
+    queryFn: () => api.getContacts(params),
+    placeholderData: keepPreviousData,
+  });
+}
 
-  const importContacts = useCallback((entries: Array<{ name: string; phone: string }>) => {
-    setContacts(addContacts(entries));
-  }, []);
+/** Up to 100 contacts as simple {id,name,phone} — the recipient picker for Broadcast. */
+export function useRecipientContacts() {
+  const { data } = useContacts({ limit: 100, offset: 0 });
+  const contacts = (data?.data ?? []).map((c) => ({
+    id: c.id,
+    name: c.name ?? "",
+    phone: c.phone_number,
+  }));
+  return { contacts, total: data?.pagination.total ?? 0 };
+}
 
-  const remove = useCallback((id: string) => {
-    setContacts(removeContact(id));
-  }, []);
+export function useCreateContact() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateContactRequest) => api.createContact(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      toast.success("Kontak ditambahkan");
+    },
+  });
+}
 
-  return { contacts, importContacts, remove };
+export function useDeleteContact() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteContact(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      toast.success("Kontak dihapus");
+    },
+  });
+}
+
+export function useImportContacts() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (csv: string) => api.importContacts(csv),
+    onSuccess: ({ imported }) => {
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      toast.success(`${imported} kontak diimpor`);
+    },
+    onError: (error) =>
+      toast.error("Impor gagal", {
+        description: apiErrorMessage(error, 'CSV needs a "phone_number" (or "phone") header column.'),
+      }),
+  });
+}
+
+/** phone digits → contact name, for labelling message rows (first 100 contacts). */
+export function useContactNames(): Map<string, string> {
+  const { data } = useContacts({ limit: 100, offset: 0 });
+  const map = new Map<string, string>();
+  for (const c of data?.data ?? []) {
+    if (c.name) map.set(c.phone_number.replace(/\D/g, ""), c.name);
+  }
+  return map;
 }

@@ -2,42 +2,53 @@
 
 import { use, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Pause, Play, QrCode, RotateCw } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowLeft, Pause, Play, QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DeviceBehavior } from "@/components/devices/device-behavior";
+import { DeviceEvents } from "@/components/devices/device-events";
 import { DeviceStatusBadge } from "@/components/devices/device-status-badge";
 import { HealthBar } from "@/components/devices/health-bar";
+import { HealthDetail } from "@/components/devices/health-detail";
 import { QRCodeDialog } from "@/components/devices/qr-code-dialog";
-import { MessageStatusBadge } from "@/components/messages/message-status-badge";
+import { MessageDetail, MessageRow, messageNumber } from "@/components/messages/message-item";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useContactNames } from "@/hooks/use-contacts";
 import { useDevice } from "@/hooks/use-device";
 import { usePauseDevice, useResumeDevice } from "@/hooks/use-devices";
+import { usePermissions } from "@/hooks/use-me";
 import { useMessages } from "@/hooks/use-messages";
-import { formatDate, formatPhoneNumber, truncate } from "@/lib/utils";
+import { useUrlFlag } from "@/hooks/use-url-flag";
+import { formatDate, formatPhoneNumber } from "@/lib/utils";
 
 export default function DeviceDetailPage(props: {
   params: Promise<{ deviceKey: string }>;
 }) {
   const { deviceKey } = use(props.params);
+  const { can } = usePermissions();
   const { data: device, isLoading } = useDevice(deviceKey);
   const { data: messages, isLoading: messagesLoading } = useMessages({
     device_key: deviceKey,
     limit: 20,
     offset: 0,
   });
+  const contactNames = useContactNames();
   const pauseDevice = usePauseDevice();
   const resumeDevice = useResumeDevice();
-  const [qrOpen, setQrOpen] = useState(false);
+  const [manualQrOpen, setManualQrOpen] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const openMessage = messages?.data.find((m) => m.id === openId) ?? null;
+
+  // A freshly created number lands here with ?connect=1: show the QR without another click.
+  const connectRequested = useUrlFlag("connect");
+  const [connectDismissed, setConnectDismissed] = useState(false);
+  const canWriteDevice = can("devices:write");
+  const qrOpen = manualQrOpen || (connectRequested && !connectDismissed && canWriteDevice && Boolean(device));
+  const setQrOpen = (open: boolean) => {
+    setManualQrOpen(open);
+    if (!open) setConnectDismissed(true);
+  };
 
   const stats = (messages?.data ?? []).reduce(
     (acc, m) => {
@@ -50,185 +61,128 @@ export default function DeviceDetailPage(props: {
     { sent: 0, delivered: 0, read: 0, failed: 0 },
   );
 
+  const canWrite = can("devices:write");
+  const actions: Array<{ label: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean; show: boolean }> = [
+    { label: "Pindai QR", icon: <QrCode className="h-4 w-4" />, onClick: () => setQrOpen(true), show: canWrite && device?.status === "pending_qr" },
+    { label: "Jeda", icon: <Pause className="h-4 w-4" />, onClick: () => pauseDevice.mutate(deviceKey), disabled: pauseDevice.isPending, show: canWrite && device?.status === "online" },
+    { label: "Lanjutkan", icon: <Play className="h-4 w-4" />, onClick: () => resumeDevice.mutate(deviceKey), disabled: resumeDevice.isPending, show: canWrite && device?.status === "paused" },
+  ];
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" asChild>
-          <Link href="/devices">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">
-            {isLoading ? <Skeleton className="h-7 w-40" /> : device?.label || deviceKey}
-          </h2>
-          <p className="text-sm text-muted-foreground">{deviceKey}</p>
-        </div>
-      </div>
+      <Button variant="ghost" size="sm" asChild className="-ml-2 text-muted-foreground">
+        <Link href="/devices">
+          <ArrowLeft className="mr-1 h-4 w-4" />
+          Nomor
+        </Link>
+      </Button>
 
       {isLoading || !device ? (
-        <Skeleton className="h-48 w-full" />
+        <Skeleton className="h-24 w-full" />
       ) : (
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card className="md:col-span-2">
-            <CardHeader>
-              <CardTitle>Device Info</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-muted-foreground">Phone Number</p>
-                <p className="font-medium">
-                  {device.phone_number ? formatPhoneNumber(device.phone_number) : "Not set"}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Status</p>
-                <DeviceStatusBadge status={device.status} />
-              </div>
-              <div>
-                <p className="text-muted-foreground">Health Score</p>
-                <HealthBar score={device.health_score} />
-              </div>
-              <div>
-                <p className="text-muted-foreground">Last Connected</p>
-                <p className="font-medium">
-                  {device.last_connected ? formatDate(device.last_connected) : "Never"}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Actions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {device.status === "pending_qr" && (
-                <Button className="w-full" variant="outline" onClick={() => setQrOpen(true)}>
-                  <QrCode className="mr-2 h-4 w-4" />
-                  Show QR Code
-                </Button>
-              )}
-              {device.status === "online" ? (
-                <Button
-                  className="w-full"
-                  variant="outline"
-                  onClick={() => pauseDevice.mutate(deviceKey)}
-                  disabled={pauseDevice.isPending}
-                >
-                  <Pause className="mr-2 h-4 w-4" />
-                  Pause
-                </Button>
-              ) : device.status === "paused" ? (
-                <Button
-                  className="w-full"
-                  variant="outline"
-                  onClick={() => resumeDevice.mutate(deviceKey)}
-                  disabled={resumeDevice.isPending}
-                >
-                  <Play className="mr-2 h-4 w-4" />
-                  Resume
-                </Button>
-              ) : null}
-              <Button
-                className="w-full"
-                variant="outline"
-                onClick={() =>
-                  toast.info("Not available yet", {
-                    description: "There's no restart endpoint on the backend yet.",
-                  })
-                }
-              >
-                <RotateCw className="mr-2 h-4 w-4" />
-                Restart
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+        <header className="flex flex-wrap items-start justify-between gap-4 border-b pb-6">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-heading truncate">{device.label || deviceKey}</h2>
+              <DeviceStatusBadge status={device.status} />
+            </div>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              <span className="font-mono text-xs">{deviceKey}</span>
+              {" · "}
+              {device.phone_number ? formatPhoneNumber(device.phone_number) : "Nomor belum diisi"}
+              {" · "}
+              {device.last_connected ? `Terakhir tersambung ${formatDate(device.last_connected)}` : "Belum pernah tersambung"}
+            </p>
+          </div>
+          <div className="flex items-center gap-1">
+            {actions.filter((a) => a.show).map((a) => (
+              <Tooltip key={a.label}>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="icon" aria-label={a.label} onClick={a.onClick} disabled={a.disabled}>
+                    {a.icon}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{a.label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+        </header>
       )}
 
-      <div>
-        <h3 className="mb-4 text-lg font-semibold">Message Stats</h3>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <StatBox label="Sent" value={stats.sent} loading={messagesLoading} />
-          <StatBox label="Delivered" value={stats.delivered} loading={messagesLoading} />
-          <StatBox label="Read" value={stats.read} loading={messagesLoading} />
-          <StatBox label="Failed" value={stats.failed} loading={messagesLoading} />
-        </div>
-      </div>
+      {/* Inline stats: label over figure, no separate cards */}
+      <dl className="flex flex-wrap gap-x-10 gap-y-4">
+        {[
+          ["Kesiapan", device ? <HealthBar key="h" score={device.health_score} /> : "—"],
+          ["Terkirim", stats.sent],
+          ["Sampai", stats.delivered],
+          ["Dibaca", stats.read],
+          ["Gagal", stats.failed],
+        ].map(([label, value]) => (
+          <div key={String(label)}>
+            <dt className="text-label">{label}</dt>
+            <dd className="mt-1 text-2xl font-medium tabular-nums">
+              {messagesLoading && label !== "Kesiapan" ? <Skeleton className="h-8 w-8" /> : value}
+            </dd>
+          </div>
+        ))}
+      </dl>
 
-      <Separator />
+      <Tabs defaultValue="ringkasan">
+        <TabsList>
+          <TabsTrigger value="ringkasan">Ringkasan</TabsTrigger>
+          <TabsTrigger value="perilaku">Perilaku pengiriman</TabsTrigger>
+          <TabsTrigger value="riwayat">Riwayat status</TabsTrigger>
+        </TabsList>
 
-      <div>
-        <h3 className="mb-4 text-lg font-semibold">Recent Messages</h3>
-        <div className="rounded-lg border bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>To</TableHead>
-                <TableHead>Content</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Timestamp</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {messagesLoading ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={4}>
-                      <Skeleton className="h-8 w-full" />
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : messages && messages.data.length > 0 ? (
-                messages.data.map((message) => (
-                  <TableRow key={message.id}>
-                    <TableCell>{formatPhoneNumber(message.to_number)}</TableCell>
-                    <TableCell className="max-w-xs">{truncate(message.content, 60)}</TableCell>
-                    <TableCell>
-                      <MessageStatusBadge status={message.status} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(message.created_at)}
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
-                    No messages yet
-                  </TableCell>
-                </TableRow>
+        <TabsContent value="ringkasan" className="mt-6">
+          <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+            <section>
+              <h3 className="text-heading mb-3 text-lg">Pesan terbaru</h3>
+              <div className="overflow-hidden rounded-2xl border bg-card shadow-card">
+                {messagesLoading ? (
+                  <Skeleton className="h-32 w-full rounded-none" />
+                ) : messages && messages.data.length > 0 ? (
+                  <ul>
+                    {messages.data.map((message) => (
+                      <MessageRow
+                        key={message.id}
+                        message={message}
+                        contactName={contactNames.get(messageNumber(message).replace(/\D/g, ""))}
+                        selected={openId === message.id}
+                        onSelect={() => setOpenId(openId === message.id ? null : message.id)}
+                      />
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="py-10 text-center text-sm text-muted-foreground">Belum ada pesan</p>
+                )}
+              </div>
+              {openMessage && (
+                <div className="mt-4 rounded-2xl border bg-card p-6 shadow-card">
+                  <MessageDetail
+                    message={openMessage}
+                    contactName={contactNames.get(messageNumber(openMessage).replace(/\D/g, ""))}
+                  />
+                </div>
               )}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
+            </section>
+
+            <aside className="rounded-2xl border bg-card p-5 shadow-card lg:sticky lg:top-6 lg:self-start">
+              <HealthDetail deviceKey={deviceKey} />
+            </aside>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="perilaku" className="mt-6">
+          <DeviceBehavior deviceKey={deviceKey} />
+        </TabsContent>
+
+        <TabsContent value="riwayat" className="mt-6">
+          <DeviceEvents deviceKey={deviceKey} />
+        </TabsContent>
+      </Tabs>
 
       <QRCodeDialog deviceKey={deviceKey} open={qrOpen} onOpenChange={setQrOpen} />
     </div>
-  );
-}
-
-function StatBox({
-  label,
-  value,
-  loading,
-}: {
-  label: string;
-  value: number;
-  loading?: boolean;
-}) {
-  return (
-    <Card>
-      <CardContent className="pt-6">
-        {loading ? (
-          <Skeleton className="h-8 w-12" />
-        ) : (
-          <p className="text-2xl font-bold">{value}</p>
-        )}
-        <p className="text-sm text-muted-foreground">{label}</p>
-      </CardContent>
-    </Card>
   );
 }

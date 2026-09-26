@@ -7,19 +7,29 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCreateDevice } from "@/hooks/use-devices";
+import { apiFailure } from "@/lib/errors";
+import type { Device } from "@/lib/types";
 
 const schema = z.object({
   label: z.string().max(100).optional(),
   phone_number: z
     .string()
     .max(20)
-    .regex(/^\+?\d*$/, "Digits only (optionally starting with +)")
+    .regex(/^\+?\d*$/, "Hanya angka (boleh diawali +)")
     .optional(),
 });
 
+function errorMessage(error: unknown): string {
+  const failure = apiFailure(error, "Gagal membuat nomor.");
+  if (failure.status === 429) return "Batas jumlah nomor untuk paket ini sudah tercapai.";
+  if (failure.status === 403) return "Peran Anda tidak bisa menambah nomor.";
+  if (failure.status === 404) return "Fitur ini belum tersedia di server.";
+  return failure.message;
+}
+
 type FormValues = z.infer<typeof schema>;
 
-export function AddDeviceForm({ onSuccess }: { onSuccess: () => void }) {
+export function AddDeviceForm({ onSuccess }: { onSuccess: (device: Device) => void }) {
   const createDevice = useCreateDevice();
   const {
     register,
@@ -37,26 +47,19 @@ export function AddDeviceForm({ onSuccess }: { onSuccess: () => void }) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="label">Label</Label>
-        <Input id="label" placeholder="e.g. Sales Jakarta" {...register("label")} />
+        <Label htmlFor="label">Nama nomor</Label>
+        <Input id="label" placeholder="mis. CS Jakarta" autoFocus {...register("label")} />
+        <p className="text-xs text-muted-foreground">Untuk membedakan nomor di dashboard. Boleh dikosongkan.</p>
         {errors.label && <p className="text-sm text-destructive">{errors.label.message}</p>}
       </div>
       <div className="space-y-2">
-        <Label htmlFor="phone_number">Phone number (optional)</Label>
-        <Input id="phone_number" placeholder="+6281234567890" {...register("phone_number")} />
-        {errors.phone_number && (
-          <p className="text-sm text-destructive">{errors.phone_number.message}</p>
-        )}
+        <Label htmlFor="phone_number">Nomor WhatsApp <span className="font-normal text-muted-foreground">(opsional)</span></Label>
+        <Input id="phone_number" inputMode="tel" placeholder="+6281234567890" {...register("phone_number")} />
+        {errors.phone_number && <p className="text-sm text-destructive">{errors.phone_number.message}</p>}
       </div>
-      {createDevice.isError && (
-        <p className="text-sm text-destructive">
-          This backend doesn&apos;t support tenant self-service device creation yet
-          (needs <code>POST /api/v1/devices</code> on api-gateway) — ask an admin to run{" "}
-          <code>POST /admin/device/create</code> for now.
-        </p>
-      )}
+      {createDevice.isError && <p role="alert" className="text-sm text-destructive">{errorMessage(createDevice.error)}</p>}
       <Button type="submit" className="w-full" disabled={createDevice.isPending}>
-        {createDevice.isPending ? "Creating..." : "Create Device"}
+        {createDevice.isPending ? "Menyiapkan nomor…" : "Lanjut ke pemindaian QR"}
       </Button>
     </form>
   );

@@ -1,16 +1,32 @@
 import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
+
+const cardVariants = cva("", {
+  variants: {
+    variant: {
+      default: "",
+      surface: "surface ring-0 border",
+      elevated: "shadow-elevated ring-0",
+      interactive:
+        "cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-elevated active:translate-y-0 active:scale-[0.99]",
+    },
+  },
+  defaultVariants: { variant: "default" },
+})
 
 function Card({
   className,
   size = "default",
+  variant,
   ...props
-}: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
+}: React.ComponentProps<"div"> & { size?: "default" | "sm" } & VariantProps<typeof cardVariants>) {
   return (
     <div
       data-slot="card"
       data-size={size}
       className={cn(
+        cardVariants({ variant }),
         "group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card py-(--card-spacing) text-sm text-card-foreground ring-1 ring-foreground/10 [--card-spacing:--spacing(4)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
         className
       )}

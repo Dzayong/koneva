@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/table";
 import { TemplateBuilder } from "@/components/messages/template-builder";
 import { useDevices } from "@/hooks/use-devices";
-import { useContacts } from "@/hooks/use-contacts";
+import { useRecipientContacts } from "@/hooks/use-contacts";
 import { api } from "@/lib/api";
 import { renderSpintax } from "@/lib/spintax";
 import { formatPhoneNumber } from "@/lib/utils";
@@ -50,7 +50,7 @@ function sleep(ms: number): Promise<void> {
 
 export default function BroadcastPage() {
   const { data: devices } = useDevices();
-  const { contacts } = useContacts();
+  const { contacts } = useRecipientContacts();
 
   const onlineDevices = useMemo(() => devices?.filter((d) => d.status === "online") ?? [], [devices]);
   const [deviceKey, setDeviceKey] = useState("");
@@ -142,7 +142,7 @@ export default function BroadcastPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Broadcast</h2>
+        <h2 className="text-display">Broadcast</h2>
         <p className="text-muted-foreground">
           Send a templated message to multiple recipients. Each one still goes through the
           normal anti-ban gate server-side — this doesn&apos;t bypass rate limits or warm-up caps.

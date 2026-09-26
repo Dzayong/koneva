@@ -1,13 +1,17 @@
-import { Badge } from "@/components/ui/badge";
 import { cn, getDeviceStatusConfig } from "@/lib/utils";
 import type { DeviceStatus } from "@/lib/types";
+
+export function StatusDot({ status, className }: { status: DeviceStatus; className?: string }) {
+  const dot = getDeviceStatusConfig(status).color.replace("text-", "bg-");
+  return <span className={cn("inline-block h-2 w-2 shrink-0 rounded-full", dot, className)} />;
+}
 
 export function DeviceStatusBadge({ status }: { status: DeviceStatus }) {
   const config = getDeviceStatusConfig(status);
   return (
-    <Badge variant="secondary" className={cn("gap-1.5", config.bgColor, config.color)}>
-      <span className={cn("h-1.5 w-1.5 rounded-full", config.color.replace("text-", "bg-"))} />
+    <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+      <StatusDot status={status} />
       {config.label}
-    </Badge>
+    </span>
   );
 }

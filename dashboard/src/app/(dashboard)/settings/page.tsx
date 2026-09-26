@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, Check, Copy, RefreshCw, Send } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,78 +10,52 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { usePermissions } from "@/hooks/use-me";
 import { api } from "@/lib/api";
-
-function GapNotice({ endpoint }: { endpoint: string }) {
-  return (
-    <div className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-      <p>
-        Not available yet — api-gateway doesn&apos;t expose <code>{endpoint}</code>.
-      </p>
-    </div>
-  );
-}
+import { copyText } from "@/lib/clipboard";
+import { apiFailure } from "@/lib/errors";
 
 export default function SettingsPage() {
-  const {
-    data: tenant,
-    isLoading,
-    isError,
-  } = useQuery({
-    queryKey: ["tenant", "me"],
-    queryFn: () => api.getMyTenant(),
-    retry: false,
+  const queryClient = useQueryClient();
+  const { can, legacy } = usePermissions();
+  const { data: tenant, isLoading, isError } = useQuery({ queryKey: ["tenant", "me"], queryFn: () => api.getMyTenant(), retry: false });
+  const [draft, setDraft] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const webhook = draft ?? tenant?.webhook_url ?? "";
+  const setWebhook = (value: string) => setDraft(value);
+
+  const save = useMutation({
+    mutationFn: (url: string) => api.updateWebhookUrl(url),
+    onSuccess: () => { setDraft(null); queryClient.invalidateQueries({ queryKey: ["tenant", "me"] }); toast.success("Webhook disimpan"); },
+    onError: (error) => toast.error("Gagal menyimpan webhook", { description: apiFailure(error).message }),
   });
 
-  const [copied, setCopied] = useState(false);
-  const [webhookUrl, setWebhookUrl] = useState("");
+  const canWebhook = can("webhooks:manage");
+  const validUrl = webhook === "" || /^https?:\/\/.+/i.test(webhook.trim());
+  const quotaPercent = tenant ? Math.min(100, (tenant.used_messages / Math.max(1, tenant.quota_messages)) * 100) : 0;
+  const trial = tenant ? tenant.max_devices <= 1 && tenant.quota_messages <= 200 : false;
 
-  const handleCopy = async () => {
+  const copyKey = async () => {
     if (!tenant?.api_key) return;
-    await navigator.clipboard.writeText(tenant.api_key);
-    setCopied(true);
-    toast.success("Copied to clipboard");
-    setTimeout(() => setCopied(false), 2000);
+    const ok = await copyText(tenant.api_key);
+    setCopied(ok);
+    if (ok) { toast.success("Tersalin"); setTimeout(() => setCopied(false), 2000); }
   };
-
-  const handleTestWebhook = () => {
-    toast.info("Not available yet", {
-      description: "There's no webhook test endpoint on the backend yet.",
-    });
-  };
-
-  const quotaPercent = tenant
-    ? Math.min(100, (tenant.used_messages / Math.max(1, tenant.quota_messages)) * 100)
-    : 0;
 
   return (
     <div className="max-w-2xl space-y-6">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Settings</h2>
-        <p className="text-muted-foreground">Tenant, API key, and webhook configuration</p>
+        <h2 className="text-display">Pengaturan</h2>
+        <p className="mt-2 text-muted-foreground">Workspace, webhook, dan pemakaian.</p>
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Tenant Info</CardTitle>
-          <CardDescription>Your account details</CardDescription>
-        </CardHeader>
+        <CardHeader><CardTitle>Workspace</CardTitle><CardDescription>Identitas workspace ini</CardDescription></CardHeader>
         <CardContent className="space-y-4">
-          {isLoading ? (
-            <Skeleton className="h-16 w-full" />
-          ) : isError || !tenant ? (
-            <GapNotice endpoint="GET /api/v1/tenant" />
-          ) : (
+          {isLoading ? <Skeleton className="h-16 w-full" /> : isError || !tenant ? <p className="text-sm text-destructive">Gagal memuat data workspace.</p> : (
             <>
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input value={tenant.name} readOnly />
-              </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input value={tenant.email ?? ""} readOnly />
-              </div>
+              <div className="space-y-2"><Label>Nama</Label><Input value={tenant.name} readOnly /></div>
+              <div className="space-y-2"><Label>Email kontak</Label><Input value={tenant.email ?? ""} readOnly /></div>
             </>
           )}
         </CardContent>
@@ -89,115 +63,47 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>API Key</CardTitle>
-          <CardDescription>Used by this dashboard and any integration you build</CardDescription>
+          <CardTitle>Webhook</CardTitle>
+          <CardDescription>Alamat yang menerima kabar saat pesan terkirim, sampai, dibaca, gagal, atau saat nomor bermasalah (tersambung, terputus, ditolak WhatsApp). Setiap kiriman ditandatangani.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {isLoading ? (
-            <Skeleton className="h-10 w-full" />
-          ) : isError || !tenant ? (
-            <GapNotice endpoint="GET /api/v1/tenant" />
-          ) : (
+        <CardContent className="space-y-3">
+          <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (validUrl) save.mutate(webhook.trim()); }}>
+            <Input aria-label="Alamat webhook" placeholder="https://aplikasi-anda.com/webhook/wa" value={webhook} onChange={(e) => setWebhook(e.target.value)} disabled={!canWebhook} />
+            <Button type="submit" disabled={!canWebhook || !validUrl || save.isPending || webhook === (tenant?.webhook_url ?? "")}>Simpan</Button>
+          </form>
+          {!validUrl && <p role="alert" className="text-sm text-destructive">Alamat harus diawali http:// atau https://</p>}
+          {!canWebhook && <p className="text-sm text-muted-foreground">Peran Anda hanya bisa melihat pengaturan ini.</p>}
+          <p className="text-xs text-muted-foreground">Kosongkan lalu simpan untuk mematikan webhook.</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Pemakaian</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {isLoading ? <Skeleton className="h-4 w-full" /> : isError || !tenant ? <p className="text-sm text-destructive">Gagal memuat pemakaian.</p> : (
             <>
-              <div className="flex gap-2">
-                <Input value={tenant.api_key} readOnly type="password" className="font-mono" />
-                <Button variant="outline" size="icon" onClick={handleCopy}>
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
-              </div>
-              <Button
-                variant="outline"
-                onClick={() =>
-                  toast.info("Not available yet", {
-                    description: "There's no key rotation endpoint on the backend yet.",
-                  })
-                }
-              >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Regenerate
-              </Button>
+              <Progress value={quotaPercent} aria-label="Pemakaian kuota pesan" />
+              <p className="text-sm text-muted-foreground">{tenant.used_messages.toLocaleString("id-ID")} dari {tenant.quota_messages.toLocaleString("id-ID")} pesan terpakai. Maksimal {tenant.max_devices} nomor.</p>
+              {trial && <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">Workspace ini masih uji coba. Untuk menambah nomor atau pesan, hubungi penyedia layanan; paket dan tagihan saat ini diatur manual.</p>}
             </>
           )}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Webhook URL</CardTitle>
-          <CardDescription>
-            Receives message.sent / delivered / read / failed events, HMAC-signed
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Input
-              placeholder="https://your-app.com/webhooks/wa-gateway"
-              value={webhookUrl || tenant?.webhook_url || ""}
-              onChange={(e) => setWebhookUrl(e.target.value)}
-            />
-            <Button variant="outline" onClick={handleTestWebhook}>
-              <Send className="mr-2 h-4 w-4" />
-              Test
-            </Button>
-          </div>
-          {(isError || !tenant) && !isLoading && <GapNotice endpoint="PATCH /api/v1/tenant" />}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Quota Usage</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {isLoading ? (
-            <Skeleton className="h-4 w-full" />
-          ) : isError || !tenant ? (
-            <GapNotice endpoint="GET /api/v1/tenant" />
-          ) : (
-            <>
-              <Progress value={quotaPercent} />
-              <p className="text-sm text-muted-foreground">
-                {tenant.used_messages.toLocaleString()} / {tenant.quota_messages.toLocaleString()}{" "}
-                messages used this period
-              </p>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Team Management</CardTitle>
-          <CardDescription>Invite members, assign roles</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>
-              Not buildable yet — the schema has one <code>api_key</code> per tenant, no{" "}
-              <code>users</code>/<code>team_members</code> table or per-user roles at all. This
-              needs real backend work (auth model, RBAC), not just a UI.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Billing</CardTitle>
-          <CardDescription>Plan, invoices, payment method</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>
-              Not buildable yet — no billing provider (Stripe/Xendit) is integrated, and{" "}
-              <code>tenants</code> has no plan/pricing-tier columns. See{" "}
-              <code>docs/PROJECT_VISION.md</code> &quot;Business Features&quot;.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      {legacy && tenant?.api_key && (
+        <Card>
+          <CardHeader>
+            <CardTitle>API key lama</CardTitle>
+            <CardDescription>Anda masuk dengan API key tenant, cara lama yang memberi akses penuh. Sebaiknya buat akun dan kunci dengan izin terbatas.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2">
+              <Input value={tenant.api_key} readOnly type="password" className="font-mono" aria-label="API key lama" />
+              <Button variant="outline" size="icon" onClick={copyKey} aria-label="Salin API key lama">{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
