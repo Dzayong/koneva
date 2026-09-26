@@ -115,7 +115,7 @@ export default function AnalyticsPage() {
         />
         <StatsCard
           index={3}
-          title="Nomor aktif"
+          title="Device aktif"
           value={overview?.active_devices ?? 0}
           icon={Smartphone}
           description={`dari ${devices?.length ?? 0} total`}
@@ -193,7 +193,7 @@ export default function AnalyticsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Tingkat sampai per nomor</CardTitle>
+            <CardTitle>Tingkat sampai per device</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -223,13 +223,13 @@ export default function AnalyticsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Skor kesiapan nomor</CardTitle>
+          <CardTitle>Skor kesiapan device</CardTitle>
         </CardHeader>
         <CardContent>
           {devicesLoading ? (
             <Skeleton className="h-32 w-full" />
           ) : !devices || devices.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">Belum ada nomor</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">Belum ada device</p>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {devices.map((d) => {

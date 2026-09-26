@@ -19,9 +19,9 @@ export function usePauseDevice() {
     onSuccess: (device: Device) => {
       queryClient.invalidateQueries({ queryKey: ["devices"] });
       queryClient.invalidateQueries({ queryKey: ["devices", device.device_key] });
-      toast.success("Nomor dijeda");
+      toast.success("Device dijeda");
     },
-    onError: () => toast.error("Gagal menjeda nomor"),
+    onError: () => toast.error("Gagal menjeda device"),
   });
 }
 
@@ -32,9 +32,9 @@ export function useResumeDevice() {
     onSuccess: (device: Device) => {
       queryClient.invalidateQueries({ queryKey: ["devices"] });
       queryClient.invalidateQueries({ queryKey: ["devices", device.device_key] });
-      toast.success("Nomor dilanjutkan");
+      toast.success("Device dilanjutkan");
     },
-    onError: () => toast.error("Gagal melanjutkan nomor"),
+    onError: () => toast.error("Gagal melanjutkan device"),
   });
 }
 
@@ -44,7 +44,7 @@ export function useCreateDevice() {
     mutationFn: (data: CreateDeviceRequest) => api.createDevice(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["devices"] });
-      toast.success("Nomor dibuat", { description: "Pindai kode QR untuk menyambungkannya." });
+      toast.success("Device dibuat", { description: "Pindai kode QR untuk menyambungkannya." });
     },
     // Error is rendered inline in the form (with the server's message).
   });
@@ -58,8 +58,8 @@ export function useDeleteDevice() {
       // Drop the detail cache first: invalidating the ["devices"] prefix would refetch it and 404.
       queryClient.removeQueries({ queryKey: ["devices", deviceKey] });
       queryClient.invalidateQueries({ queryKey: ["devices"], exact: true });
-      toast.success("Nomor dihapus");
+      toast.success("Device dihapus");
     },
-    onError: () => toast.error("Gagal menghapus nomor"),
+    onError: () => toast.error("Gagal menghapus device"),
   });
 }

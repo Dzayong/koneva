@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { BusinessUpdate, ProductInput, StatusPost } from "@/lib/types";
+import type { ProfileUpdate, StatusPost } from "@/lib/types";
 
 export function useStatusPosts(deviceKey: string | undefined) {
   return useQuery({
@@ -33,29 +33,20 @@ export function useCancelCommand(deviceKey: string) {
   });
 }
 
-// The number is asked live, which can take a while: no automatic refetching or retries.
-export function useBusiness(deviceKey: string | undefined) {
-  return useQuery({ queryKey: ["business", deviceKey], queryFn: () => api.getBusiness(deviceKey!), enabled: Boolean(deviceKey), retry: false, staleTime: 60_000, refetchOnWindowFocus: false });
+// The device is asked live, which can take a while: no automatic refetching or retries.
+export function useProfile(deviceKey: string | undefined) {
+  return useQuery({ queryKey: ["profile", deviceKey], queryFn: () => api.getProfile(deviceKey!), enabled: Boolean(deviceKey), retry: false, staleTime: 60_000, refetchOnWindowFocus: false });
 }
 
-export function useCatalog(deviceKey: string | undefined, enabled: boolean) {
-  return useQuery({ queryKey: ["catalog", deviceKey], queryFn: () => api.getCatalog(deviceKey!), enabled: Boolean(deviceKey) && enabled, retry: false, staleTime: 60_000, refetchOnWindowFocus: false });
-}
-
-export function useUpdateBusiness(deviceKey: string) {
+export function useUpdateProfile(deviceKey: string) {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (body: BusinessUpdate) => api.updateBusiness(deviceKey, body), onSuccess: () => qc.invalidateQueries({ queryKey: ["business", deviceKey] }) });
+  return useMutation({ mutationFn: (body: ProfileUpdate) => api.updateProfile(deviceKey, body), onSuccess: (data) => qc.setQueryData(["profile", deviceKey], data) });
 }
 
-export function useSaveProduct(deviceKey: string) {
+export function useSetPicture(deviceKey: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id?: string; body: ProductInput }) => (v.id ? api.updateProduct(deviceKey, v.id, v.body) : api.createProduct(deviceKey, v.body)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["catalog", deviceKey] }),
+    mutationFn: (imageBase64: string | null) => (imageBase64 ? api.setProfilePicture(deviceKey, imageBase64) : api.removeProfilePicture(deviceKey)),
+    onSuccess: (data) => qc.setQueryData(["profile", deviceKey], data),
   });
-}
-
-export function useDeleteProduct(deviceKey: string) {
-  const qc = useQueryClient();
-  return useMutation({ mutationFn: (id: string) => api.deleteProduct(deviceKey, id), onSuccess: () => qc.invalidateQueries({ queryKey: ["catalog", deviceKey] }) });
 }

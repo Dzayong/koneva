@@ -1,6 +1,6 @@
 import { jidNormalizedUser, type WASocket } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
-import { PRICE_SCALE, type CommandType, type StatusPayload } from '../shared/commands';
+import type { CommandType, ProfilePicturePayload, ProfileUpdate, StatusPayload } from '../shared/commands';
 import { getOrCreatePersona, isWithinPersonaWindow, msUntilWindowOpens } from '../shared/persona';
 import type { PresenceRoutine } from './presence';
 
@@ -15,7 +15,7 @@ export interface CommandContext {
   log: Logger;
   random?: () => number;
   now?: () => Date;
-  /** Test hook: shorter give-up time for catalog calls. */
+  /** Test hook: shorter give-up time for WhatsApp queries. */
   deadlineMs?: number;
 }
 
@@ -30,23 +30,19 @@ export class Reschedule extends Error {
 }
 
 /**
- * Baileys logs "timed out waiting for message" and then resolves with an EMPTY result, so a catalog that
- * WhatsApp never answered looks like an empty catalog. Seen live on a real Business number (60 s, empty).
- * Give up earlier and say so instead of showing a false "no products".
+ * Baileys logs "timed out waiting for message" and then resolves with an EMPTY result, so a query WhatsApp
+ * never answered can look like real-but-empty data. Give up early and say so instead.
  */
-export const CATALOG_DEADLINE_MS = 20_000;
+export const COMMAND_DEADLINE_MS = 15_000;
 async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
       work,
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new CommandFailure('CATALOG_TIMEOUT', 'WhatsApp did not answer the catalog request')), ms); }),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new CommandFailure('WA_TIMEOUT', 'WhatsApp did not answer in time')), ms); }),
     ]);
   } finally { if (timer) clearTimeout(timer); }
 }
-
-export const toWirePrice = (price: number): number => Math.round(price * PRICE_SCALE);
-export const fromWirePrice = (wire: number): number => wire / PRICE_SCALE;
 
 const ownJid = (sock: WASocket): string => {
   const id = sock.user?.id;
@@ -61,28 +57,14 @@ async function businessProfile(sock: WASocket) {
 
 async function requireBusiness(sock: WASocket) {
   const profile = await businessProfile(sock);
-  if (!profile) throw new CommandFailure('NOT_BUSINESS', 'This number is a regular WhatsApp account. Catalog and business profile need WhatsApp Business.');
+  if (!profile) throw new CommandFailure('NOT_BUSINESS', 'This number is a regular WhatsApp account. The business profile needs WhatsApp Business.');
   return profile;
-}
-
-function mapProduct(p: { price?: number } & Record<string, unknown>) {
-  return { ...p, price: typeof p.price === 'number' ? fromWirePrice(p.price) : p.price };
 }
 
 const toMinutes = (hhmm: string): string => {
   const [h = '0', m = '0'] = hhmm.split(':');
   return String(Number(h) * 60 + Number(m));
 };
-
-interface ProductInput {
-  id?: string; name: string; description?: string; price: number; currency?: string; url?: string;
-  retailer_id?: string; is_hidden?: boolean; image_urls: string[]; origin_country?: string;
-}
-const productBody = (p: ProductInput) => ({
-  name: p.name, description: p.description ?? '', price: toWirePrice(p.price), currency: p.currency ?? 'IDR',
-  ...(p.url ? { url: p.url } : {}), ...(p.retailer_id ? { retailerId: p.retailer_id } : {}),
-  isHidden: p.is_hidden ?? false, images: p.image_urls.map((url) => ({ url })),
-});
 
 /** JIDs that may see a status: people this number has actually exchanged messages with, or an explicit list. */
 export async function statusAudience(ctx: CommandContext, p: StatusPayload): Promise<string[]> {
@@ -126,64 +108,75 @@ async function postStatus(ctx: CommandContext, p: StatusPayload) {
   return { message_id: sent?.key.id ?? null, recipients: recipients.length };
 }
 
-export async function executeCommand(type: CommandType, payload: unknown, ctx: CommandContext): Promise<unknown> {
+async function readProfile(ctx: CommandContext) {
   const { sock } = ctx;
+  const jid = ownJid(sock);
+  const deadline = ctx.deadlineMs ?? COMMAND_DEADLINE_MS;
+  const [business, about, picture] = await Promise.all([
+    businessProfile(sock),
+    withDeadline(Promise.resolve(sock.fetchStatus(jid)), deadline).catch(() => undefined),
+    withDeadline(Promise.resolve(sock.profilePictureUrl(jid, 'image')), deadline).catch(() => undefined),
+  ]);
+  const first = Array.isArray(about) ? about[0] : undefined;
+  const aboutText = (first as { status?: { status?: string } | string } | undefined)?.status;
+  return {
+    jid,
+    phone: jid.split('@')[0] ?? null,
+    name: sock.user?.name ?? null,
+    about: typeof aboutText === 'string' ? aboutText : (aboutText?.status ?? null),
+    picture_url: picture ?? null,
+    is_business: Boolean(business),
+    business: business ?? null,
+  };
+}
+
+async function updateProfile(ctx: CommandContext, p: ProfileUpdate) {
+  const { sock } = ctx;
+  const deadline = ctx.deadlineMs ?? COMMAND_DEADLINE_MS;
+  if (p.name !== undefined) await withDeadline(sock.updateProfileName(p.name), deadline);
+  if (p.about !== undefined) await withDeadline(sock.updateProfileStatus(p.about), deadline);
+  if (p.business) {
+    await requireBusiness(sock);
+    const b = p.business;
+    await withDeadline(sock.updateBussinesProfile({
+      ...(b.description !== undefined ? { description: b.description } : {}),
+      ...(b.address !== undefined ? { address: b.address } : {}),
+      ...(b.email !== undefined ? { email: b.email } : {}),
+      ...(b.websites ? { websites: b.websites } : {}),
+      ...(b.hours ? {
+        hours: {
+          timezone: b.hours.timezone,
+          days: b.hours.days.map((d) => (d.mode === 'specific_hours'
+            ? { day: d.day, mode: 'specific_hours', openTimeInMinutes: toMinutes(d.open ?? '00:00'), closeTimeInMinutes: toMinutes(d.close ?? '00:00') }
+            : { day: d.day, mode: d.mode })) as never,
+        },
+      } : {}),
+    }), deadline);
+  }
+  return readProfile(ctx);
+}
+
+async function setPicture(ctx: CommandContext, p: ProfilePicturePayload) {
+  const { sock } = ctx;
+  const jid = ownJid(sock);
+  const deadline = ctx.deadlineMs ?? COMMAND_DEADLINE_MS;
+  if (!p.image_base64 && !p.image_url) {
+    await withDeadline(sock.removeProfilePicture(jid), deadline);
+  } else {
+    const content = p.image_base64 ? Buffer.from(p.image_base64, 'base64') : { url: p.image_url ?? '' };
+    await withDeadline(sock.updateProfilePicture(jid, content as never), deadline * 2);
+  }
+  return readProfile(ctx);
+}
+
+export async function executeCommand(type: CommandType, payload: unknown, ctx: CommandContext): Promise<unknown> {
   switch (type) {
-    case 'account.info': {
-      const profile = await businessProfile(sock);
-      return { jid: ownJid(sock), name: sock.user?.name ?? null, is_business: Boolean(profile) };
-    }
-    case 'business.get': {
-      const profile = await businessProfile(sock);
-      return profile ? { is_business: true, profile } : { is_business: false, profile: null };
-    }
-    case 'business.update': {
-      await requireBusiness(sock);
-      const p = payload as { description?: string; address?: string; email?: string; websites?: string[]; hours?: { timezone: string; days: Array<Record<string, string>> } };
-      await sock.updateBussinesProfile({
-        ...(p.description !== undefined ? { description: p.description } : {}),
-        ...(p.address !== undefined ? { address: p.address } : {}),
-        ...(p.email !== undefined ? { email: p.email } : {}),
-        ...(p.websites ? { websites: p.websites } : {}),
-        ...(p.hours ? {
-          hours: {
-            timezone: p.hours.timezone,
-            days: p.hours.days.map((d) => (d['mode'] === 'specific_hours'
-              ? { day: d['day'], mode: 'specific_hours', openTimeInMinutes: toMinutes(d['open'] ?? '00:00'), closeTimeInMinutes: toMinutes(d['close'] ?? '00:00') }
-              : { day: d['day'], mode: d['mode'] })) as never,
-          },
-        } : {}),
-      });
-      return { is_business: true, profile: await businessProfile(sock) };
-    }
-    case 'catalog.list': {
-      await requireBusiness(sock);
-      const p = payload as { limit?: number; cursor?: string };
-      const catalog = await withDeadline(sock.getCatalog({ limit: p.limit ?? 20, ...(p.cursor ? { cursor: p.cursor } : {}) }), (ctx.deadlineMs ?? CATALOG_DEADLINE_MS));
-      return { products: catalog.products.map((x) => mapProduct(x as never)), next_cursor: catalog.nextPageCursor ?? null };
-    }
-    case 'collections.list': {
-      await requireBusiness(sock);
-      const collections = await withDeadline(sock.getCollections(), (ctx.deadlineMs ?? CATALOG_DEADLINE_MS));
-      return { collections: collections.collections.map((c) => ({ ...c, products: c.products.map((x) => mapProduct(x as never)) })) };
-    }
-    case 'product.create': {
-      await requireBusiness(sock);
-      const p = payload as ProductInput;
-      const created = await withDeadline(sock.productCreate({ ...productBody(p), originCountryCode: p.origin_country } as never), (ctx.deadlineMs ?? CATALOG_DEADLINE_MS));
-      return mapProduct(created as never);
-    }
-    case 'product.update': {
-      await requireBusiness(sock);
-      const p = payload as ProductInput;
-      const updated = await withDeadline(sock.productUpdate(String(p.id), productBody(p) as never), (ctx.deadlineMs ?? CATALOG_DEADLINE_MS));
-      return mapProduct(updated as never);
-    }
-    case 'product.delete': {
-      await requireBusiness(sock);
-      const p = payload as { id: string };
-      return await withDeadline(sock.productDelete([p.id]), (ctx.deadlineMs ?? CATALOG_DEADLINE_MS));
-    }
+    case 'profile.get':
+      return readProfile(ctx);
+    case 'profile.update':
+      return updateProfile(ctx, payload as ProfileUpdate);
+    case 'profile.picture':
+      return setPicture(ctx, payload as ProfilePicturePayload);
     case 'status.post':
       return postStatus(ctx, payload as StatusPayload);
     default:

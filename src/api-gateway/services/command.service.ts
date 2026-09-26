@@ -80,7 +80,7 @@ export async function runCommand(
 export function commandFailure(error: string | null): ServiceError {
   const match = /^([A-Z_]+): (.*)$/s.exec(error ?? '');
   const code = match?.[1] ?? 'COMMAND_FAILED';
-  const status = code === 'NOT_BUSINESS' ? 409 : code === 'NOT_CONNECTED' ? 503 : code === 'NO_AUDIENCE' ? 400 : code === 'CATALOG_TIMEOUT' ? 504 : 502;
+  const status = code === 'NOT_BUSINESS' ? 409 : code === 'NOT_CONNECTED' ? 503 : code === 'NO_AUDIENCE' ? 400 : code === 'WA_TIMEOUT' ? 504 : 502;
   return new ServiceError(status, code, match?.[2] ?? error ?? 'Command failed');
 }
 
@@ -95,7 +95,7 @@ export async function listCommands(tenantId: string, deviceKey: string, type: Co
 }
 
 /**
- * Read results (business profile, catalog) hold personal data such as the shop's email and address, so
+ * Read results (profile: name, About, business email and address) hold personal data such as the shop's email and address, so
  * they are dropped after a day; status posts keep 30 days of history for the daily limit and the history list.
  */
 export async function purgeOldCommands(): Promise<number> {

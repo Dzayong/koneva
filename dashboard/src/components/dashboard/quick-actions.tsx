@@ -18,13 +18,13 @@ export function QuickActions() {
     <>
       <Button onClick={() => setOpen(true)}>
         <Plus className="mr-2 h-4 w-4" />
-        Tambah nomor
+        Tambah device
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Tambah nomor</DialogTitle>
-            <DialogDescription>Sambungkan nomor WhatsApp baru ke workspace Anda.</DialogDescription>
+            <DialogTitle>Tambah device</DialogTitle>
+            <DialogDescription>Sambungkan device WhatsApp baru ke workspace Anda.</DialogDescription>
           </DialogHeader>
           <AddDeviceForm onSuccess={(device) => { setOpen(false); router.push(`/devices/${device.device_key}?connect=1`); }} />
         </DialogContent>

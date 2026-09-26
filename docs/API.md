@@ -296,49 +296,50 @@ addresses are rejected) and `media_type` (`image` default, `video`, `document`).
 caption and may be empty. Links written in `message` are clickable for the recipient; no link preview card is
 generated. Numbers still in warm-up (days 1-4) cannot send media (`media_not_allowed_in_warmup`).
 
-## Status, catalog and business profile
+## Status and device profile
 
-These run on the number itself, so the number must be online. They are asynchronous commands stored in
-`device_commands`; the bot claims and runs them, and the API either waits for the answer (reads and quick
-edits, up to 20 s, `504 DEVICE_NOT_RESPONDING` otherwise) or returns `202` (status posts).
+These run on the device itself (the WhatsApp number), so it must be online. They are asynchronous commands
+stored in `device_commands`; the bot claims and runs them, and the API either waits for the answer (profile
+calls, up to 22-40 s: `504 DEVICE_NOT_RESPONDING`, or `504 WA_TIMEOUT` when WhatsApp itself stays silent) or
+returns `202` (status posts).
 
 **Status (WhatsApp Story)**
 
 | Endpoint | Permission | What |
 |---|---|---|
 | `POST /api/v1/devices/:key/status` | `content:write` | `{kind: text\|image\|video, text?, media_url?, caption?, background?, audience: chatted\|list, numbers?, send_at?}` → `202 {command_id, status, run_at}` |
-| `GET /api/v1/devices/:key/status` | `devices:read` | last 30 status posts with state (`queued`, `running`, `done`, `failed`, `cancelled`) |
+| `GET /api/v1/devices/:key/status` | `devices:read` | last 30 status posts with state (`queued`, `running`, `done`, `failed`, `cancelled`) and `views` |
 | `GET /api/v1/devices/:key/commands/:id` | `devices:read` | one command and its result |
-| `POST /api/v1/devices/:key/commands/:id/cancel` | `content:write` | cancel while still `queued` |
 | `GET /api/v1/devices/:key/commands/:id/viewers` | `devices:read` | who opened a status: `{viewers: [{number, viewed_at}], total}` |
+| `POST /api/v1/devices/:key/commands/:id/cancel` | `content:write` | cancel while still `queued` |
 
 - Media is fetched by the bot: `media_url` must be a public `https` address (private addresses are rejected).
-- WhatsApp needs to know who may see a status. `audience: "chatted"` uses people this number has exchanged
+- WhatsApp needs to know who may see a status. `audience: "chatted"` uses people this device has exchanged
   messages with in the last 90 days (max 500); `"list"` uses the given numbers. With nobody to show it to the
   post fails with `NO_AUDIENCE`.
-- A post outside the number's active hours waits until the number "wakes up" (plus 0-20 random minutes).
-- At most **3 posts per number per day** (`429 STATUS_LIMIT`). This is a caution, not a measured WhatsApp limit.
+- A post outside the device's active hours waits until it "wakes up" (plus 0-20 random minutes).
+- At most **3 posts per device per day** (`429 STATUS_LIMIT`). A caution, not a measured WhatsApp limit.
 - `send_at` schedules up to 7 days ahead.
-- **Views:** each post in `GET .../status` carries `views`, counted from the read receipts WhatsApp sends back.
-  Only people whose own "read receipts" setting is on are reported, so it is a lower bound. Recorded by the bot
-  from `message-receipt.update` events; **not yet confirmed against a real posted status**.
+- **Views:** counted from the read receipts WhatsApp sends back. Only people whose own "read receipts" setting
+  is on are reported, so it is a lower bound. Recorded by the bot from `message-receipt.update` events;
+  **not yet confirmed against a real posted status**.
 
-**Business profile and catalog** (only for numbers registered in WhatsApp Business; a regular number gets
-`409 NOT_BUSINESS`)
+**Profile**
 
 | Endpoint | Permission | What |
 |---|---|---|
-| `GET /api/v1/devices/:key/business` | `devices:read` | `{is_business, profile}`; also the way to detect the account type |
-| `PATCH /api/v1/devices/:key/business` | `content:write` | `{description?, address?, email?, websites?, hours?}` (`hours.days[]`: `{day: mon..sun, mode: specific_hours\|open_24h\|appointment_only, open?, close?}`) |
-| `GET /api/v1/devices/:key/catalog` | `devices:read` | `?limit&cursor` → `{products, next_cursor}` |
-| `GET /api/v1/devices/:key/collections` | `devices:read` | product collections |
-| `POST /api/v1/devices/:key/products` | `content:write` | `{name, price, description?, currency?, url?, retailer_id?, is_hidden?, image_urls[], origin_country?}` |
-| `PATCH /api/v1/devices/:key/products/:id` | `content:write` | same fields as create |
-| `DELETE /api/v1/devices/:key/products/:id` | `content:write` | |
+| `GET /api/v1/devices/:key/profile` | `devices:read` | `{jid, phone, name, about, picture_url, is_business, business}` |
+| `PATCH /api/v1/devices/:key/profile` | `content:write` | `{name? (<=25), about? (<=139), business?: {description?, address?, email?, websites?, hours?}}`; `business` needs a WhatsApp Business number (`409 NOT_BUSINESS`) |
+| `POST /api/v1/devices/:key/profile/picture` | `content:write` | exactly one of `image_url` (public https) or `image_base64` (<= ~300 KB; the dashboard resizes to 640 px) |
+| `DELETE /api/v1/devices/:key/profile/picture` | `content:write` | remove the photo |
 
-`price` is in whole currency units (25000 = Rp 25.000). WhatsApp stores prices as amount x 1000; the bot
-converts (`PRICE_SCALE` in `src/shared/commands.ts`). **This conversion and the catalog calls have not been
-tested against a real WhatsApp Business number**: create one product and check the price in the app first.
+`hours.days[]` is `{day: mon..sun, mode: specific_hours|open_24h|appointment_only, open?, close?}` (`HH:MM`).
+Verified live on a real Business number: `GET profile` (read only). **Not yet verified live:** changing the
+name, About, photo or business profile (they alter a real number, so they were only unit-tested).
+
+**Catalog was removed.** WhatsApp did not answer catalog queries from a linked device (8 stanza variants tried on
+a Business number that has a catalog; matches an upstream Baileys report), so the feature was dropped instead of
+shipping something that shows "empty catalog" falsely. Revisit if Baileys or WhatsApp changes.
 
 ## Bot Container (internal)
 

@@ -23,7 +23,7 @@ import keysRoutes from './routes/keys.routes';
 import auditRoutes from './routes/audit.routes';
 import teamRoutes from './routes/team.routes';
 import { purgeOldCommands } from './services/command.service';
-import businessRoutes from './routes/business.routes';
+import deviceContentRoutes from './routes/device-content.routes';
 import billingRoutes from './routes/billing.routes';
 import publicRoutes from './routes/public.routes';
 import { sweepSubscriptions } from './services/billing.service';
@@ -78,7 +78,7 @@ app.get('/ready', async (_request, response) => {
 app.use('/auth', authRoutes);
 app.use('/public', publicRoutes);
 app.use('/api/v1', tenantAuth, authorize, auditTrail, messageRoutes, deviceRoutes, tenantRoutes,
-  contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, businessRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes, billingRoutes);
+  contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, deviceContentRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes, billingRoutes);
 app.use('/admin', adminAuth, adminRoutes);
 app.use((_request, response) => response.status(404).json({
   success: false, error: { code: 'NOT_FOUND', message: 'Route not found' },

@@ -1,23 +1,14 @@
 // Shared between the API gateway (which validates and enqueues) and the bot (which runs).
-export const COMMAND_TYPES = [
-  'account.info', 'business.get', 'business.update', 'catalog.list', 'collections.list',
-  'product.create', 'product.update', 'product.delete', 'status.post',
-] as const;
+export const COMMAND_TYPES = ['profile.get', 'profile.update', 'profile.picture', 'status.post'] as const;
 export type CommandType = (typeof COMMAND_TYPES)[number];
 
 export const commandChannel = (deviceKey: string): string => `bot:command:${deviceKey}`;
 
 /**
- * WhatsApp Status posts per number per day. Each post is seen by many contacts at once, so the
+ * WhatsApp Status posts per device per day. Each post is seen by many contacts at once, so the
  * default is deliberately low. Not measured against WhatsApp's limits; treat it as caution.
  */
 export const STATUS_DAILY_LIMIT = 3;
-
-/**
- * WhatsApp stores catalog prices as amount x 1000 (Rp 25.000 -> 25000000). Baileys passes the number
- * through untouched. UNVERIFIED against a real Business number: check the first product in the app.
- */
-export const PRICE_SCALE = 1000;
 
 export interface StatusPayload {
   kind: 'text' | 'image' | 'video';
@@ -27,4 +18,24 @@ export interface StatusPayload {
   background?: string;
   audience: 'chatted' | 'list';
   numbers?: string[];
+}
+
+export interface BusinessProfileUpdate {
+  description?: string;
+  address?: string;
+  email?: string;
+  websites?: string[];
+  hours?: { timezone: string; days: Array<{ day: string; mode: string; open?: string; close?: string }> };
+}
+
+export interface ProfileUpdate {
+  name?: string;
+  about?: string;
+  business?: BusinessProfileUpdate;
+}
+
+/** `image_base64` is a resized JPEG/PNG from the dashboard; `image_url` is a public https address. Neither = remove. */
+export interface ProfilePicturePayload {
+  image_base64?: string;
+  image_url?: string;
 }

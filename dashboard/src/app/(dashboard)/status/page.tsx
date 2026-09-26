@@ -95,7 +95,7 @@ export default function StatusPage() {
       </div>
 
       {isLoading ? <Skeleton className="h-64" /> : online.length === 0 ? (
-        <p className="rounded-lg border bg-card p-5 text-sm text-muted-foreground">Belum ada nomor yang online. Sambungkan nomor dulu di menu Nomor.</p>
+        <p className="rounded-lg border bg-card p-5 text-sm text-muted-foreground">Belum ada device yang online. Sambungkan device dulu di menu Device.</p>
       ) : (
         <>
           <DeviceSelect devices={devices ?? []} value={deviceKey} onChange={setChosen} />
@@ -149,7 +149,7 @@ export default function StatusPage() {
               <div className="space-y-2">
                 <Label htmlFor="st-at" className="flex items-center gap-1.5"><Clock className="h-4 w-4" />Jadwalkan (opsional)</Label>
                 <Input id="st-at" type="datetime-local" value={sendAt} onChange={(e) => setSendAt(e.target.value)} className="w-64" />
-                <p className="text-xs text-muted-foreground">Kosongkan untuk posting segera. Di luar jam aktif nomor, status menunggu sampai nomor &quot;bangun&quot;. Maksimal 3 status per nomor per hari.</p>
+                <p className="text-xs text-muted-foreground">Kosongkan untuk posting segera. Di luar jam aktif nomor, status menunggu sampai nomor &quot;bangun&quot;. Maksimal 3 status per device per hari.</p>
               </div>
 
               {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

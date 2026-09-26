@@ -5,7 +5,7 @@ const REASONS: Record<string, string> = {
   rate_limit_per_minute: "Terlalu banyak pesan dalam satu menit. Coba lagi sebentar.",
   resting: "Nomor sedang istirahat setelah mengirim banyak pesan. Pesan akan dicoba lagi otomatis.",
   device_paused: "Nomor sedang dijeda. Lanjutkan nomor lalu kirim ulang.",
-  device_banned: "WhatsApp menolak nomor ini. Pengiriman dihentikan. Sambungkan nomor lain.",
+  device_banned: "WhatsApp menolak nomor ini. Pengiriman dihentikan. Sambungkan device lain.",
   health_score_too_low: "Kesiapan nomor terlalu rendah, pengiriman ditahan untuk melindungi nomor.",
   proactive_not_allowed_in_warmup: "Nomor baru belum boleh memulai percakapan selama 2 hari pertama. Pesan menunggu sampai hari ke-3, atau bisa dikirim lebih cepat jika penerima menghubungi Anda lebih dulu.",
   media_not_allowed_in_warmup: "Nomor baru belum boleh mengirim media.",

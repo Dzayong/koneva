@@ -86,10 +86,10 @@ export default function MessagesPage() {
           }}
         >
           <SelectTrigger className="w-full sm:w-48">
-            <SelectValue placeholder="Semua nomor" />
+            <SelectValue placeholder="Semua device" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>Semua nomor</SelectItem>
+            <SelectItem value={ALL}>Semua device</SelectItem>
             {devices?.map((d) => (
               <SelectItem key={d.id} value={d.device_key}>
                 {d.label || d.device_key}

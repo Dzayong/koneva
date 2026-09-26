@@ -47,7 +47,7 @@ export function AddDeviceForm({ onSuccess }: { onSuccess: (device: Device) => vo
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="label">Nama nomor</Label>
+        <Label htmlFor="label">Nama device</Label>
         <Input id="label" placeholder="mis. CS Jakarta" autoFocus {...register("label")} />
         <p className="text-xs text-muted-foreground">Untuk membedakan nomor di dashboard. Boleh dikosongkan.</p>
         {errors.label && <p className="text-sm text-destructive">{errors.label.message}</p>}

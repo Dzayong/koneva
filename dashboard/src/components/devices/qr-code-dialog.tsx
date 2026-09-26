@@ -36,7 +36,7 @@ export function QRCodeDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{connected ? "Nomor tersambung" : "Sambungkan nomor"}</DialogTitle>
+          <DialogTitle>{connected ? "Device tersambung" : "Sambungkan device"}</DialogTitle>
           <DialogDescription>
             {connected
               ? "Nomor Anda sudah aktif di KONEVA."

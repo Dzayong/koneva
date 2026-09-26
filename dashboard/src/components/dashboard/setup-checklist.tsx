@@ -40,8 +40,8 @@ export function SetupChecklist() {
     const list = devices ?? [];
     const pending = list.find((d) => d.status === "pending_qr");
     const list_: Step[] = [
-      { id: "device", title: "Sambungkan nomor WhatsApp", hint: "Tambahkan nomor yang akan dipakai mengirim dan menerima pesan.", done: list.length > 0, href: "/devices?add=1", action: "Tambah nomor" },
-      { id: "scan", title: "Pindai kode QR di HP", hint: "Buka WhatsApp di HP, lalu Perangkat tertaut, Tautkan perangkat.", done: list.some((d) => d.status === "online"), href: pending ? `/devices/${pending.device_key}?connect=1` : "/devices", action: pending ? "Tampilkan QR" : "Lihat nomor" },
+      { id: "device", title: "Sambungkan device WhatsApp", hint: "Tambahkan nomor yang akan dipakai mengirim dan menerima pesan.", done: list.length > 0, href: "/devices?add=1", action: "Tambah device" },
+      { id: "scan", title: "Pindai kode QR di HP", hint: "Buka WhatsApp di HP, lalu Perangkat tertaut, Tautkan perangkat.", done: list.some((d) => d.status === "online"), href: pending ? `/devices/${pending.device_key}?connect=1` : "/devices", action: pending ? "Tampilkan QR" : "Lihat device" },
       { id: "send", title: "Kirim pesan pertama", hint: "Nomor baru belum boleh memulai percakapan selama 2 hari pertama. Kirim pesan ke nomor ini dari HP lain, lalu balas dari sini.", done: (messages?.data ?? []).some((m) => m.direction === "outbound" && ["sent", "delivered", "read"].includes(m.status)), href: "/developers/quickstart", action: "Coba kirim" },
       { id: "webhook", title: "Pasang webhook", hint: "Terima kabar saat pesan terkirim, dibalas, atau nomor bermasalah.", done: Boolean(tenant.data?.webhook_url), href: "/developers/webhooks", action: "Atur webhook", optional: true },
     ];

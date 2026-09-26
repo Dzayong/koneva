@@ -39,7 +39,7 @@ export function NotificationCenter() {
         <DropdownMenuLabel>Notifikasi</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {alerts.length === 0 ? (
-          <p className="p-3 text-sm text-muted-foreground">Semua nomor dalam kondisi baik</p>
+          <p className="p-3 text-sm text-muted-foreground">Semua device dalam kondisi baik</p>
         ) : (
           alerts.map((device) => {
             const config = getDeviceStatusConfig(device.status);
@@ -65,7 +65,7 @@ export function NotificationCenter() {
           <>
             <DropdownMenuSeparator />
             <div className="p-2 text-center">
-              <Badge variant="outline">{alerts.length} nomor perlu perhatian</Badge>
+              <Badge variant="outline">{alerts.length} device perlu perhatian</Badge>
             </div>
           </>
         )}

@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DeviceBehavior } from "@/components/devices/device-behavior";
 import { DeviceEvents } from "@/components/devices/device-events";
+import { DeviceProfileTab } from "@/components/devices/device-profile";
 import { DeviceStatusBadge } from "@/components/devices/device-status-badge";
 import { HealthBar } from "@/components/devices/health-bar";
 import { HealthDetail } from "@/components/devices/health-detail";
@@ -73,7 +74,7 @@ export default function DeviceDetailPage(props: {
       <Button variant="ghost" size="sm" asChild className="-ml-2 text-muted-foreground">
         <Link href="/devices">
           <ArrowLeft className="mr-1 h-4 w-4" />
-          Nomor
+          Device
         </Link>
       </Button>
 
@@ -131,6 +132,7 @@ export default function DeviceDetailPage(props: {
         <TabsList>
           <TabsTrigger value="ringkasan">Ringkasan</TabsTrigger>
           <TabsTrigger value="perilaku">Perilaku pengiriman</TabsTrigger>
+          <TabsTrigger value="profil">Profil</TabsTrigger>
           <TabsTrigger value="riwayat">Riwayat status</TabsTrigger>
         </TabsList>
 
@@ -175,6 +177,10 @@ export default function DeviceDetailPage(props: {
 
         <TabsContent value="perilaku" className="mt-6">
           <DeviceBehavior deviceKey={deviceKey} />
+        </TabsContent>
+
+        <TabsContent value="profil" className="mt-6">
+          <DeviceProfileTab deviceKey={deviceKey} online={device?.status === "online"} canEdit={can("content:write")} />
         </TabsContent>
 
         <TabsContent value="riwayat" className="mt-6">

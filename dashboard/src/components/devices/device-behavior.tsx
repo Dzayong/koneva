@@ -31,7 +31,7 @@ function facts(p: Preset): string[] {
 function PresetPicker({ presets, current, canEdit }: { presets: Preset[]; current: Persona["preset"]; canEdit: boolean }) {
   const apply = useApplyPreset(useDeviceKey());
   return (
-    <div role="radiogroup" aria-label="Peran nomor" className="grid gap-3 md:grid-cols-3">
+    <div role="radiogroup" aria-label="Peran device" className="grid gap-3 md:grid-cols-3">
       {presets.map((p) => {
         const selected = current === p.id;
         return (
@@ -224,7 +224,7 @@ export function DeviceBehavior({ deviceKey }: { deviceKey: string }) {
     <DeviceKeyContext.Provider value={deviceKey}>
       <div className="space-y-8">
         <section aria-labelledby="peran">
-          <h3 id="peran" className="text-heading mb-1 text-lg">Peran nomor ini</h3>
+          <h3 id="peran" className="text-heading mb-1 text-lg">Peran device ini</h3>
           <p className="mb-4 text-sm text-muted-foreground">
             Pilih untuk apa nomor ini dipakai. Setiap nomor tetap mendapat sedikit variasi sendiri, jadi dua nomor dengan pilihan yang sama tidak berpola identik.
             {persona?.preset === "custom" && <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs">Sekarang: kustom</span>}

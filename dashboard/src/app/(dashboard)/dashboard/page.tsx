@@ -59,7 +59,7 @@ export default function DashboardPage() {
 
       <StatGrid>
         <StatsCard
-          title="Jumlah nomor"
+          title="Jumlah device"
           index={0}
           value={devices?.length ?? 0}
           icon={Smartphone}

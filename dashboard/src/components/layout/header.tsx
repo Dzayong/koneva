@@ -15,12 +15,11 @@ import { HelpButton, TrialChip } from "./header-extras";
 
 const PAGE_TITLES: Record<string, string> = {
   "/dashboard": "Ringkasan",
-  "/devices": "Nomor",
+  "/devices": "Device",
   "/messages": "Pesan",
   "/broadcast": "Broadcast",
   "/contacts": "Kontak",
   "/status": "Status WhatsApp",
-  "/catalog": "Katalog",
   "/analytics": "Analitik",
   "/settings": "Pengaturan",
   "/settings/auto-reply": "Balas otomatis",
@@ -34,7 +33,7 @@ const PAGE_TITLES: Record<string, string> = {
 
 function pageTitle(pathname: string): string {
   if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname];
-  if (pathname.startsWith("/devices/")) return "Detail nomor";
+  if (pathname.startsWith("/devices/")) return "Detail device";
   return "KONEVA";
 }
 

@@ -247,7 +247,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
         <Label>Nomor</Label>
         <Select value={deviceKey} onValueChange={setDeviceKey}>
           <SelectTrigger className="w-full">
-            <SelectValue placeholder="Pilih nomor" />
+            <SelectValue placeholder="Pilih device" />
           </SelectTrigger>
           <SelectContent>
             {devices?.map((d) => (

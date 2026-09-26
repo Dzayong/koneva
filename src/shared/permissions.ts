@@ -40,11 +40,11 @@ const RULES: readonly Rule[] = [
   [['GET'], /^\/devices\/[^/]+\/qr$/, 'devices:write'],
   [['GET'], /^\/devices(\/[^/]+(\/[^/]+)?)?$/, 'devices:read'],
   [['GET'], /^\/devices\/[^/]+\/commands\/[^/]+(\/viewers)?$/, 'devices:read'],
-  // Status posts, business profile and catalog: content the number publishes, so developers may, viewers may not.
-  [['POST'], /^\/devices\/[^/]+\/(status|products)$/, 'content:write'],
+  // Status posts and profile edits are content the device publishes: developers may, viewers may not.
+  [['POST'], /^\/devices\/[^/]+\/status$/, 'content:write'],
   [['POST'], /^\/devices\/[^/]+\/commands\/[^/]+\/cancel$/, 'content:write'],
-  [['PATCH'], /^\/devices\/[^/]+\/business$/, 'content:write'],
-  [['PATCH', 'DELETE'], /^\/devices\/[^/]+\/products\/[^/]+$/, 'content:write'],
+  [['PATCH'], /^\/devices\/[^/]+\/profile$/, 'content:write'],
+  [['POST', 'DELETE'], /^\/devices\/[^/]+\/profile\/picture$/, 'content:write'],
   [['POST'], /^\/devices$/, 'devices:write'],
   [['POST'], /^\/devices\/[^/]+\/(pause|resume|preset)$/, 'devices:write'],
   [['GET'], /^\/presets$/, 'devices:read'],

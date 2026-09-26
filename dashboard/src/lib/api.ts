@@ -12,11 +12,9 @@ declare module "axios" {
 }
 import type {
   ApiKeyRecord,
-  BusinessInfo,
-  BusinessUpdate,
-  CatalogProduct,
   DeviceCommand,
-  ProductInput,
+  DeviceProfile,
+  ProfileUpdate,
   StatusPost,
   StatusViewers,
   WebhookLog,
@@ -488,7 +486,7 @@ class ApiClient {
     return response.data.data;
   }
 
-  // ---- Status, catalog and business profile --------------------------------
+  // ---- Status and device profile --------------------------------
 
   async postStatus(deviceKey: string, body: StatusPost): Promise<{ command_id: string; status: string; run_at: string }> {
     return (await this.client.post<ApiSuccess<{ command_id: string; status: string; run_at: string }>>(`/api/v1/devices/${deviceKey}/status`, body, { skipErrorToast: true })).data.data;
@@ -502,24 +500,18 @@ class ApiClient {
   async cancelCommand(deviceKey: string, id: string): Promise<void> {
     await this.client.post(`/api/v1/devices/${deviceKey}/commands/${id}/cancel`, {}, { skipErrorToast: true });
   }
-  // These wait for the number to answer, so allow a generous timeout.
-  async getBusiness(deviceKey: string): Promise<BusinessInfo> {
-    return (await this.client.get<ApiSuccess<BusinessInfo>>(`/api/v1/devices/${deviceKey}/business`, { skipErrorToast: true, timeout: 30_000 })).data.data;
+  // Profile calls wait for the device to answer, so allow a generous timeout.
+  async getProfile(deviceKey: string): Promise<DeviceProfile> {
+    return (await this.client.get<ApiSuccess<DeviceProfile>>(`/api/v1/devices/${deviceKey}/profile`, { skipErrorToast: true, timeout: 30_000 })).data.data;
   }
-  async updateBusiness(deviceKey: string, body: BusinessUpdate): Promise<BusinessInfo> {
-    return (await this.client.patch<ApiSuccess<BusinessInfo>>(`/api/v1/devices/${deviceKey}/business`, body, { skipErrorToast: true, timeout: 30_000 })).data.data;
+  async updateProfile(deviceKey: string, body: ProfileUpdate): Promise<DeviceProfile> {
+    return (await this.client.patch<ApiSuccess<DeviceProfile>>(`/api/v1/devices/${deviceKey}/profile`, body, { skipErrorToast: true, timeout: 45_000 })).data.data;
   }
-  async getCatalog(deviceKey: string): Promise<{ products: CatalogProduct[]; next_cursor: string | null }> {
-    return (await this.client.get<ApiSuccess<{ products: CatalogProduct[]; next_cursor: string | null }>>(`/api/v1/devices/${deviceKey}/catalog`, { params: { limit: 50 }, skipErrorToast: true, timeout: 60_000 })).data.data;
+  async setProfilePicture(deviceKey: string, imageBase64: string): Promise<DeviceProfile> {
+    return (await this.client.post<ApiSuccess<DeviceProfile>>(`/api/v1/devices/${deviceKey}/profile/picture`, { image_base64: imageBase64 }, { skipErrorToast: true, timeout: 60_000 })).data.data;
   }
-  async createProduct(deviceKey: string, body: ProductInput): Promise<CatalogProduct> {
-    return (await this.client.post<ApiSuccess<CatalogProduct>>(`/api/v1/devices/${deviceKey}/products`, body, { skipErrorToast: true, timeout: 60_000 })).data.data;
-  }
-  async updateProduct(deviceKey: string, id: string, body: ProductInput): Promise<CatalogProduct> {
-    return (await this.client.patch<ApiSuccess<CatalogProduct>>(`/api/v1/devices/${deviceKey}/products/${id}`, body, { skipErrorToast: true, timeout: 60_000 })).data.data;
-  }
-  async deleteProduct(deviceKey: string, id: string): Promise<void> {
-    await this.client.delete(`/api/v1/devices/${deviceKey}/products/${id}`, { skipErrorToast: true, timeout: 60_000 });
+  async removeProfilePicture(deviceKey: string): Promise<DeviceProfile> {
+    return (await this.client.delete<ApiSuccess<DeviceProfile>>(`/api/v1/devices/${deviceKey}/profile/picture`, { skipErrorToast: true, timeout: 45_000 })).data.data;
   }
 
   // ---- Webhook -------------------------------------------------------------

@@ -14,7 +14,7 @@ import type { CreatedApiKey, Permission } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const SCOPE_LABEL: Record<string, string> = {
-  "devices:read": "Lihat nomor",
+  "devices:read": "Lihat device",
   "devices:write": "Kelola nomor",
   "devices:delete": "Hapus nomor",
   "messages:read": "Baca pesan",

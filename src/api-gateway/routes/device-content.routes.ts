@@ -8,7 +8,6 @@ const router = Router();
 
 const deviceParams = z.object({ key: z.string().min(1).max(32) });
 const commandParams = deviceParams.extend({ id: z.string().uuid() });
-const productParams = deviceParams.extend({ id: z.string().min(1).max(64) });
 
 export const statusSchema = z.object({
   kind: z.enum(['text', 'image', 'video']),
@@ -27,7 +26,8 @@ export const statusSchema = z.object({
 });
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
-export const businessSchema = z.object({
+const day = z.enum(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+const businessSchema = z.object({
   description: z.string().trim().max(512).optional(),
   address: z.string().trim().max(256).optional(),
   email: z.string().email().max(128).optional(),
@@ -35,26 +35,24 @@ export const businessSchema = z.object({
   hours: z.object({
     timezone: z.string().min(3).max(64),
     days: z.array(z.discriminatedUnion('mode', [
-      z.object({ day: z.enum(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']), mode: z.literal('specific_hours'), open: hhmm, close: hhmm }),
-      z.object({ day: z.enum(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']), mode: z.enum(['open_24h', 'appointment_only']) }),
+      z.object({ day, mode: z.literal('specific_hours'), open: hhmm, close: hhmm }),
+      z.object({ day, mode: z.enum(['open_24h', 'appointment_only']) }),
     ])).min(1).max(7),
   }).optional(),
+}).strict();
+
+/** Display name (max 25), About text (max 139) and, for WhatsApp Business numbers, the business profile. */
+export const profileSchema = z.object({
+  name: z.string().trim().min(1).max(25).optional(),
+  about: z.string().trim().max(139).optional(),
+  business: businessSchema.optional(),
 }).strict().refine((v) => Object.keys(v).length > 0, 'Send at least one field to change');
 
-const productBase = {
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().max(1024).default(''),
-  /** Whole currency units, e.g. 25000 for Rp 25.000. */
-  price: z.number().nonnegative().max(1_000_000_000),
-  currency: z.string().length(3).default('IDR'),
-  url: z.string().url().max(512).optional(),
-  retailer_id: z.string().max(64).optional(),
-  is_hidden: z.boolean().default(false),
-  image_urls: z.array(mediaUrl).min(1).max(10),
-};
-export const productCreateSchema = z.object({ ...productBase, origin_country: z.string().length(2).optional() }).strict();
-export const productUpdateSchema = z.object(productBase).strict();
-const catalogQuery = z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.string().max(200).optional() });
+/** Either a public https image address or a small base64 image (the dashboard resizes to 640 px first). */
+export const pictureSchema = z.object({
+  image_url: mediaUrl.optional(),
+  image_base64: z.string().min(100).max(400_000).regex(/^[A-Za-z0-9+/=]+$/, 'image_base64 must be plain base64').optional(),
+}).strict().refine((v) => Boolean(v.image_url) !== Boolean(v.image_base64), 'Send exactly one of image_url or image_base64');
 
 const key = (request: Request): string => (request.validated!.params as { key: string }).key;
 
@@ -80,29 +78,18 @@ router.post('/devices/:key/commands/:id/cancel', validate({ params: commandParam
   response.json({ success: true, data: await cancelCommand(request.tenant!.id, p.key, p.id) });
 });
 
-// Business profile, catalog and products only work on numbers registered as WhatsApp Business.
-router.get('/devices/:key/business', validate({ params: deviceParams }), async (request: Request, response: Response) => {
-  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'business.get', {}) });
+// Profile: name, About, photo, and for WhatsApp Business numbers the business profile.
+router.get('/devices/:key/profile', validate({ params: deviceParams }), async (request: Request, response: Response) => {
+  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'profile.get', {}, 22_000) });
 });
-router.patch('/devices/:key/business', validate({ params: deviceParams, body: businessSchema }), async (request: Request, response: Response) => {
-  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'business.update', request.validated!.body) });
+router.patch('/devices/:key/profile', validate({ params: deviceParams, body: profileSchema }), async (request: Request, response: Response) => {
+  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'profile.update', request.validated!.body, 35_000) });
 });
-router.get('/devices/:key/catalog', validate({ params: deviceParams, query: catalogQuery }), async (request: Request, response: Response) => {
-  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'catalog.list', request.validated!.query, 26_000) });
+router.post('/devices/:key/profile/picture', validate({ params: deviceParams, body: pictureSchema }), async (request: Request, response: Response) => {
+  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'profile.picture', request.validated!.body, 40_000) });
 });
-router.get('/devices/:key/collections', validate({ params: deviceParams }), async (request: Request, response: Response) => {
-  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'collections.list', {}, 26_000) });
-});
-router.post('/devices/:key/products', validate({ params: deviceParams, body: productCreateSchema }), async (request: Request, response: Response) => {
-  response.status(201).json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'product.create', request.validated!.body, 40_000) });
-});
-router.patch('/devices/:key/products/:id', validate({ params: productParams, body: productUpdateSchema }), async (request: Request, response: Response) => {
-  const p = request.validated!.params as z.infer<typeof productParams>;
-  response.json({ success: true, data: await runCommand(request.tenant!.id, p.key, 'product.update', { id: p.id, ...(request.validated!.body as object) }, 40_000) });
-});
-router.delete('/devices/:key/products/:id', validate({ params: productParams }), async (request: Request, response: Response) => {
-  const p = request.validated!.params as z.infer<typeof productParams>;
-  response.json({ success: true, data: await runCommand(request.tenant!.id, p.key, 'product.delete', { id: p.id }, 26_000) });
+router.delete('/devices/:key/profile/picture', validate({ params: deviceParams }), async (request: Request, response: Response) => {
+  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'profile.picture', {}, 30_000) });
 });
 
 export default router;

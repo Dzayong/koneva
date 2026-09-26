@@ -141,12 +141,12 @@ export default function QuickstartPage() {
           )}
           {online.length === 0 ? (
             <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-              Belum ada nomor yang online. <Link href="/devices" className="font-medium text-primary underline underline-offset-4">Sambungkan nomor</Link> dulu, lalu kembali ke sini.
+              Belum ada device yang online. <Link href="/devices" className="font-medium text-primary underline underline-offset-4">Sambungkan device</Link> dulu, lalu kembali ke sini.
             </div>
           ) : (
             <form onSubmit={(e) => { e.preventDefault(); if (validTo) send.mutate(); }} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="qs-device">Kirim dari nomor</Label>
+                <Label htmlFor="qs-device">Kirim dari device</Label>
                 <Select value={selected} onValueChange={setDeviceKey}>
                   <SelectTrigger id="qs-device" className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>{online.map((d) => <SelectItem key={d.device_key} value={d.device_key}>{d.label || d.device_key}</SelectItem>)}</SelectContent>

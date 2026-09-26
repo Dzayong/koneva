@@ -95,7 +95,7 @@ export default function BroadcastPage() {
 
   const handleSend = async () => {
     if (!deviceKey) {
-      toast.error("Pilih nomor dulu");
+      toast.error("Pilih device dulu");
       return;
     }
     if (!template.trim() && !mediaUrl.trim()) {
@@ -160,16 +160,16 @@ export default function BroadcastPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>1. Nomor pengirim</CardTitle>
+              <CardTitle>1. Device pengirim</CardTitle>
             </CardHeader>
             <CardContent>
               <Select value={deviceKey} onValueChange={setDeviceKey}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Pilih nomor yang online" />
+                  <SelectValue placeholder="Pilih device yang online" />
                 </SelectTrigger>
                 <SelectContent>
                   {onlineDevices.length === 0 ? (
-                    <div className="p-2 text-sm text-muted-foreground">Tidak ada nomor online</div>
+                    <div className="p-2 text-sm text-muted-foreground">Tidak ada device online</div>
                   ) : (
                     onlineDevices.map((d) => (
                       <SelectItem key={d.id} value={d.device_key}>

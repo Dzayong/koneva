@@ -8,18 +8,17 @@ import { usePermissions } from "@/hooks/use-me";
 import { formatDate } from "@/lib/utils";
 
 const ACTION: Record<string, string> = {
-  "devices.create": "Menambah nomor",
+  "devices.create": "Menambah device",
   "webhook.secret_rotate": "Membuat kunci webhook baru",
   "status.post": "Memposting status WhatsApp",
-  "business.update": "Mengubah profil bisnis",
-  "product.create": "Menambah produk katalog",
-  "product.update": "Mengubah produk katalog",
-  "product.delete": "Menghapus produk katalog",
-  "devices.pause": "Menjeda nomor",
-  "devices.resume": "Melanjutkan nomor",
+  "profile.update": "Mengubah profil device",
+  "profile.picture": "Mengganti foto profil device",
+  "profile.picture_remove": "Menghapus foto profil device",
+  "devices.pause": "Menjeda device",
+  "devices.resume": "Melanjutkan device",
   "devices.persona_update": "Mengubah pengaturan pengiriman",
-  "devices.preset_apply": "Menerapkan peran nomor",
-  "devices.delete": "Menghapus nomor",
+  "devices.preset_apply": "Menerapkan peran device",
+  "devices.delete": "Menghapus device",
   "webhook.update": "Mengubah webhook",
   "keys.create": "Membuat kunci API",
   "keys.rotate": "Memutar kunci API",
@@ -56,7 +55,7 @@ export default function ActivityPage() {
       {isLoading ? <Skeleton className="h-48 w-full" /> : isError ? (
         <p className="text-sm text-destructive">Gagal memuat aktivitas. Muat ulang halaman.</p>
       ) : rows.length === 0 ? (
-        <p className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">Belum ada aktivitas. Menambah nomor, membuat kunci, atau mengundang rekan akan muncul di sini.</p>
+        <p className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">Belum ada aktivitas. Menambah device, membuat kunci, atau mengundang rekan akan muncul di sini.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border bg-card">
           <Table>

@@ -61,7 +61,7 @@ export function DeviceCard({
   const deleteDevice = useDeleteDevice();
 
   const handleDelete = () => {
-    if (window.confirm(`Hapus nomor "${device.label || device.device_key}"? Nomor akan diputus dan tidak bisa dikembalikan.`)) {
+    if (window.confirm(`Hapus device "${device.label || device.device_key}"? Device akan diputus dan tidak bisa dikembalikan.`)) {
       deleteDevice.mutate(device.device_key);
     }
   };
@@ -84,7 +84,7 @@ export function DeviceCard({
             <h3 className="truncate font-semibold">{device.label || "Tanpa nama"}</h3>
             <p className="truncate text-xs text-muted-foreground">{device.device_key}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {device.phone_number ? formatPhoneNumber(device.phone_number) : "Belum ada nomor"}
+              {device.phone_number ? formatPhoneNumber(device.phone_number) : "Belum ada device"}
             </p>
           </div>
         </div>
