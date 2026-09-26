@@ -16,15 +16,28 @@ export function HowItWorks() {
   const [active, setActive] = useState(0);
   const refs = useRef<Array<HTMLDivElement | null>>([]);
 
+  // The active step is the one whose text block is nearest the middle of the screen. (An IntersectionObserver
+  // band switched the picture as soon as the next block's top edge entered it, while its text was still far below.)
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) if (e.isIntersecting) setActive(Number((e.target as HTMLElement).dataset.index));
-      },
-      { rootMargin: "-40% 0px -40% 0px" },
-    );
-    refs.current.forEach((r) => r && observer.observe(r));
-    return () => observer.disconnect();
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const mid = window.innerHeight / 2;
+      let best = 0;
+      let bestDistance = Infinity;
+      refs.current.forEach((el, i) => {
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const distance = Math.abs(rect.top + rect.height / 2 - mid);
+        if (distance < bestDistance) { bestDistance = distance; best = i; }
+      });
+      setActive(best);
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
+    update();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    return () => { window.removeEventListener("scroll", schedule); window.removeEventListener("resize", schedule); if (frame) cancelAnimationFrame(frame); };
   }, []);
 
   return (

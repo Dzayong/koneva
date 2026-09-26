@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-const WORDS = ["kode OTP", "notifikasi pesanan", "pengingat jadwal", "tagihan", "balasan CS"];
+// OTP is last on purpose: this channel is unofficial, so it should not be the first thing we suggest.
+const WORDS = ["notifikasi pesanan", "pengingat jadwal", "tagihan", "balasan CS", "kode OTP"];
 const TYPE_MS = 70;
 const DELETE_MS = 38;
 const HOLD_MS = 1500;

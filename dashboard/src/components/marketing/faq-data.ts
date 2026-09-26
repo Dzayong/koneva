@@ -22,7 +22,7 @@ export const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "Bagaimana dengan OTP yang harus cepat?",
-    a: "Pesan dengan prioritas urgent memakai antrean sendiri dan tidak menunggu jeda pengiriman biasa, sehingga cocok untuk kode OTP. Pesan biasa tetap diberi jeda agar pola pengiriman tidak terlihat seperti mesin.",
+    a: "Pesan dengan prioritas urgent memakai antrean sendiri dan tidak menunggu jeda pengiriman biasa, sehingga cocok untuk kode OTP. Pesan biasa tetap diberi jeda agar pola pengiriman tidak terlihat seperti mesin. Karena jalur ini tidak resmi, jangan menjadikannya satu-satunya cara untuk login atau transaksi penting; siapkan jalur cadangan seperti SMS atau email.",
   },
   {
     q: "Bagaimana saya tahu pesan terkirim, dibaca, atau nomor bermasalah?",

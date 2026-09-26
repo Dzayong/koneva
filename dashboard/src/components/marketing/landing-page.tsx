@@ -63,8 +63,34 @@ function AuthLink() {
   const { isAuthenticated } = useAuth();
   return isAuthenticated === true
     ? <Button asChild><Link href="/dashboard">Buka dashboard</Link></Button>
-    : <Button asChild variant="outline"><Link href="/login" onClick={() => track("cta_login")}>Masuk</Link></Button>;
+    : (
+      <>
+        <Button asChild variant="ghost" className="px-2 sm:px-4"><Link href="/login" onClick={() => track("cta_login")}>Masuk</Link></Button>
+        <Button asChild className="px-3 sm:px-4"><Link href="/signup" onClick={() => track("cta_signup")}>Daftar gratis</Link></Button>
+      </>
+    );
 }
+
+/** The question everyone asks first. Shows the lowest published monthly price, or says plainly that it is not set yet. */
+function PriceHint() {
+  const plans = usePublicPlans();
+  const prices = (plans.data ?? []).filter((p) => p.price_is_final && p.price_month_idr !== null).map((p) => p.price_month_idr as number);
+  const from = prices.length ? Math.min(...prices) : null;
+  return (
+    <p className="text-sm text-muted-foreground">
+      {from !== null
+        ? <>Paket berbayar mulai <strong className="text-foreground">Rp {from.toLocaleString("id-ID")}/bulan</strong>. </>
+        : <>Harga paket Pelajar dan UMKM diumumkan sebentar lagi; sekarang Anda bisa mencoba dulu. </>}
+      <a href="#harga" className="underline underline-offset-2 hover:text-foreground">Lihat paket</a>
+    </p>
+  );
+}
+
+const AUDIENCES: Array<{ title: string; text: string; cta: string; href: string; from: RevealFrom }> = [
+  { title: "Pemilik usaha dan UMKM", text: "Kirim info pesanan, pengingat, dan promo ke pelanggan dari nomor WhatsApp toko Anda. Ada dashboard untuk kontak, kirim massal, dan balasan otomatis, tanpa perlu coding.", cta: "Coba gratis", href: "/signup", from: "left" },
+  { title: "Developer dan freelancer", text: "Satu API untuk mengirim dan menerima pesan, status waktu nyata, webhook bertanda tangan, dan kunci API berizin. Contoh kode Node.js, Python, dan PHP.", cta: "Baca dokumentasi", href: "/docs", from: "up" },
+  { title: "Pelajar dan proyek kuliah", text: "Paket khusus pelajar dengan verifikasi email kampus. Cocok untuk tugas akhir, bot pengingat, atau proyek kecil yang butuh WhatsApp.", cta: "Lihat paket", href: "#harga", from: "right" },
+];
 
 export function LandingPage() {
   const reduce = useReducedMotion();
@@ -86,9 +112,9 @@ export function LandingPage() {
           <motion.div aria-hidden style={{ scale: glowScale }} className="pointer-events-none absolute top-[38%] left-1/2 h-[620px] w-[900px] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(37,99,235,0.38),rgba(6,182,212,0.12)_55%,transparent)] blur-2xl" />
           <div aria-hidden className="absolute inset-x-0 top-0 h-[560px] [background-image:radial-gradient(rgba(148,163,255,0.22)_1px,transparent_1px)] [background-size:24px_24px] [mask-image:radial-gradient(ellipse_at_top,black_25%,transparent_70%)]" />
           <header className="relative mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
-            <Link href="/" className="flex items-center gap-3" aria-label="WA Gateway, beranda">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#2563eb] to-[#06b6d4] shadow-md"><Zap className="h-5 w-5 text-white" /></span>
-              <span className="text-lg font-semibold">WA Gateway</span>
+            <Link href="/" className="flex items-center gap-2 sm:gap-3" aria-label="WA Gateway, beranda">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#2563eb] to-[#06b6d4] shadow-md sm:h-10 sm:w-10"><Zap className="h-5 w-5 text-white" /></span>
+              <span className="text-base font-semibold whitespace-nowrap sm:text-lg">WA Gateway</span>
             </Link>
             <nav aria-label="Utama" className="flex items-center gap-1 sm:gap-2">
               <Button asChild variant="ghost" className="hidden sm:inline-flex"><a href="#harga">Harga</a></Button>
@@ -99,20 +125,23 @@ export function LandingPage() {
 
           <div className="relative mx-auto max-w-5xl px-6 pt-14 pb-10 text-center md:pt-24">
             <motion.p initial="hidden" animate="show" variants={rise} className="mx-auto inline-flex items-center gap-2 rounded-full border bg-card/60 px-3.5 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#67e8f9]" />Jalur non-resmi, risikonya kami jelaskan terbuka
+              <span className="h-1.5 w-1.5 rounded-full bg-[#67e8f9]" />Untuk UMKM, developer, dan pelajar
             </motion.p>
             <motion.h1 initial="hidden" animate="show" custom={1} variants={rise} className="font-display mt-7 text-4xl leading-[1.08] sm:text-6xl md:text-7xl">
               Kirim <span className="hidden lg:inline"> </span><RotatingText />
-              <span className="lg:hidden"> </span>lewat WhatsApp API.
+              {" "}lewat WhatsApp API.
             </motion.h1>
             <motion.p initial="hidden" animate="show" custom={2} variants={rise} className="mx-auto mt-7 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
-              Pindai QR dengan nomor Anda sendiri, ambil kunci API, kirim. Nomor dijaga dengan pemanasan bertahap, jeda seperti orang, dan skor kesiapan, supaya Anda tahu kondisinya sebelum WhatsApp yang memberi tahu.
+              Sambungkan nomor WhatsApp Anda dengan memindai QR, lalu kirim pesan dari aplikasi atau dashboard. Nomor dijaga otomatis: dilatih bertahap, dijeda seperti manusia, dan dipantau kesehatannya.
             </motion.p>
             <motion.div initial="hidden" animate="show" custom={3} variants={rise} className="mt-9 flex flex-wrap items-center justify-center gap-3">
               <Button asChild size="lg" className="h-12 px-7 text-base font-semibold"><Link href="/signup" onClick={() => track("cta_signup")}>Coba gratis 14 hari <ArrowRight className="ml-1" /></Link></Button>
               <Button asChild variant="outline" size="lg" className="h-12 px-7 text-base"><a href="#tur">Lihat cara kerjanya</a></Button>
             </motion.div>
-            <motion.p initial="hidden" animate="show" custom={4} variants={rise} className="mt-4 text-xs text-muted-foreground">Tanpa kartu kredit. Tidak ada jaminan bebas blokir, dan kami tidak menjanjikannya.</motion.p>
+            <motion.div initial="hidden" animate="show" custom={4} variants={rise} className="mt-5 space-y-1.5">
+              <PriceHint />
+              <p className="text-xs text-muted-foreground">Tanpa kartu kredit. Ini layanan tidak resmi, jadi WhatsApp bisa membatasi nomor; <a href="#faq" className="underline underline-offset-2 hover:text-foreground">baca risikonya</a>.</p>
+            </motion.div>
           </div>
 
           <motion.div style={{ y: demoY }} initial="hidden" animate="show" custom={5} variants={rise} className="relative mx-auto max-w-2xl px-6 pb-20">
@@ -121,6 +150,25 @@ export function LandingPage() {
           <UseCaseMarquee />
           <div aria-hidden className="h-24" />
         </section>
+
+        {/* Untuk siapa: sky = jelas dan tepercaya; juga menyebut untuk siapa layanan ini BUKAN */}
+        <Section tone="sky" id="untuk-siapa" label="Untuk siapa">
+          <Heading eyebrow="Untuk siapa" title="Dibuat untuk yang ingin mulai cepat, tanpa urusan rumit" />
+          <Stagger className="mt-12 grid gap-5 md:grid-cols-3" step={0.1}>
+            {AUDIENCES.map((a) => (
+              <StaggerItem key={a.title} from={a.from} className="flex flex-col rounded-2xl border bg-card p-7 shadow-card">
+                <h3 className="font-display text-2xl">{a.title}</h3>
+                <p className="mt-3 flex-1 text-muted-foreground">{a.text}</p>
+                <Button asChild variant="outline" className="mt-6 self-start"><Link href={a.href}>{a.cta} <ArrowRight className="ml-1" /></Link></Button>
+              </StaggerItem>
+            ))}
+          </Stagger>
+          <Reveal delay={0.1}>
+            <p className="mt-8 max-w-3xl rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+              <strong className="text-foreground">Bukan untuk:</strong> kebutuhan yang tidak boleh berisiko sama sekali, misalnya instansi dengan kewajiban kepatuhan, atau login yang hanya bergantung pada WhatsApp. Untuk itu, jalur resmi dari Meta lebih tepat.
+            </p>
+          </Reveal>
+        </Section>
 
         {/* Tur produk: cream = tenang, manusiawi */}
         <Section tone="cream" id="tur" label="Tampilan produk" backdrop={<PhotoBackdrop src="/media/photos/florist.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[560px]" />}>
