@@ -13,6 +13,8 @@ import { activeConnections } from './metrics';
 import { shutdownTracing } from './tracing';
 import { registerIncomingMessageListener } from './incoming';
 import { AutoReplyEngine } from './auto-reply';
+import { PresenceRoutine } from './presence';
+import { getOrCreatePersona } from '../shared/persona';
 import { DeviceStatusNotifier } from './device-events';
 import type { BotConfig, ConnectionState, BotStatus } from './types';
 
@@ -95,12 +97,24 @@ async function main(): Promise<void> {
   };
   let currentSocket: WASocket | undefined;
 
+  const presence = new PresenceRoutine(
+    () => currentSocket,
+    async () => {
+      const device = (await queryFn('SELECT id FROM devices WHERE device_key = $1', [botConfig.botId])).rows[0] as { id: string } | undefined;
+      if (!device) return { enabled: false, minMs: 1_000, maxMs: 200_000 };
+      const persona = await getOrCreatePersona(device.id, queryFn);
+      return { enabled: persona.presenceEnabled, minMs: persona.presenceMinMs, maxMs: persona.presenceMaxMs };
+    },
+    log,
+  );
+
   const queueProcessor = startQueueProcessor(
     botConfig.botId,
     redis,
     {
       getSocket: () => currentSocket,
       isConnected: () => currentState.status === 'online',
+      presence,
     },
     log,
     queryFn,
@@ -150,8 +164,11 @@ async function main(): Promise<void> {
     onSocketReady: (sock: WASocket) => {
       currentSocket = sock;
       registerReceiptListener(sock, log, queryFn);
-      registerIncomingMessageListener(sock, botConfig.botId, log, queryFn, (message) =>
-        autoReplyEngine.process(message, sock).then(() => undefined));
+      registerIncomingMessageListener(sock, botConfig.botId, log, queryFn, async (message) => {
+        // Direct chats only: groups are not "opened" by this routine.
+        if (!message.isGroup) await presence.onInbound(message.key);
+        await autoReplyEngine.process(message, sock, presence);
+      });
     },
   });
 
@@ -164,6 +181,7 @@ async function main(): Promise<void> {
 
     log.info('Shutting down bot container', { signal });
     server.close();
+    presence.stop();
     await queueProcessor.stop();
     await closeQueueResources();
     await autoReplyEngine.close();

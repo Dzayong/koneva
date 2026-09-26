@@ -79,15 +79,21 @@ function Advanced({ persona, canEdit, deviceKey }: { persona: Persona; canEdit: 
   const [max, setMax] = useState(seconds(persona.delay_max_ms));
   const [wake, setWake] = useState(toTime(persona.wake_hour));
   const [sleep, setSleep] = useState(toTime(persona.sleep_hour));
+  const [presence, setPresence] = useState(persona.presence_enabled);
+  const [pMin, setPMin] = useState(seconds(persona.presence_min_ms));
+  const [pMax, setPMax] = useState(seconds(persona.presence_max_ms));
 
   const n = (v: string) => Math.round(Number(v) * 1000);
   const valid =
     (mode === "flat" ? n(flat) >= 1000 && n(flat) <= 600_000 : n(min) >= 1000 && n(max) >= n(min) && n(max) <= 600_000) &&
-    (alwaysOn || fromTime(wake) < fromTime(sleep));
+    (alwaysOn || fromTime(wake) < fromTime(sleep)) &&
+    (!presence || (n(pMin) >= 1000 && n(pMax) >= n(pMin) && n(pMax) <= 600_000));
 
   const save = () => {
     update.mutate({
       always_on: alwaysOn,
+      presence_enabled: presence,
+      ...(presence ? { presence_min_ms: n(pMin), presence_max_ms: n(pMax) } : {}),
       ...(mode === "flat" ? { delay_ms: n(flat) } : { delay_min_ms: n(min), delay_max_ms: n(max) }),
       ...(alwaysOn ? {} : { wake_hour: fromTime(wake), sleep_hour: fromTime(sleep) }),
     });
@@ -137,6 +143,24 @@ function Advanced({ persona, canEdit, deviceKey }: { persona: Persona; canEdit: 
               </div>
             )}
             {!valid && <p role="alert" className="text-sm text-destructive">Periksa angka: jeda 1 detik sampai 10 menit, angka terbesar tidak boleh lebih kecil dari yang terkecil, dan jam berhenti harus setelah jam mulai.</p>}
+          </fieldset>
+
+          <fieldset className="space-y-3 border-t pt-5">
+            <legend className="text-sm font-medium">Membuka WhatsApp seperti orang</legend>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label htmlFor="presence">Online saat ada pesan masuk</Label>
+                <p className="text-sm text-muted-foreground">Nomor menunggu sebentar, tampil online, menunggu lagi, membaca pesan (centang biru), lalu offline lagi. Saat membalas, nomor dipastikan online dulu.</p>
+              </div>
+              <Switch id="presence" checked={presence} onCheckedChange={setPresence} disabled={!canEdit} />
+            </div>
+            {presence && (
+              <div className="flex flex-wrap items-end gap-4">
+                <div className="space-y-1.5"><Label htmlFor="pmin">Jeda tiap tahap, paling cepat (detik)</Label><Input id="pmin" inputMode="decimal" value={pMin} onChange={(e) => setPMin(e.target.value)} disabled={!canEdit} className="w-28" /></div>
+                <div className="space-y-1.5"><Label htmlFor="pmax">Paling lama (detik)</Label><Input id="pmax" inputMode="decimal" value={pMax} onChange={(e) => setPMax(e.target.value)} disabled={!canEdit} className="w-28" /></div>
+                <p className="pb-2 text-sm text-muted-foreground">Setiap tahap memakai jeda acak dalam rentang ini. Centang biru hanya terlihat pengirim jika pengaturan “Tanda baca” di HP Anda aktif.</p>
+              </div>
+            )}
           </fieldset>
 
           <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">

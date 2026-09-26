@@ -20,6 +20,10 @@ export interface Persona {
   typingMsPerChar: number;
   /** 24-hour mode: no active-hours window (pacing and rests still apply). */
   alwaysOn: boolean;
+  /** Online/read/offline routine around messages; each pause is random within these bounds. */
+  presenceEnabled: boolean;
+  presenceMinMs: number;
+  presenceMaxMs: number;
   /** Preset the number was last set to; null/undefined when hand-tuned. */
   preset?: string | null | undefined;
 }
@@ -48,6 +52,9 @@ export function generatePersona(seed: string, timezone = 'Asia/Jakarta'): Person
     restMaxMs: restMinMs + Math.round((5 + unit(seed, 'rmax') * 8) * 60_000),
     typingMsPerChar: 45 + Math.floor(unit(seed, 'type') * 36),
     alwaysOn: false,
+    presenceEnabled: true,
+    presenceMinMs: 1_000,
+    presenceMaxMs: 200_000,
   };
 }
 
@@ -150,6 +157,7 @@ export async function getBurstState(deviceId: string, queryFn: QueryFn): Promise
 interface PersonaRow {
   seed: string; timezone: string; wake_hour: number; sleep_hour: number; delay_min_ms: number; delay_max_ms: number;
   burst_size: number; rest_min_ms: number; rest_max_ms: number; typing_ms_per_char: number; always_on: boolean; preset?: string | null;
+  presence_enabled?: boolean; presence_min_ms?: number; presence_max_ms?: number;
 }
 
 function fromRow(row: PersonaRow): Persona {
@@ -158,12 +166,15 @@ function fromRow(row: PersonaRow): Persona {
     delayMinMs: row.delay_min_ms, delayMaxMs: row.delay_max_ms, burstSize: row.burst_size,
     restMinMs: row.rest_min_ms, restMaxMs: row.rest_max_ms, typingMsPerChar: row.typing_ms_per_char,
     alwaysOn: row.always_on === true,
+    presenceEnabled: row.presence_enabled !== false,
+    presenceMinMs: row.presence_min_ms ?? 1_000,
+    presenceMaxMs: row.presence_max_ms ?? 200_000,
     preset: row.preset ?? null,
   };
 }
 
 const SELECT_SQL = `SELECT seed, timezone, wake_hour, sleep_hour, delay_min_ms, delay_max_ms, burst_size,
-  rest_min_ms, rest_max_ms, typing_ms_per_char, always_on, preset FROM device_personas WHERE device_id = $1::uuid`;
+  rest_min_ms, rest_max_ms, typing_ms_per_char, always_on, preset, presence_enabled, presence_min_ms, presence_max_ms FROM device_personas WHERE device_id = $1::uuid`;
 
 export async function getOrCreatePersona(deviceId: string, queryFn: QueryFn): Promise<Persona> {
   const existing = (await queryFn(SELECT_SQL, [deviceId])).rows[0] as PersonaRow | undefined;

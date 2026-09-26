@@ -498,6 +498,11 @@ class ApiClient {
 
   // ---- Plans and billing ---------------------------------------------------
 
+  async getPublicInfo(): Promise<{ support_contact: string | null }> {
+    const response = await this.client.get<ApiSuccess<{ support_contact: string | null }>>("/public/info", { skipErrorToast: true });
+    return response.data.data;
+  }
+
   async getPublicPlans(): Promise<PublicPlan[]> {
     const response = await this.client.get<ApiSuccess<PublicPlan[]>>("/public/plans", { skipErrorToast: true });
     return response.data.data;

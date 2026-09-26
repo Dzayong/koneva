@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { CycleToggle, PlanCards } from "@/components/billing/plan-cards";
 import { HeroDemo } from "@/components/marketing/hero-demo";
 import { HowItWorks } from "@/components/marketing/how-it-works";
+import { PhotoBackdrop } from "@/components/marketing/photo-backdrop";
+import { SiteFooter } from "@/components/marketing/site-footer";
 import { ProductTour } from "@/components/marketing/product-tour";
 import { ReadinessRing } from "@/components/marketing/readiness-ring";
 import { RotatingText } from "@/components/marketing/rotating-text";
@@ -42,10 +44,11 @@ function Heading({ eyebrow, title, text }: { eyebrow: string; title: string; tex
   );
 }
 
-function Section({ tone, id, className, children }: { tone: string; id?: string; className?: string; children: React.ReactNode }) {
+function Section({ tone, id, className, backdrop, children }: { tone: string; id?: string; className?: string; backdrop?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section id={id} data-tone className={cn(`tone-${tone} scroll-mt-4`, className)}>
-      <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">{children}</div>
+    <section id={id} data-tone className={cn(`tone-${tone} relative scroll-mt-4 overflow-hidden`, className)}>
+      {backdrop}
+      <div className="relative mx-auto max-w-7xl px-6 py-24 md:py-32">{children}</div>
     </section>
   );
 }
@@ -64,6 +67,7 @@ export default function WelcomePage() {
       <main className="relative overflow-x-clip">
         {/* Hero: ink navy = authority; coral action = the one warm complement */}
         <section ref={heroRef} data-tone className="tone-ink relative overflow-hidden">
+          <PhotoBackdrop src="/media/photos/skyline-night.jpg" side="full" className="!top-auto h-[70%]" />
           <motion.div aria-hidden style={{ scale: glowScale }} className="pointer-events-none absolute top-[38%] left-1/2 h-[620px] w-[900px] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(37,99,235,0.38),rgba(6,182,212,0.12)_55%,transparent)] blur-2xl" />
           <div aria-hidden className="absolute inset-x-0 top-0 h-[560px] [background-image:radial-gradient(rgba(148,163,255,0.22)_1px,transparent_1px)] [background-size:24px_24px] [mask-image:radial-gradient(ellipse_at_top,black_25%,transparent_70%)]" />
           <header className="relative mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
@@ -102,13 +106,13 @@ export default function WelcomePage() {
         </section>
 
         {/* Tur produk: cream = tenang, manusiawi */}
-        <Section tone="cream" id="tur">
+        <Section tone="cream" id="tur" backdrop={<PhotoBackdrop src="/media/photos/florist.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[560px]" />}>
           <Heading eyebrow="Tampilan asli" title="Dari daftar sampai siap kirim, sekitar 5 menit" text="Bukan mockup. Anda dituntun satu langkah demi satu langkah, tanpa perlu membaca dokumentasi dulu." />
           <div className="mt-12"><ProductTour /></div>
         </Section>
 
         {/* Perlindungan: mint = rasa aman */}
-        <Section tone="mint" id="features">
+        <Section tone="mint" id="features" backdrop={<PhotoBackdrop src="/media/photos/support.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
           <Heading eyebrow="Keamanan nomor" title="Dibuat untuk keandalan, bukan sekadar kecepatan" />
           <div className="mt-12 grid gap-5 md:grid-cols-3">
             {FEATURES.map((f, i) => (
@@ -123,13 +127,13 @@ export default function WelcomePage() {
         </Section>
 
         {/* Pemanasan: sand = hangat, sabar, bertahap */}
-        <Section tone="sand">
+        <Section tone="sand" backdrop={<PhotoBackdrop src="/media/photos/seller.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[560px]" />}>
           <Heading eyebrow="Pemanasan" title="Nomor baru dilatih dulu, bukan langsung dipakai penuh" text="Batas kirim naik bertahap. Balasan ke orang yang menulis lebih dulu selalu diperbolehkan sejak hari pertama." />
           <div className="mt-12"><WarmupFlow /></div>
         </Section>
 
         {/* Skor: indigo = analitis, wawasan */}
-        <Section tone="indigo">
+        <Section tone="indigo" backdrop={<PhotoBackdrop src="/media/photos/analytics.jpg" side="right" blend="mix-blend-luminosity" className="!bottom-auto h-[520px]" />}>
           <Heading eyebrow="Skor kesiapan" title="Lihat kesehatan nomor, bukan menebak" text="Lima faktor dengan bobot yang jelas. Kalau datanya belum cukup, skor bilang belum yakin, bukan berpura-pura pasti." />
           <div className="mt-12"><ReadinessRing /></div>
         </Section>
@@ -142,7 +146,7 @@ export default function WelcomePage() {
 
         {/* Harga: sky = kepercayaan untuk keputusan uang. Angka muncul setelah operator menetapkan final. */}
         {plans.data && plans.data.length > 0 && (
-          <Section tone="sky" id="harga">
+          <Section tone="sky" id="harga" backdrop={<PhotoBackdrop src="/media/photos/homeoffice.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
             <div className="flex flex-wrap items-end justify-between gap-4">
               <Heading eyebrow="Paket" title="Harga yang jelas, tanpa kejutan" text="Percobaan gratis 14 hari saat mendaftar. Pembayaran dikonfirmasi manual oleh penyedia layanan." />
               <CycleToggle value={cycle} onChange={setCycle} />
@@ -158,8 +162,9 @@ export default function WelcomePage() {
             <p className="mx-auto mt-5 max-w-xl text-lg text-muted-foreground">Buat akun, sambungkan nomor, dan mulai mengirim dalam hitungan menit.</p>
             <Button asChild size="lg" className="mt-9 h-12 px-8 text-base font-semibold"><Link href="/signup">Buat akun gratis <ArrowRight className="ml-1" /></Link></Button>
           </div>
-          <footer className="mx-auto max-w-7xl border-t px-6 py-8 text-sm text-muted-foreground">© {new Date().getFullYear()} WA Gateway</footer>
+
         </section>
+        <SiteFooter />
       </main>
     </Stage>
   );

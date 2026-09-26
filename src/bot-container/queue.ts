@@ -1,3 +1,4 @@
+import type { PresenceRoutine } from './presence';
 import { Queue, Worker, UnrecoverableError, type Job } from 'bullmq';
 import type Redis from 'ioredis';
 import {
@@ -246,6 +247,8 @@ export interface QueueProcessorDeps {
   now?: () => Date;
   /** Injectable delay; production uses Baileys' real delay implementation. */
   delay?: (ms: number) => Promise<void>;
+  /** Puts the number online before it types and sends, and lets it drift offline afterwards. */
+  presence?: Pick<PresenceRoutine, 'ensureOnline' | 'afterSend'>;
 }
 
 async function failAttempt(
@@ -411,6 +414,7 @@ async function processJobBody(
   }
 
   const jid = toWaJid(message.to);
+  await deps.presence?.ensureOnline();
   if (typingMs > 0) {
     try {
       await sock.sendPresenceUpdate('composing', jid);
@@ -437,6 +441,7 @@ async function processJobBody(
     return;
   }
 
+  void deps.presence?.afterSend();
   const whatsappMessageId = sendResult?.key.id ?? undefined;
   await updateMessageStatus(
     message.id,

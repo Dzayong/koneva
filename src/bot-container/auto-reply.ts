@@ -1,3 +1,4 @@
+import type { PresenceRoutine } from './presence';
 import type { WASocket, WAMessageKey } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import type Redis from 'ioredis';
@@ -80,8 +81,8 @@ export class AutoReplyEngine {
     this.log.info('Auto-reply rules loaded', { deviceKey: this.deviceKey, count: loaded.length });
   }
 
-  async process(message: IncomingForAutoReply, sock: WASocket): Promise<boolean> {
-    return processAutoReply(message, this.rules, sock, this.queryFn, this.log);
+  async process(message: IncomingForAutoReply, sock: WASocket, presence?: AutoReplyDependencies['presence']): Promise<boolean> {
+    return processAutoReply(message, this.rules, sock, this.queryFn, this.log, presence ? { presence } : {});
   }
 
   getRules(): readonly AutoReplyRule[] {
@@ -112,6 +113,8 @@ export function matchesAutoReply(rule: AutoReplyRule, content: string): boolean 
 interface AutoReplyDependencies {
   canSend?: (deviceKey: string) => Promise<AntiBanDecision>;
   wait?: (milliseconds: number) => Promise<void>;
+  /** When set, going online and reading are owned by the presence routine. */
+  presence?: Pick<PresenceRoutine, 'beforeReply' | 'afterSend'>;
 }
 
 async function logActivity(
@@ -176,18 +179,21 @@ export async function processAutoReply(
     const typingMs = decision.typing.shouldSimulate ? Math.min(decision.typing.durationMs, Math.floor(total * 0.6)) : 0;
     const readAfterMs = Math.min(1_500 + Math.floor(Math.random() * 3_500), Math.floor(total * 0.3));
     await wait(readAfterMs);
-    if (message.key) {
+    if (message.key && !dependencies.presence) {
       await sock.readMessages([message.key]).catch((error: unknown) => {
         log.debug('Failed to mark message as read', { error: error instanceof Error ? error.message : String(error) });
       });
     }
     await wait(Math.max(0, total - readAfterMs - typingMs));
+    // Human order: the phone is on and the message read before anything is typed.
+    await dependencies.presence?.beforeReply(message.key);
     if (typingMs > 0) {
       await sock.sendPresenceUpdate('composing', jid);
       await wait(typingMs);
       await sock.sendPresenceUpdate('paused', jid);
     }
     const sent = await sock.sendMessage(jid, { text: content });
+    void dependencies.presence?.afterSend();
     const inserted = await queryFn(
       `INSERT INTO messages (tenant_id, device_id, device_key, from_number, to_number, content,
        type, status, direction, whatsapp_message_id, sent_at)

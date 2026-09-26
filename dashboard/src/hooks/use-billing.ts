@@ -14,6 +14,10 @@ export function usePublicPlans() {
   return useQuery({ queryKey: ["public-plans"], queryFn: () => api.getPublicPlans(), staleTime: 300_000, retry: false });
 }
 
+export function usePublicInfo() {
+  return useQuery({ queryKey: ["public-info"], queryFn: () => api.getPublicInfo(), staleTime: 300_000, retry: false });
+}
+
 export function useCreateOrder() {
   const qc = useQueryClient();
   return useMutation({

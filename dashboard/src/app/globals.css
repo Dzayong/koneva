@@ -253,7 +253,7 @@
    Reasoning (heuristics, not laws): ink navy = authority, cream = calm and human,
    mint = safety, sand = warmth and patience, indigo = insight, sky = trust for
    money decisions, coral = the one warm complement that makes the action stand out. */
-.font-display { font-family: var(--font-fraunces), Georgia, serif; font-optical-sizing: auto; letter-spacing: -0.02em; font-weight: 600; }
+.font-display { font-family: var(--font-display), Georgia, serif; font-optical-sizing: auto; letter-spacing: -0.015em; font-weight: 600; }
 
 .tone-ink { --stage:#0a1224; --background:#0a1224; --foreground:#f2f5fc; --card:#111c38; --card-foreground:#f2f5fc; --border:#24345f; --input:#34467a; --muted:#16224a; --muted-foreground:#a9b7d6; --secondary:#16224a; --secondary-foreground:#f2f5fc; --accent:#1a2a5a; --accent-foreground:#dbe6ff; --primary:#ff7a45; --primary-foreground:#1c0d05; --ring:#ff9a6e; --brand-from:#67e8f9; --brand-to:#93c5fd; }
 .tone-cream { --stage:#faf6ee; --background:#faf6ee; --foreground:#1a2238; --card:#ffffff; --card-foreground:#1a2238; --border:#e6dfd0; --input:#d8cfbb; --muted:#f0eadc; --muted-foreground:#5b6478; --secondary:#efe8d8; --secondary-foreground:#1a2238; --accent:#e8effe; --accent-foreground:#1e3a8a; --primary:#1d4ed8; --primary-foreground:#ffffff; --ring:#3b82f6; }

@@ -358,6 +358,9 @@ export interface Persona {
   rest_max_ms: number;
   typing_ms_per_char: number;
   always_on: boolean;
+  presence_enabled: boolean;
+  presence_min_ms: number;
+  presence_max_ms: number;
   preset: PresetId | "custom";
 }
 
