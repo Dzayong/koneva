@@ -39,8 +39,8 @@ const STATUS_COLORS: Record<MessageStatus, string> = {
 
 function formatSeconds(seconds: number): string {
   if (seconds <= 0) return "—";
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  return `${(seconds / 60).toFixed(1)}m`;
+  if (seconds < 60) return `${seconds.toFixed(1)} dtk`;
+  return `${(seconds / 60).toFixed(1)} mnt`;
 }
 
 export default function AnalyticsPage() {
@@ -82,50 +82,50 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-heading">Analytics</h2>
+        <h2 className="text-heading">Analitik</h2>
         <p className="text-muted-foreground">
-          Totals and the 14-day trend cover all messages; the breakdowns below sample the latest 100.
+          Total dan tren 14 hari mencakup semua pesan; rincian di bawahnya dari 100 pesan terbaru.
         </p>
       </div>
 
       <StatGrid>
         <StatsCard
           index={0}
-          title="Total Messages"
+          title="Total pesan"
           value={(overview?.total_messages ?? 0).toLocaleString()}
           icon={MessageSquare}
-          description="Inbound + outbound"
+          description="Masuk + keluar"
           isLoading={overviewLoading}
         />
         <StatsCard
           index={1}
-          title="Delivery Rate"
+          title="Tingkat sampai"
           value={`${Number(overview?.delivery_rate ?? 0).toFixed(1)}%`}
           icon={CheckCheck}
-          description="Outbound delivered or read"
+          description="Pesan keluar yang sampai atau dibaca"
           isLoading={overviewLoading}
         />
         <StatsCard
           index={2}
-          title="Avg Response"
+          title="Rata-rata balasan"
           value={formatSeconds(Number(overview?.avg_response_time ?? 0))}
           icon={Timer}
-          description="Time to reply to inbound"
+          description="Waktu membalas pesan masuk"
           isLoading={overviewLoading}
         />
         <StatsCard
           index={3}
-          title="Active Devices"
+          title="Nomor aktif"
           value={overview?.active_devices ?? 0}
           icon={Smartphone}
-          description={`of ${devices?.length ?? 0} total`}
+          description={`dari ${devices?.length ?? 0} total`}
           isLoading={overviewLoading}
         />
       </StatGrid>
 
       <Card>
         <CardHeader>
-          <CardTitle>Messages, last 14 days</CardTitle>
+          <CardTitle>Pesan, 14 hari terakhir</CardTitle>
         </CardHeader>
         <CardContent>
           {dailyLoading ? (
@@ -143,8 +143,8 @@ export default function AnalyticsPage() {
                 />
                 <YAxis fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
                 <Tooltip />
-                <Area type="monotone" dataKey="outbound" name="Outbound" stackId="1" stroke="var(--chart-1)" strokeWidth={1.5} fill="var(--chart-1)" fillOpacity={0.08} isAnimationActive={!reduceMotion} animationDuration={300} />
-                <Area type="monotone" dataKey="inbound" name="Inbound" stackId="1" stroke="var(--chart-2)" strokeWidth={1.5} fill="var(--chart-2)" fillOpacity={0.08} isAnimationActive={!reduceMotion} animationDuration={300} />
+                <Area type="monotone" dataKey="outbound" name="Keluar" stackId="1" stroke="var(--chart-1)" strokeWidth={1.5} fill="var(--chart-1)" fillOpacity={0.08} isAnimationActive={!reduceMotion} animationDuration={300} />
+                <Area type="monotone" dataKey="inbound" name="Masuk" stackId="1" stroke="var(--chart-2)" strokeWidth={1.5} fill="var(--chart-2)" fillOpacity={0.08} isAnimationActive={!reduceMotion} animationDuration={300} />
               </AreaChart>
             </ResponsiveContainer>
           )}
@@ -154,13 +154,13 @@ export default function AnalyticsPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Message status breakdown</CardTitle>
+            <CardTitle>Rincian status pesan</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (
               <Skeleton className="h-64 w-full" />
             ) : statusBreakdown.length === 0 ? (
-              <p className="py-16 text-center text-sm text-muted-foreground">No messages yet</p>
+              <p className="py-16 text-center text-sm text-muted-foreground">Belum ada pesan</p>
             ) : (
               <ResponsiveContainer width="100%" height={256}>
                 <PieChart>
@@ -193,13 +193,13 @@ export default function AnalyticsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Delivery rate by device</CardTitle>
+            <CardTitle>Tingkat sampai per nomor</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (
               <Skeleton className="h-64 w-full" />
             ) : deliveryRateByDevice.length === 0 ? (
-              <p className="py-16 text-center text-sm text-muted-foreground">No messages yet</p>
+              <p className="py-16 text-center text-sm text-muted-foreground">Belum ada pesan</p>
             ) : (
               <ResponsiveContainer width="100%" height={256}>
                 <BarChart data={deliveryRateByDevice}>
@@ -212,7 +212,7 @@ export default function AnalyticsPage() {
                     domain={[0, 100]}
                     unit="%"
                   />
-                  <Tooltip formatter={(v: unknown) => [`${String(v)}%`, "Delivery rate"]} />
+                  <Tooltip formatter={(v: unknown) => [`${String(v)}%`, "Tingkat sampai"]} />
                   <Bar dataKey="rate" fill="var(--chart-1)" radius={[2, 2, 0, 0]} isAnimationActive={!reduceMotion} animationDuration={300} />
                 </BarChart>
               </ResponsiveContainer>
@@ -223,13 +223,13 @@ export default function AnalyticsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Device health scores</CardTitle>
+          <CardTitle>Skor kesiapan nomor</CardTitle>
         </CardHeader>
         <CardContent>
           {devicesLoading ? (
             <Skeleton className="h-32 w-full" />
           ) : !devices || devices.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No devices yet</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">Belum ada nomor</p>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {devices.map((d) => {

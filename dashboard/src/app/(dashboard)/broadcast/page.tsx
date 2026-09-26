@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFailure } from "@/lib/errors";
+
 import { useMemo, useState } from "react";
 import { CheckCircle2, Loader2, Radio, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -91,16 +93,16 @@ export default function BroadcastPage() {
 
   const handleSend = async () => {
     if (!deviceKey) {
-      toast.error("Pick a device first");
+      toast.error("Pilih nomor dulu");
       return;
     }
     if (!template.trim()) {
-      toast.error("Write a message first");
+      toast.error("Tulis pesan dulu");
       return;
     }
     const list = buildRecipientList();
     if (list.length === 0) {
-      toast.error("No recipients", { description: "Select contacts or paste phone numbers." });
+      toast.error("Belum ada penerima", { description: "Pilih kontak atau tempel nomor telepon." });
       return;
     }
 
@@ -121,8 +123,7 @@ export default function BroadcastPage() {
           prev.map((r, idx) => (idx === i ? { ...r, status: "queued" } : r)),
         );
       } catch (err) {
-        const message =
-          err && typeof err === "object" && "message" in err ? String(err.message) : "Failed";
+        const message = apiFailure(err, "Gagal").message;
         setRecipients((prev) =>
           prev.map((r, idx) => (idx === i ? { ...r, status: "failed", error: message } : r)),
         );
@@ -132,8 +133,8 @@ export default function BroadcastPage() {
     }
 
     setIsSending(false);
-    toast.success("Broadcast finished", {
-      description: "Check the table below for per-recipient results.",
+    toast.success("Broadcast selesai", {
+      description: "Lihat tabel di bawah untuk hasil tiap penerima.",
     });
   };
 
@@ -144,8 +145,8 @@ export default function BroadcastPage() {
       <div>
         <h2 className="text-display">Broadcast</h2>
         <p className="text-muted-foreground">
-          Send a templated message to multiple recipients. Each one still goes through the
-          normal anti-ban gate server-side — this doesn&apos;t bypass rate limits or warm-up caps.
+          Kirim pesan bertemplat ke banyak penerima. Setiap pesan tetap melewati aturan anti-blokir di server,
+          jadi batas kirim, jeda, dan masa pemanasan nomor tidak dilewati.
         </p>
       </div>
 
@@ -153,16 +154,16 @@ export default function BroadcastPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>1. Device</CardTitle>
+              <CardTitle>1. Nomor pengirim</CardTitle>
             </CardHeader>
             <CardContent>
               <Select value={deviceKey} onValueChange={setDeviceKey}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select an online device" />
+                  <SelectValue placeholder="Pilih nomor yang online" />
                 </SelectTrigger>
                 <SelectContent>
                   {onlineDevices.length === 0 ? (
-                    <div className="p-2 text-sm text-muted-foreground">No online devices</div>
+                    <div className="p-2 text-sm text-muted-foreground">Tidak ada nomor online</div>
                   ) : (
                     onlineDevices.map((d) => (
                       <SelectItem key={d.id} value={d.device_key}>
@@ -177,12 +178,12 @@ export default function BroadcastPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>2. Recipients ({recipientCount})</CardTitle>
+              <CardTitle>2. Penerima ({recipientCount})</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {contacts.length > 0 && (
                 <div className="space-y-2">
-                  <Label>From contacts</Label>
+                  <Label>Dari kontak</Label>
                   <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border p-2">
                     {contacts.map((c) => (
                       <label key={c.id} className="flex items-center gap-2 text-sm">
@@ -198,7 +199,7 @@ export default function BroadcastPage() {
                 </div>
               )}
               <div className="space-y-2">
-                <Label htmlFor="manualNumbers">Or paste phone numbers (one per line)</Label>
+                <Label htmlFor="manualNumbers">Atau tempel nomor telepon (satu per baris)</Label>
                 <Textarea
                   id="manualNumbers"
                   rows={4}
@@ -213,7 +214,7 @@ export default function BroadcastPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>3. Message</CardTitle>
+            <CardTitle>3. Pesan</CardTitle>
           </CardHeader>
           <CardContent>
             <TemplateBuilder value={template} onChange={setTemplate} />
@@ -225,12 +226,12 @@ export default function BroadcastPage() {
         {isSending ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Sending...
+            Mengirim...
           </>
         ) : (
           <>
             <Radio className="mr-2 h-4 w-4" />
-            Send Broadcast
+            Kirim broadcast
           </>
         )}
       </Button>
@@ -240,7 +241,7 @@ export default function BroadcastPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Recipient</TableHead>
+                <TableHead>Penerima</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -253,21 +254,21 @@ export default function BroadcastPage() {
                   </TableCell>
                   <TableCell>
                     {r.status === "pending" && (
-                      <span className="text-muted-foreground">Pending</span>
+                      <span className="text-muted-foreground">Menunggu</span>
                     )}
                     {r.status === "sending" && (
                       <span className="flex items-center gap-1 text-blue-600">
-                        <Loader2 className="h-3 w-3 animate-spin" /> Sending
+                        <Loader2 className="h-3 w-3 animate-spin" /> Mengirim
                       </span>
                     )}
                     {r.status === "queued" && (
                       <span className="flex items-center gap-1 text-green-600">
-                        <CheckCircle2 className="h-3 w-3" /> Queued
+                        <CheckCircle2 className="h-3 w-3" /> Antre
                       </span>
                     )}
                     {r.status === "failed" && (
                       <span className="flex items-center gap-1 text-red-600">
-                        <XCircle className="h-3 w-3" /> {r.error || "Failed"}
+                        <XCircle className="h-3 w-3" /> {r.error || "Gagal"}
                       </span>
                     )}
                   </TableCell>

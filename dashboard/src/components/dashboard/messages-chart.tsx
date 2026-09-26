@@ -41,7 +41,7 @@ export function MessagesChart() {
   return (
     <Card className="h-full">
       <CardHeader>
-        <CardTitle>Messages (last 7 days)</CardTitle>
+        <CardTitle>Pesan (7 hari terakhir)</CardTitle>
       </CardHeader>
       <CardContent>
         {isLoading ? (

@@ -14,13 +14,13 @@ export function RecentAlerts({ devices }: { devices: Device[] }) {
   return (
     <Card className="h-full">
       <CardHeader>
-        <CardTitle>Alerts</CardTitle>
+        <CardTitle>Peringatan</CardTitle>
       </CardHeader>
       <CardContent>
         {atRisk.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-8 text-center">
             <CheckCircle2 className="h-8 w-8 text-green-500" />
-            <p className="text-sm text-muted-foreground">All devices are healthy</p>
+            <p className="text-sm text-muted-foreground">Semua nomor dalam kondisi baik</p>
           </div>
         ) : (
           <ul className="space-y-3">
@@ -42,7 +42,7 @@ export function RecentAlerts({ devices }: { devices: Device[] }) {
                         <span className={statusConfig.color}>{statusConfig.label}</span>
                         {" · "}
                         <span className={healthConfig.color}>
-                          Health {device.health_score}
+                          Kesiapan {device.health_score}
                         </span>
                       </p>
                     </div>

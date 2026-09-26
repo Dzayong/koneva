@@ -28,40 +28,40 @@ const entrance: Variants = {
 const FEATURES = [
   {
     icon: Smartphone,
-    title: "Multi-device, multi-tenant",
-    text: "One API key per tenant, many WhatsApp numbers each. Every device runs isolated with its own session.",
+    title: "Banyak nomor, banyak workspace",
+    text: "Satu workspace bisa punya beberapa nomor WhatsApp. Setiap nomor berjalan terpisah dengan sesinya sendiri.",
     span: "md:col-span-2",
   },
   {
     icon: ShieldCheck,
-    title: "Anti-ban protection",
-    text: "Warm-up schedule, per-minute and per-hour rate limits, and content filtering before anything is sent.",
+    title: "Perlindungan nomor",
+    text: "Pemanasan bertahap, jeda seperti orang, batas kirim harian, dan filter isi sebelum pesan dikirim. Mengurangi risiko, tidak menjamin bebas blokir.",
     span: "",
   },
   {
     icon: CheckCheck,
-    title: "Delivery & read receipts",
-    text: "Track every message from queued to read, with timestamps.",
+    title: "Status terkirim dan dibaca",
+    text: "Pantau tiap pesan dari antre sampai dibaca, lengkap dengan waktunya.",
     span: "",
   },
   {
     icon: BellRing,
-    title: "Signed webhooks",
-    text: "Events pushed to your server with an HMAC signature you can verify.",
+    title: "Webhook bertanda tangan",
+    text: "Kabar dikirim ke server Anda dengan tanda tangan HMAC yang bisa diverifikasi, termasuk saat nomor bermasalah.",
     span: "",
   },
   {
     icon: Gauge,
-    title: "Device health score",
-    text: "See which numbers are healthy at a glance, before WhatsApp does it for you.",
+    title: "Skor kesiapan nomor",
+    text: "Lihat sekilas nomor mana yang sehat, sebelum WhatsApp yang memberi tahu Anda.",
     span: "md:col-span-2",
   },
 ] as const;
 
 const STEPS = [
-  { icon: KeyRound, title: "Get your API key", text: "Sign in to the dashboard with your tenant key." },
-  { icon: Smartphone, title: "Add a device", text: "Create a device and scan the QR from WhatsApp." },
-  { icon: Zap, title: "Send messages", text: "Call POST /api/v1/message/send and watch delivery live." },
+  { icon: KeyRound, title: "Buat akun", text: "Daftar dengan email dan langsung mendapat workspace uji coba." },
+  { icon: Smartphone, title: "Sambungkan nomor", text: "Tambahkan nomor lalu pindai kode QR dari WhatsApp." },
+  { icon: Zap, title: "Kirim pesan", text: "Panggil POST /api/v1/message/send dan pantau statusnya langsung." },
 ] as const;
 
 export default function WelcomePage() {
@@ -79,7 +79,7 @@ export default function WelcomePage() {
           <span className="text-lg font-semibold">WA Gateway</span>
         </div>
         <Button asChild variant="outline">
-          <Link href="/login">Sign in</Link>
+          <Link href="/login">Masuk</Link>
         </Button>
       </header>
 
@@ -93,7 +93,7 @@ export default function WelcomePage() {
         >
           <span className="text-primary">WhatsApp API</span>
           <br />
-          for modern business.
+          untuk bisnis modern.
         </motion.h1>
         <motion.p
           initial="hidden"
@@ -102,8 +102,8 @@ export default function WelcomePage() {
           variants={rise}
           className="mt-6 max-w-2xl text-lg font-medium leading-relaxed text-muted-foreground md:text-xl"
         >
-          Multi-device sending, anti-ban protection, delivery tracking and a dashboard that stays out
-          of your way. Scale your messaging without babysitting it.
+          Kirim dari banyak nomor, dengan perlindungan nomor, pelacakan pengiriman, dan dashboard yang
+          tidak menghalangi kerja Anda. Skalakan pesan tanpa harus mengawasinya terus.
         </motion.p>
         <motion.div
           initial="hidden"
@@ -114,18 +114,18 @@ export default function WelcomePage() {
         >
           <Button asChild size="lg" className="h-11 px-6 text-base">
             <Link href="/login">
-              Open dashboard <ArrowRight className="ml-1" />
+              Masuk ke dashboard <ArrowRight className="ml-1" />
             </Link>
           </Button>
           <Button asChild variant="outline" size="lg" className="h-11 px-6 text-base">
-            <a href="#features">See features</a>
+            <a href="#features">Lihat fitur</a>
           </Button>
         </motion.div>
       </section>
 
       {/* Features — bento */}
       <section id="features" className="mx-auto max-w-7xl scroll-mt-8 px-6 pb-24">
-        <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Built for reliability</h2>
+        <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Dibuat untuk keandalan</h2>
         <div className="mt-10 grid gap-5 md:grid-cols-3">
           {FEATURES.map((f, i) => (
             <motion.div
@@ -152,7 +152,7 @@ export default function WelcomePage() {
 
       {/* How it works */}
       <section className="mx-auto max-w-7xl px-6 pb-24">
-        <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Live in three steps</h2>
+        <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">Aktif dalam tiga langkah</h2>
         <div className="mt-10 grid gap-5 md:grid-cols-3">
           {STEPS.map((s, i) => (
             <motion.div
@@ -185,14 +185,14 @@ export default function WelcomePage() {
           className="relative overflow-hidden rounded-3xl bg-sidebar p-10 text-sidebar-accent-foreground md:p-16"
         >
           <h2 className="max-w-2xl text-3xl font-semibold tracking-tight md:text-5xl">
-            Ready to send your first message?
+            Siap mengirim pesan pertama?
           </h2>
           <p className="mt-4 max-w-xl text-white/80">
-            Sign in with your API key, connect a device and you&apos;re sending in minutes.
+            Buat akun, sambungkan nomor, dan mulai mengirim dalam hitungan menit.
           </p>
           <Button asChild size="lg" className="mt-8 h-11 bg-white px-6 text-base text-black hover:bg-white/90">
-            <Link href="/login">
-              Get started <ArrowRight className="ml-1" />
+            <Link href="/signup">
+              Buat akun <ArrowRight className="ml-1" />
             </Link>
           </Button>
         </motion.div>

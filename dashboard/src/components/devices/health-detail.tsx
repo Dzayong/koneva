@@ -199,7 +199,7 @@ export function HealthDetail({ deviceKey }: { deviceKey: string }) {
       <section>
         <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
           <Shield className="h-4 w-4 text-primary" />
-          Breakdown Skor
+          Rincian skor
         </h3>
         <div className="space-y-2">
           {data.breakdown.map((item) => (
@@ -213,7 +213,7 @@ export function HealthDetail({ deviceKey }: { deviceKey: string }) {
         <div className="mb-3 flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <Trophy className="h-4 w-4 text-amber-500" />
-            Misi Kesehatan
+            Misi kesiapan
           </h3>
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Star className="h-3 w-3" />

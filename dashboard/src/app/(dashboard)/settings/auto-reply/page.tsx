@@ -53,18 +53,18 @@ export default function AutoReplyPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-heading">Auto-Reply Rules</h2>
-          <p className="text-muted-foreground">Automatically respond to incoming messages.</p>
+          <h2 className="text-heading">Aturan balas otomatis</h2>
+          <p className="text-muted-foreground">Balas pesan masuk secara otomatis.</p>
         </div>
         <Button onClick={() => setDialog({ rule: null })}>
           <Plus className="mr-2 h-4 w-4" />
-          Add Rule
+          Tambah aturan
         </Button>
       </div>
 
       <p className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground">
-        Bots load rules when they start — after changing rules, a device may need a restart before
-        the change takes effect.
+        Perubahan aturan berlaku beberapa detik setelah disimpan. Balasan tetap mengikuti jeda, jam aktif,
+        dan batas kirim nomor, dan tidak dikirim ke grup.
       </p>
 
       {isLoading ? (
@@ -75,7 +75,7 @@ export default function AutoReplyPage() {
         </div>
       ) : isError ? (
         <div className="rounded-lg border border-destructive/30 p-8 text-center text-sm text-destructive">
-          Couldn&apos;t load auto-reply rules. The server may not support them yet.
+          Aturan balas otomatis tidak bisa dimuat. Muat ulang halaman.
         </div>
       ) : rules && rules.length === 0 ? (
         <motion.div
@@ -86,11 +86,11 @@ export default function AutoReplyPage() {
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
             <MessageSquare className="h-8 w-8 text-muted-foreground" />
           </div>
-          <h3 className="mt-4 text-lg font-semibold">No auto-reply rules</h3>
-          <p className="mt-2 text-sm text-muted-foreground">Create your first rule to automate responses.</p>
+          <h3 className="mt-4 text-lg font-semibold">Belum ada aturan balas otomatis</h3>
+          <p className="mt-2 text-sm text-muted-foreground">Buat aturan pertama untuk membalas pesan secara otomatis.</p>
           <Button variant="outline" className="mt-6" onClick={() => setDialog({ rule: null })}>
             <Plus className="mr-2 h-4 w-4" />
-            Create Rule
+            Buat aturan
           </Button>
         </motion.div>
       ) : (
@@ -115,7 +115,7 @@ export default function AutoReplyPage() {
                           <Badge className={cn("border-0", TRIGGER_STYLES[rule.trigger_type])}>{rule.trigger_type}</Badge>
                         </div>
                         <p className="mt-1.5 font-mono text-sm break-all">
-                          {rule.trigger_type === "all" ? "Every incoming message" : rule.trigger_pattern}
+                          {rule.trigger_type === "all" ? "Setiap pesan masuk" : rule.trigger_pattern}
                         </p>
                       </div>
                       <ArrowRight className="mx-auto h-5 w-5 rotate-90 text-primary md:rotate-0" />
@@ -140,12 +140,12 @@ export default function AutoReplyPage() {
                     <Switch
                       checked={rule.is_active}
                       disabled={toggle.isPending}
-                      aria-label={rule.is_active ? "Disable rule" : "Enable rule"}
+                      aria-label={rule.is_active ? "Matikan aturan" : "Nyalakan aturan"}
                       onCheckedChange={() => toggle.mutate(rule.id)}
                     />
                     <Button variant="ghost" size="icon" onClick={() => setDialog({ rule })}>
                       <Pencil className="h-4 w-4" />
-                      <span className="sr-only">Edit</span>
+                      <span className="sr-only">Ubah</span>
                     </Button>
                     <Button
                       variant="ghost"
@@ -153,11 +153,11 @@ export default function AutoReplyPage() {
                       className="text-destructive"
                       disabled={remove.isPending}
                       onClick={() => {
-                        if (window.confirm("Delete this auto-reply rule?")) remove.mutate(rule.id);
+                        if (window.confirm("Hapus aturan balas otomatis ini?")) remove.mutate(rule.id);
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
-                      <span className="sr-only">Delete</span>
+                      <span className="sr-only">Hapus</span>
                     </Button>
                   </div>
                 </div>
@@ -170,8 +170,8 @@ export default function AutoReplyPage() {
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && setDialog(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{dialog?.rule ? "Edit Rule" : "Create Auto-Reply Rule"}</DialogTitle>
-            <DialogDescription>Matching is case-insensitive.</DialogDescription>
+            <DialogTitle>{dialog?.rule ? "Ubah aturan" : "Buat aturan balas otomatis"}</DialogTitle>
+            <DialogDescription>Pencocokan tidak membedakan huruf besar dan kecil.</DialogDescription>
           </DialogHeader>
           {/* Keyed so each open starts from that rule's values, not the previous form's. */}
           {dialog && (
@@ -213,13 +213,13 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
   const delay = Number(delaySeconds);
   const patternError =
     type === "regex" && pattern && !isValidRegex(pattern)
-      ? "Invalid regular expression."
+      ? "Ekspresi reguler tidak valid."
       : type !== "all" && !pattern.trim()
-        ? "Pattern is required."
+        ? "Pola wajib diisi."
         : null;
   const delayError =
     !Number.isFinite(delay) || delay < 0 || delay > MAX_DELAY_SECONDS
-      ? `Delay must be 0–${MAX_DELAY_SECONDS} seconds.`
+      ? `Jeda harus 0–${MAX_DELAY_SECONDS} detik.`
       : null;
   const canSubmit = deviceKey && content.trim() && !patternError && !delayError;
 
@@ -244,10 +244,10 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
   return (
     <form onSubmit={submit} className="space-y-4">
       <div className="space-y-2">
-        <Label>Device</Label>
+        <Label>Nomor</Label>
         <Select value={deviceKey} onValueChange={setDeviceKey}>
           <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select device" />
+            <SelectValue placeholder="Pilih nomor" />
           </SelectTrigger>
           <SelectContent>
             {devices?.map((d) => (
@@ -260,22 +260,22 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
       </div>
 
       <div className="space-y-2">
-        <Label>Trigger type</Label>
+        <Label>Jenis pemicu</Label>
         <Select value={type} onValueChange={(v) => setType(v as AutoReplyTriggerType)}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="keyword">Keyword (message contains…)</SelectItem>
+            <SelectItem value="keyword">Kata kunci (pesan mengandung…)</SelectItem>
             <SelectItem value="regex">Regex</SelectItem>
-            <SelectItem value="all">Catch all</SelectItem>
+            <SelectItem value="all">Semua pesan</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       {type !== "all" && (
         <div className="space-y-2">
-          <Label htmlFor="rule-pattern">{type === "keyword" ? "Keyword or phrase" : "Pattern"}</Label>
+          <Label htmlFor="rule-pattern">{type === "keyword" ? "Kata kunci atau frasa" : "Pola"}</Label>
           <Input
             id="rule-pattern"
             value={pattern}
@@ -284,8 +284,8 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           />
           {type === "keyword" && (
             <p className="text-xs text-muted-foreground">
-              One phrase — the rule fires when the message contains it. For several words use Regex,
-              e.g. <code>halo|hi|hello</code>.
+              Satu frasa: aturan berjalan bila pesan mengandungnya. Untuk beberapa kata gunakan Regex,
+              mis. <code>halo|hi|hello</code>.
             </p>
           )}
           {patternError && <p className="text-sm text-destructive">{patternError}</p>}
@@ -293,7 +293,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
       )}
 
       <div className="space-y-2">
-        <Label htmlFor="rule-content">Response message</Label>
+        <Label htmlFor="rule-content">Isi balasan</Label>
         <Textarea
           id="rule-content"
           value={content}
@@ -308,18 +308,18 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
 
       {content.trim() && (
         <div className="space-y-2">
-          <Label>Preview</Label>
+          <Label>Pratinjau</Label>
           <div className="rounded-2xl bg-muted/60 p-4">
             <p className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-lg bg-primary px-4 py-2.5 text-sm whitespace-pre-wrap text-primary-foreground shadow-sm">
               {renderPreview(content)}
             </p>
-            <p className="mt-2 text-right text-xs text-muted-foreground">Sample values — {delaySeconds || 0}s after the message arrives</p>
+            <p className="mt-2 text-right text-xs text-muted-foreground">Nilai contoh, dikirim {delaySeconds || 0} dtk setelah pesan masuk</p>
           </div>
         </div>
       )}
 
       <div className="space-y-2">
-        <Label htmlFor="rule-delay">Delay (seconds)</Label>
+        <Label htmlFor="rule-delay">Jeda (detik)</Label>
         <Input
           id="rule-delay"
           type="number"
@@ -333,15 +333,15 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
       </div>
 
       {save.isError && (
-        <p className="text-sm text-destructive">{apiErrorMessage(save.error, "Failed to save rule.")}</p>
+        <p className="text-sm text-destructive">{apiErrorMessage(save.error, "Gagal menyimpan aturan.")}</p>
       )}
 
       <div className="flex gap-3 pt-2">
         <Button type="submit" className="flex-1" disabled={save.isPending || !canSubmit}>
-          {save.isPending ? "Saving..." : rule ? "Update Rule" : "Create Rule"}
+          {save.isPending ? "Menyimpan..." : rule ? "Simpan perubahan" : "Buat aturan"}
         </Button>
         <Button type="button" variant="outline" onClick={onDone}>
-          Cancel
+          Batal
         </Button>
       </div>
     </form>

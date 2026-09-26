@@ -29,15 +29,15 @@ export default function DashboardError({
           <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
             <AlertTriangle className="h-5 w-5 text-destructive" />
           </div>
-          <CardTitle>Something went wrong</CardTitle>
+          <CardTitle>Terjadi kesalahan</CardTitle>
           <CardDescription>
-            {error.message || "An unexpected error occurred while loading this page."}
+            {error.message || "Terjadi kesalahan tak terduga saat memuat halaman ini."}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button onClick={reset} className="gap-2">
             <RefreshCw className="h-4 w-4" />
-            Try again
+            Coba lagi
           </Button>
         </CardContent>
       </Card>

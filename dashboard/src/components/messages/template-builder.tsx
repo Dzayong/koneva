@@ -33,7 +33,7 @@ export function TemplateBuilder({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="template">Message template</Label>
+        <Label htmlFor="template">Templat pesan</Label>
         <textarea
           id="template"
           className="flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -42,14 +42,14 @@ export function TemplateBuilder({
           onChange={(e) => onChange(e.target.value)}
         />
         <p className="text-xs text-muted-foreground">
-          Spintax: <code>{"{option1|option2|option3}"}</code> picks one at random each send.
-          Variables like <code>{"{nama}"}</code> get filled in per recipient when actually sent.
+          Spintax: <code>{"{option1|option2|option3}"}</code> memilih satu secara acak setiap kali kirim.
+          Variabel seperti <code>{"{nama}"}</code> diisi sesuai penerima saat dikirim.
         </p>
       </div>
 
       {variables.length > 0 && (
         <div className="space-y-2">
-          <Label htmlFor="sampleName">Preview value for {"{nama}"}</Label>
+          <Label htmlFor="sampleName">Nilai contoh untuk {"{nama}"}</Label>
           <Input id="sampleName" value={sampleName} onChange={(e) => setSampleName(e.target.value)} />
         </div>
       )}
@@ -57,10 +57,10 @@ export function TemplateBuilder({
       {previews.length > 0 && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-sm">Preview ({PREVIEW_SAMPLE_COUNT} random samples)</CardTitle>
+            <CardTitle className="text-sm">Pratinjau ({PREVIEW_SAMPLE_COUNT} contoh acak)</CardTitle>
             <Button variant="ghost" size="sm" onClick={() => setPreviewSeed((s) => s + 1)}>
               <RefreshCw className="mr-2 h-3 w-3" />
-              Reroll
+              Acak ulang
             </Button>
           </CardHeader>
           <CardContent className="space-y-2">

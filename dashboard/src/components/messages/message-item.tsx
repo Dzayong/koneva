@@ -1,5 +1,7 @@
 "use client";
 
+import { messageErrorText } from "@/lib/message-errors";
+
 import { ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { MessageStatusBadge } from "@/components/messages/message-status-badge";
 import { cn, formatDate, formatPhoneNumber, formatShortRelative } from "@/lib/utils";
@@ -39,7 +41,7 @@ export function MessageRow({
         <div className="flex items-baseline justify-between gap-3">
           <p className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
             <Arrow className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">{contactName || formatPhoneNumber(number) || "Unknown"}</span>
+            <span className="truncate">{contactName || formatPhoneNumber(number) || "Tidak dikenal"}</span>
           </p>
           <time
             dateTime={message.created_at}
@@ -60,24 +62,24 @@ export function MessageDetail({ message, contactName }: { message: Message; cont
   const inbound = message.direction === "inbound";
   const number = messageNumber(message);
   const rows: Array<[string, React.ReactNode]> = [
-    [inbound ? "From" : "To", `${contactName ? `${contactName} · ` : ""}${formatPhoneNumber(number)}`],
-    ["Device", <span key="d" className="font-mono text-xs">{message.device_key}</span>],
+    [inbound ? "Dari" : "Ke", `${contactName ? `${contactName} · ` : ""}${formatPhoneNumber(number)}`],
+    ["Nomor", <span key="d" className="font-mono text-xs">{message.device_key}</span>],
     ["Status", <MessageStatusBadge key="s" status={message.status} />],
-    ["Created", formatDate(message.created_at)],
-    ...(message.sent_at ? ([["Sent", formatDate(message.sent_at)]] as Array<[string, React.ReactNode]>) : []),
-    ...(message.delivered_at ? ([["Delivered", formatDate(message.delivered_at)]] as Array<[string, React.ReactNode]>) : []),
-    ...(message.read_at ? ([["Read", formatDate(message.read_at)]] as Array<[string, React.ReactNode]>) : []),
+    ["Dibuat", formatDate(message.created_at)],
+    ...(message.sent_at ? ([["Terkirim", formatDate(message.sent_at)]] as Array<[string, React.ReactNode]>) : []),
+    ...(message.delivered_at ? ([["Sampai", formatDate(message.delivered_at)]] as Array<[string, React.ReactNode]>) : []),
+    ...(message.read_at ? ([["Dibaca", formatDate(message.read_at)]] as Array<[string, React.ReactNode]>) : []),
   ];
 
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-label">{inbound ? "Received message" : "Sent message"}</p>
+        <p className="text-label">{inbound ? "Pesan masuk" : "Pesan keluar"}</p>
         <p className="mt-3 text-lg leading-relaxed whitespace-pre-wrap">{message.content}</p>
       </div>
       {message.error_message && (
         <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          {message.error_message}
+          {messageErrorText(message.error_message)}
         </p>
       )}
       <dl className="divide-y rounded-2xl border text-sm">

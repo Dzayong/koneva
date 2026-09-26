@@ -26,7 +26,7 @@ export function NotificationCenter() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">
+        <Button variant="ghost" size="icon" className="relative" aria-label="Notifikasi">
           <Bell className="h-5 w-5" />
           {alerts.length > 0 && (
             <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] text-destructive-foreground">
@@ -36,10 +36,10 @@ export function NotificationCenter() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80">
-        <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+        <DropdownMenuLabel>Notifikasi</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {alerts.length === 0 ? (
-          <p className="p-3 text-sm text-muted-foreground">All devices are healthy</p>
+          <p className="p-3 text-sm text-muted-foreground">Semua nomor dalam kondisi baik</p>
         ) : (
           alerts.map((device) => {
             const config = getDeviceStatusConfig(device.status);
@@ -52,7 +52,7 @@ export function NotificationCenter() {
                       {device.label || device.device_key}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      <span className={config.color}>{config.label}</span> · Health{" "}
+                      <span className={config.color}>{config.label}</span> · Kesiapan{" "}
                       {device.health_score}
                     </span>
                   </span>
@@ -65,7 +65,7 @@ export function NotificationCenter() {
           <>
             <DropdownMenuSeparator />
             <div className="p-2 text-center">
-              <Badge variant="outline">{alerts.length} device(s) need attention</Badge>
+              <Badge variant="outline">{alerts.length} nomor perlu perhatian</Badge>
             </div>
           </>
         )}

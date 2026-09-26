@@ -87,8 +87,8 @@ export default function ContactsPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-heading">Contacts</h2>
-          <p className="text-muted-foreground">Your customer list — also the recipient list for Broadcast.</p>
+          <h2 className="text-heading">Kontak</h2>
+          <p className="text-muted-foreground">Daftar pelanggan Anda, sekaligus daftar penerima untuk Broadcast.</p>
         </div>
         <div className="flex gap-2">
           <input
@@ -108,11 +108,11 @@ export default function ContactsPage() {
             disabled={importContacts.isPending}
           >
             <Upload className="mr-2 h-4 w-4" />
-            Import CSV
+            Impor CSV
           </Button>
           <Button onClick={() => setAddOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
-            Add Contact
+            Tambah kontak
           </Button>
         </div>
       </div>
@@ -120,11 +120,11 @@ export default function ContactsPage() {
       {legacy.length > 0 && (
         <div className="surface flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm">
-            Found <strong>{legacy.length}</strong> contact{legacy.length === 1 ? "" : "s"} saved only in
-            this browser. Move them to your account so they sync and work in Broadcast.
+            Ditemukan <strong>{legacy.length}</strong> kontak yang hanya tersimpan di
+            browser ini. Pindahkan ke akun Anda supaya tersinkron dan bisa dipakai di Broadcast.
           </p>
           <Button size="sm" onClick={migrateLegacy} disabled={importContacts.isPending}>
-            Move to account
+            Pindahkan ke akun
           </Button>
         </div>
       )}
@@ -135,9 +135,9 @@ export default function ContactsPage() {
         <Input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Search name or number…"
+          placeholder="Cari nama atau nomor…"
           className="h-11 pl-12"
-          aria-label="Search contacts"
+          aria-label="Cari kontak"
         />
         </div>
       </div>
@@ -146,9 +146,9 @@ export default function ContactsPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="text-label">Name</TableHead>
-              <TableHead className="text-label">Phone</TableHead>
-              <TableHead className="text-label hidden sm:table-cell">Tags</TableHead>
+              <TableHead className="text-label">Nama</TableHead>
+              <TableHead className="text-label">Telepon</TableHead>
+              <TableHead className="text-label hidden sm:table-cell">Label</TableHead>
               <TableHead className="w-12" />
             </TableRow>
           </TableHeader>
@@ -167,11 +167,11 @@ export default function ContactsPage() {
                   <div className="flex flex-col items-center gap-2">
                     <Users className="h-8 w-8 text-muted-foreground" />
                     <p className="text-muted-foreground">
-                      {search ? "No contacts match your search" : "No contacts yet"}
+                      {search ? "Tidak ada kontak yang cocok" : "Belum ada kontak"}
                     </p>
                     {!search && (
                       <p className="text-xs text-muted-foreground">
-                        CSV header: <code>phone_number,name,tags,notes</code> (tags separated by <code>|</code>)
+                        Header CSV: <code>phone_number,name,tags,notes</code> (label dipisah dengan <code>|</code>)
                       </p>
                     )}
                   </div>
@@ -203,13 +203,13 @@ export default function ContactsPage() {
                       className="text-muted-foreground hover:text-destructive"
                       disabled={deleteContact.isPending}
                       onClick={() => {
-                        if (window.confirm(`Delete ${contact.name || contact.phone_number}?`)) {
+                        if (window.confirm(`Hapus ${contact.name || contact.phone_number}?`)) {
                           deleteContact.mutate(contact.id);
                         }
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
-                      <span className="sr-only">Delete</span>
+                      <span className="sr-only">Hapus</span>
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -221,7 +221,7 @@ export default function ContactsPage() {
 
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <p>
-          Page {page} of {totalPages} · {total} contact{total === 1 ? "" : "s"}
+          Halaman {page} dari {totalPages} · {total} kontak
         </p>
         <div className="flex gap-2">
           <Button
@@ -231,7 +231,7 @@ export default function ContactsPage() {
             onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
           >
             <ChevronLeft className="mr-1 h-4 w-4" />
-            Previous
+            Sebelumnya
           </Button>
           <Button
             variant="outline"
@@ -239,7 +239,7 @@ export default function ContactsPage() {
             disabled={isPlaceholderData || offset + PAGE_SIZE >= total}
             onClick={() => setOffset(offset + PAGE_SIZE)}
           >
-            Next
+            Berikutnya
             <ChevronRight className="ml-1 h-4 w-4" />
           </Button>
         </div>
@@ -293,12 +293,12 @@ function AddContactDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Contact</DialogTitle>
-          <DialogDescription>Numbers in international format, e.g. +6281234567890.</DialogDescription>
+          <DialogTitle>Tambah kontak</DialogTitle>
+          <DialogDescription>Nomor dalam format internasional, mis. +6281234567890.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="contact-phone">Phone number</Label>
+            <Label htmlFor="contact-phone">Nomor telepon</Label>
             <Input
               id="contact-phone"
               value={phone}
@@ -308,22 +308,22 @@ function AddContactDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="contact-name">Name (optional)</Label>
+            <Label htmlFor="contact-name">Nama (opsional)</Label>
             <Input id="contact-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="contact-tags">Tags (optional, comma separated)</Label>
+            <Label htmlFor="contact-tags">Label (opsional, pisahkan dengan koma)</Label>
             <Input id="contact-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="vip, jakarta" />
           </div>
           {createContact.isError && (
             <p className="text-sm text-destructive">
               {isDuplicate(createContact.error)
-                ? "This number is already in your contacts."
-                : apiErrorMessage(createContact.error, "Failed to add contact.")}
+                ? "Nomor ini sudah ada di kontak Anda."
+                : apiErrorMessage(createContact.error, "Gagal menambah kontak.")}
             </p>
           )}
           <Button type="submit" className="w-full" disabled={createContact.isPending || !normalizedPhone}>
-            {createContact.isPending ? "Saving..." : "Save Contact"}
+            {createContact.isPending ? "Menyimpan..." : "Simpan kontak"}
           </Button>
         </form>
       </DialogContent>

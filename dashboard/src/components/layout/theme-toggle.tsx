@@ -13,7 +13,7 @@ export function ThemeToggle() {
     <motion.button
       type="button"
       whileTap={{ scale: 0.92 }}
-      aria-label="Toggle theme"
+      aria-label="Ganti tema"
       onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
       className="surface relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl border"
     >

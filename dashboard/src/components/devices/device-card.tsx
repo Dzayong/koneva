@@ -61,7 +61,7 @@ export function DeviceCard({
   const deleteDevice = useDeleteDevice();
 
   const handleDelete = () => {
-    if (window.confirm(`Delete device "${device.label || device.device_key}"? This cannot be undone.`)) {
+    if (window.confirm(`Hapus nomor "${device.label || device.device_key}"? Nomor akan diputus dan tidak bisa dikembalikan.`)) {
       deleteDevice.mutate(device.device_key);
     }
   };
@@ -81,10 +81,10 @@ export function DeviceCard({
             {(device.label || "WA").slice(0, 2).toUpperCase()}
           </div>
           <div className="min-w-0">
-            <h3 className="truncate font-semibold">{device.label || "Unnamed"}</h3>
+            <h3 className="truncate font-semibold">{device.label || "Tanpa nama"}</h3>
             <p className="truncate text-xs text-muted-foreground">{device.device_key}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {device.phone_number ? formatPhoneNumber(device.phone_number) : "No number yet"}
+              {device.phone_number ? formatPhoneNumber(device.phone_number) : "Belum ada nomor"}
             </p>
           </div>
         </div>
@@ -93,24 +93,24 @@ export function DeviceCard({
 
       <div className="relative mt-4 flex items-center justify-between text-xs text-muted-foreground">
         <DeviceStatusBadge status={device.status} />
-        <span>{device.last_connected ? formatDate(device.last_connected) : "Never connected"}</span>
+        <span>{device.last_connected ? formatDate(device.last_connected) : "Belum pernah tersambung"}</span>
       </div>
 
       <div className="relative mt-5 flex items-center gap-2">
         <Button variant="outline" size="sm" asChild>
-          <Link href={`/devices/${device.device_key}`}>View Details</Link>
+          <Link href={`/devices/${device.device_key}`}>Lihat detail</Link>
         </Button>
         {device.status === "pending_qr" && (
           <Button size="sm" onClick={() => onShowQr(device.device_key)}>
             <QrCode className="mr-2 h-4 w-4" />
-            Scan QR
+            Pindai QR
           </Button>
         )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="ml-auto">
               <MoreHorizontal className="h-4 w-4" />
-              <span className="sr-only">Actions</span>
+              <span className="sr-only">Aksi</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -120,7 +120,7 @@ export function DeviceCard({
                 disabled={pauseDevice.isPending}
               >
                 <Pause className="mr-2 h-4 w-4" />
-                Pause
+                Jeda
               </DropdownMenuItem>
             )}
             {device.status === "paused" && (
@@ -129,13 +129,13 @@ export function DeviceCard({
                 disabled={resumeDevice.isPending}
               >
                 <Play className="mr-2 h-4 w-4" />
-                Resume
+                Lanjutkan
               </DropdownMenuItem>
             )}
             {(device.status === "online" || device.status === "paused") && <DropdownMenuSeparator />}
             <DropdownMenuItem variant="destructive" onClick={handleDelete} disabled={deleteDevice.isPending}>
               <Trash2 className="mr-2 h-4 w-4" />
-              Delete
+              Hapus
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
