@@ -4,7 +4,8 @@ import { z } from 'zod';
 import config from '../../shared/config';
 import pool from '../../shared/database/connection';
 import { validate } from '../middleware/validate';
-import { ServiceError } from '../services/message.service';
+import { ServiceError } from '../services/service-error';
+import { createOwnerForTenant } from '../services/account.service';
 
 const router = Router();
 const createTenantSchema = z.object({
@@ -25,6 +26,18 @@ router.post('/tenant/create', validate({ body: createTenantSchema }), async (req
     [input.name, input.email, apiKey, input.max_devices, input.quota_messages],
   )).rows[0];
   response.status(201).json({ success: true, data: row });
+});
+
+const ownerSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(255),
+  name: z.string().trim().min(1).max(120),
+  password: z.string().min(10).max(128),
+}).strict();
+
+router.post('/tenant/:id/owner', validate({ params: z.object({ id: z.string().uuid() }), body: ownerSchema }), async (request, response) => {
+  const { id } = request.validated!.params as { id: string };
+  const created = await createOwnerForTenant(id, request.validated!.body as z.infer<typeof ownerSchema>);
+  response.status(201).json({ success: true, data: created });
 });
 
 router.post('/device/create', validate({ body: createDeviceSchema }), async (request, response) => {

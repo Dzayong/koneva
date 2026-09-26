@@ -1,4 +1,11 @@
 import type { Request } from 'express';
+import { z } from 'zod';
+import type { Permission, Role } from '../permissions';
+
+export const createDeviceSchema = z.object({
+  phone_number: z.string().regex(/^\+?[0-9]{10,15}$/).optional(),
+  label: z.string().min(1).max(100).optional(),
+});
 
 export interface TenantContext {
   id: string;
@@ -19,8 +26,9 @@ export interface PaginationQuery {
 }
 
 export interface PaginatedResponse<T> {
+  success: true;
   data: T[];
-  pagination: PaginationQuery & { total: number };
+  pagination: PaginationQuery & { total: number; has_more: boolean };
 }
 
 export interface ApiErrorResponse {
@@ -33,6 +41,8 @@ export interface SendMessageRequest {
   to: string;
   message: string;
   external_id?: string | undefined;
+  /** 'urgent' is for OTP and other time-critical transactional messages. */
+  priority?: 'normal' | 'urgent' | undefined;
 }
 
 export interface SendMessageResponse {
@@ -49,15 +59,20 @@ export interface CreateTenantRequest {
 }
 
 export interface CreateDeviceRequest {
-  tenant_id: string;
   phone_number?: string;
   label?: string;
 }
+
+/** Who is calling: a person signed in to the console, or a system using an API key. */
+export type Actor =
+  | { kind: 'user'; userId: string; email: string; role: Role }
+  | { kind: 'api_key'; role: Role; scopes?: readonly Permission[]; keyId?: string };
 
 declare global {
   namespace Express {
     interface Request {
       tenant?: TenantContext;
+      actor?: Actor;
       isAdmin?: boolean;
       validated?: { body?: unknown; query?: unknown; params?: unknown };
     }

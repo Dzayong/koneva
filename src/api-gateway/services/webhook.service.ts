@@ -1,16 +1,20 @@
 import pool from '../../shared/database/connection';
-import { ServiceError } from './message.service';
+import { ServiceError } from './service-error';
 
 export async function testWebhook(tenantId: string) {
-  const tenant = (await pool.query<{ webhook_url: string | null }>(
-    'SELECT webhook_url FROM tenants WHERE id = $1', [tenantId],
+  const tenant = (await pool.query<{ webhook_url: string | null; webhook_secret: string | null }>(
+    'SELECT webhook_url, webhook_secret FROM tenants WHERE id = $1', [tenantId],
   )).rows[0];
   if (!tenant?.webhook_url) throw new ServiceError(400, 'WEBHOOK_NOT_SET', 'Webhook URL is not configured');
 
   const payload = { event: 'webhook.test', timestamp: new Date().toISOString() };
-  const response = await fetch(tenant.webhook_url, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
-  });
+  const body = JSON.stringify(payload);
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (tenant.webhook_secret) {
+    const { computeWebhookSignature } = await import('../../bot-container/webhook');
+    headers['X-Webhook-Secret'] = computeWebhookSignature(body, tenant.webhook_secret);
+  }
+  const response = await fetch(tenant.webhook_url, { method: 'POST', headers, body });
   await pool.query(
     `INSERT INTO webhook_logs (tenant_id, event_type, payload, response_status, response_body)
      VALUES ($1, 'webhook.test', $2, $3, $4)`,

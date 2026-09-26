@@ -6,18 +6,48 @@ import config from '../shared/config';
 import pool from '../shared/database/connection';
 import { getRedisClient } from '../shared/redis';
 import logger from '../shared/utils/logger';
-import { adminAuth, tenantAuth } from './middleware/auth';
+import { adminAuth, authorize, tenantAuth } from './middleware/auth';
 import adminRoutes from './routes/admin.routes';
 import deviceRoutes from './routes/device.routes';
 import messageRoutes from './routes/message.routes';
-import { ServiceError } from './services/message.service';
+import tenantRoutes from './routes/tenant.routes';
+import contactRoutes from './routes/contact.routes';
+import templateRoutes from './routes/template.routes';
+import analyticsRoutes from './routes/analytics.routes';
+import autoReplyRoutes from './routes/auto-reply.routes';
+import statsRoutes from './routes/stats.routes';
+import broadcastRoutes from './routes/broadcast.routes';
+import activityRoutes from './routes/activity.routes';
+import authRoutes from './routes/auth.routes';
+import keysRoutes from './routes/keys.routes';
+import auditRoutes from './routes/audit.routes';
+import teamRoutes from './routes/team.routes';
+import { auditTrail } from './middleware/audit';
+import { ServiceError } from './services/service-error';
 
 const app = express();
+// Explicit opt-in for the local personal proxy; direct deployments remain off.
+const proxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+if (Number.isInteger(proxyHops) && proxyHops > 0 && proxyHops <= 2) {
+  app.set('trust proxy', proxyHops);
+}
 app.disable('x-powered-by');
 app.use(helmet());
-app.use(cors());
+app.use(cors(config.env === 'production' ? {
+  origin: process.env.CORS_ORIGIN?.split(',').map(s => s.trim()) ?? false,
+  credentials: true,
+} : {}));
 app.use(express.json({ limit: '1mb' }));
-app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }));
+app.use(rateLimit({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  handler: (_request, response) => response.status(429).json({
+    success: false,
+    error: { code: 'RATE_LIMITED', message: 'Too many requests' },
+  }),
+}));
 app.use((request, response, next) => {
   const started = Date.now();
   response.on('finish', () => logger.info('HTTP request', {
@@ -40,7 +70,9 @@ app.get('/ready', async (_request, response) => {
     response.status(503).json({ status: 'not_ready' });
   }
 });
-app.use('/api/v1', tenantAuth, messageRoutes, deviceRoutes);
+app.use('/auth', authRoutes);
+app.use('/api/v1', tenantAuth, authorize, auditTrail, messageRoutes, deviceRoutes, tenantRoutes,
+  contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes);
 app.use('/admin', adminAuth, adminRoutes);
 app.use((_request, response) => response.status(404).json({
   success: false, error: { code: 'NOT_FOUND', message: 'Route not found' },
@@ -48,6 +80,13 @@ app.use((_request, response) => response.status(404).json({
 
 const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
   logger.error('Request failed', { error });
+  if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
+    response.status(400).json({
+      success: false,
+      error: { code: 'INVALID_JSON', message: 'Malformed JSON request body' },
+    });
+    return;
+  }
   if (error instanceof ServiceError) {
     response.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
     return;

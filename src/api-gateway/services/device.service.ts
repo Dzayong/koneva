@@ -1,5 +1,5 @@
 import pool from '../../shared/database/connection';
-import { ServiceError } from './message.service';
+import { ServiceError } from './service-error';
 
 export async function listDevices(tenantId: string) {
   return (await pool.query(
