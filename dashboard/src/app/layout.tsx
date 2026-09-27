@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Inter, Geist_Mono, Newsreader } from "next/font/google";
 import "./globals.css";
+import { DevBanner } from "@/components/dev-banner";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -42,6 +44,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${inter.variable} ${geistMono.variable} ${display.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        {/* Suspense keeps the dynamic env read (connection() inside DevBanner) isolated to this one boundary,
+            so the rest of the tree -- including statically prerenderable marketing pages -- is unaffected. */}
+        <Suspense fallback={null}>
+          <DevBanner />
+        </Suspense>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           <QueryProvider>
             <TooltipProvider>

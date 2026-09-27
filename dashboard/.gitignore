@@ -43,5 +43,6 @@ next-env.d.ts
 # playwright
 /.next-stack/
 /.next-ui/
+/.next-sandbox/
 /test-results/
 /playwright-report/

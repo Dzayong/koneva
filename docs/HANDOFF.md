@@ -23,6 +23,21 @@
 > It is disabled by default and cannot be enabled in production before MFA. No commit/deploy/production migration was
 > performed. Claude's uncommitted dashboard files were preserved. The historical status sections below describe the
 > earlier deployed baseline, not this uncommitted local implementation.
+> Update 2026-09-28 (Claude): [ENVIRONMENT_MAP.md](ENVIRONMENT_MAP.md) added — port/service/DB/mock-vs-live map derived
+> from actual config (not :13000 access). DEV sandbox banner + fail-closed WhatsApp/email guards for `:13200`
+> (`KONEVA_SANDBOX=1`): `dashboard/src/components/dev-banner.tsx`, `src/shared/sandbox.ts`, wired into
+> `src/bot-container/connection.ts` and `src/api-gateway/services/mailer.ts`. See "ATURAN KERAS :13000" below —
+> new, explicit 4-step process gates any future `:13000` deploy; nothing in this update touched `:13000`.
+
+## ATURAN KERAS :13000
+
+1. Claude menyelesaikan perubahan lokal, lalu melaporkan diff/bukti tes dan kondisi sistem apa adanya.
+2. PM (Codex) memeriksa bukti dan mengonfirmasi.
+3. Owner memberi konfirmasi eksplisit.
+4. Baru deploy/update `:13000` dijalankan.
+
+Tanpa keempat langkah itu selesai, agen dilarang mengakses, mengubah, me-restart, atau deploy ke `:13000`. Agen
+bekerja di `:13200`/`:13300`/harness disposable saja. Detail port/service/mock-vs-live: [ENVIRONMENT_MAP.md](ENVIRONMENT_MAP.md).
 
 Ditulis 2026-09-26 oleh Claude Code (Sonnet 5), atas permintaan pemilik proyek (Dzaki). Bahasa percakapan dengan
 pemilik: **Indonesia**. Kode dan dokumen teknis: Inggris (kecuali UI, yang Indonesia).

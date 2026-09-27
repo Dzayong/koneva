@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { otpLimits } from './otp-limits';
 import { ServiceError } from './service-error';
+import { isSandbox, isSandboxEmailAllowed } from '../../shared/sandbox';
 
 /**
  * Outgoing email, used only for invitation OTPs today.
@@ -47,7 +48,14 @@ export function requireEmail(env: NodeJS.ProcessEnv = process.env): void {
 
 export async function sendInvitationOtp(message: OtpMessage, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   requireEmail(env);
-  if (emailTransport(env) === 'dev-outbox') {
+  const transport = emailTransport(env);
+  // Sandbox guard: dev-outbox never leaves the machine already, so only the real sender (gmail-api) needs an
+  // allowlist. The allowlist is empty by default, so sandbox + gmail-api rejects every recipient until the
+  // owner explicitly lists exact addresses in SANDBOX_EMAIL_ALLOWLIST. :13000/production is unaffected.
+  if (isSandbox(env) && transport === 'gmail-api' && !isSandboxEmailAllowed(message.to, env)) {
+    throw new ServiceError(403, 'SANDBOX_RECIPIENT_NOT_ALLOWED', 'Sandbox hanya mengizinkan pengiriman ke alamat yang ada di allowlist.');
+  }
+  if (transport === 'dev-outbox') {
     const file = env['DEV_EMAIL_OUTBOX_FILE']!;
     const line = JSON.stringify({
       at: new Date().toISOString(), to: message.to, subject: 'Kode verifikasi KONEVA',

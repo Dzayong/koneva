@@ -7,6 +7,7 @@ import type { Logger } from 'winston';
 import { loadSession, bindCredsUpdate } from './session';
 import { classifyDisconnect } from './disconnect';
 import { createProxyAgent, describeProxy } from './proxy';
+import { whatsappTransportMode } from '../shared/sandbox';
 import type { BotConfig, ConnectionState } from './types';
 
 const BOT_BROWSER: [string, string, string] = ['Windows', 'Chrome', '10.0.22621'];
@@ -37,6 +38,17 @@ export async function startBotConnection(
   };
 
   const connect = async (): Promise<void> => {
+    // Sandbox/mock kill-switch: checked before loadSession, before fetchLatestBaileysVersion, before anything
+    // that could touch a session file or the network. No Baileys socket is ever created in mock mode, so there
+    // is nothing here for a real WhatsApp number to see, and no reconnect loop gets scheduled (that logic lives
+    // entirely inside the real socket's own 'connection.update' handler below, which mock mode never reaches).
+    if (whatsappTransportMode() === 'mock') {
+      logger.warn('WHATSAPP_TRANSPORT=mock (sandbox): refusing to start a real WhatsApp connection', { botId: config.botId });
+      connState.status = 'offline';
+      connState.lastDisconnectReason = 'sandbox_mock_transport';
+      await emitState();
+      return;
+    }
     const { state, saveCreds } = await loadSession(config.sessionPath, config.botId, logger);
     const { version, isLatest } = await fetchLatestBaileysVersion();
     logger.info('Using Baileys version', { botId: config.botId, version, isLatest });
