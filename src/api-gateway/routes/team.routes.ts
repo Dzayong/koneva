@@ -1,7 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { ROLES } from '../../shared/permissions';
+import { ASSIGNABLE_ROLES } from '../../shared/permissions';
 import { validate } from '../middleware/validate';
+import { requireVerifiedEmail } from '../middleware/verified-email';
 import {
   changeMemberRole, createInvitation, listTeam, removeMember, revokeInvitation,
 } from '../services/team.service';
@@ -12,9 +13,9 @@ const uuid = z.object({ id: z.string().uuid() });
 
 export const inviteSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(255),
-  role: z.enum(ROLES),
+  role: z.enum(ASSIGNABLE_ROLES),
 }).strict();
-export const roleSchema = z.object({ role: z.enum(ROLES) }).strict();
+export const roleSchema = z.object({ role: z.enum(ASSIGNABLE_ROLES) }).strict();
 
 function person(request: Request) {
   const actor = request.actor;
@@ -26,11 +27,11 @@ router.get('/team', async (request: Request, response: Response) => {
   response.json({ success: true, data: await listTeam(request.tenant!.id) });
 });
 
-router.post('/team/invitations', validate({ body: inviteSchema }), async (request: Request, response: Response) => {
+router.post('/team/invitations', requireVerifiedEmail, validate({ body: inviteSchema }), async (request: Request, response: Response) => {
   const created = await createInvitation(request.tenant!.id, person(request), request.validated!.body as z.infer<typeof inviteSchema>);
   response.status(201).json({
     success: true, data: created,
-    notice: 'Share this link with the person yourself. It works once, only for that email, and expires in 48 hours.',
+    notice: 'Share this link with the person yourself. It works once, only for that Gmail address after they confirm a code sent to it, and expires in 48 hours.',
   });
 });
 
@@ -39,13 +40,13 @@ router.delete('/team/invitations/:id', validate({ params: uuid }), async (reques
   response.json({ success: true });
 });
 
-router.patch('/team/members/:id', validate({ params: uuid, body: roleSchema }), async (request: Request, response: Response) => {
+router.patch('/team/members/:id', requireVerifiedEmail, validate({ params: uuid, body: roleSchema }), async (request: Request, response: Response) => {
   await changeMemberRole(request.tenant!.id, person(request), (request.validated!.params as { id: string }).id,
     (request.validated!.body as z.infer<typeof roleSchema>).role);
   response.json({ success: true });
 });
 
-router.delete('/team/members/:id', validate({ params: uuid }), async (request: Request, response: Response) => {
+router.delete('/team/members/:id', requireVerifiedEmail, validate({ params: uuid }), async (request: Request, response: Response) => {
   await removeMember(request.tenant!.id, person(request), (request.validated!.params as { id: string }).id);
   response.json({ success: true });
 });

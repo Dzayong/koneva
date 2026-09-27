@@ -2,18 +2,37 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { PERMISSIONS, ROLES, can, permissionFor } from './permissions';
+import { ROLE_PERMISSIONS as ROLE_PERMISSIONS_SNAPSHOT, ASSIGNABLE_ROLES, CURRENT_ROLES, LEGACY_ROLES, PERMISSIONS, ROLES, can, isLegacyRole, permissionFor } from './permissions';
 
 test('owner can do everything; admin can do everything except billing', () => {
   for (const p of PERMISSIONS) assert.equal(can('owner', p), true, p);
   for (const p of PERMISSIONS) assert.equal(can('admin', p), p !== 'billing:manage', p);
 });
 
-test('developer works with numbers and messages but cannot delete numbers, manage the team or billing', () => {
-  for (const p of ['devices:read', 'devices:write', 'messages:send', 'webhooks:manage', 'keys:manage'] as const) {
+test('developer runs the whole technical side, including deleting a device, but never billing or the team', () => {
+  for (const p of ['devices:read', 'devices:write', 'devices:delete', 'messages:send', 'webhooks:manage', 'keys:manage', 'content:write'] as const) {
     assert.equal(can('developer', p), true, p);
   }
-  for (const p of ['devices:delete', 'team:manage', 'billing:manage'] as const) assert.equal(can('developer', p), false, p);
+  for (const p of ['team:manage', 'billing:manage', 'audit:read'] as const) assert.equal(can('developer', p), false, p);
+});
+
+test('owner holds every developer permission by itself (no second membership needed)', () => {
+  for (const p of PERMISSIONS.filter((x) => can('developer', x))) assert.equal(can('owner', p), true, p);
+});
+
+test('role model: owner + developer are current, admin + viewer are legacy, only developer can be handed out', () => {
+  assert.deepEqual([...CURRENT_ROLES], ['owner', 'developer']);
+  assert.deepEqual([...LEGACY_ROLES], ['admin', 'viewer']);
+  assert.deepEqual([...ASSIGNABLE_ROLES], ['developer']);
+  assert.deepEqual([...ROLES].sort(), [...CURRENT_ROLES, ...LEGACY_ROLES].sort());
+  assert.equal(isLegacyRole('viewer'), true); assert.equal(isLegacyRole('owner'), false); assert.equal(isLegacyRole('developer'), false);
+});
+
+test('legacy members keep exactly their historical access (nothing silently upgraded)', () => {
+  assert.deepEqual([...ROLE_PERMISSIONS_SNAPSHOT.viewer], ['devices:read', 'messages:read']);
+  assert.equal(can('admin', 'team:manage'), true);
+  assert.equal(can('admin', 'devices:delete'), true);
+  assert.equal(can('admin', 'billing:manage'), false);
 });
 
 test('viewer can only read', () => {

@@ -143,7 +143,13 @@ export async function requestStudentVerification(tenantId: string, requesterEmai
   if (!looksLikeStudentEmail(requesterEmail)) {
     throw new ServiceError(400, 'NOT_A_STUDENT_EMAIL', 'Paket Pelajar butuh email kampus atau sekolah (mis. .ac.id atau .sch.id).');
   }
-  await pool.query('UPDATE tenants SET student_request_at = now(), student_note = $2 WHERE id = $1', [tenantId, note.slice(0, 500)]);
+  await transaction(async (client) => {
+    const tenant = await client.query('SELECT id FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
+    if (!tenant.rows.length) throw new ServiceError(404, 'TENANT_NOT_FOUND', 'Workspace not found');
+    await client.query("UPDATE student_requests SET status = 'superseded', version = version + 1 WHERE tenant_id = $1 AND status = 'pending'", [tenantId]);
+    await client.query('INSERT INTO student_requests (tenant_id, requester_email, note) VALUES ($1, $2, $3)', [tenantId, requesterEmail.toLowerCase(), note.slice(0, 500)]);
+    await client.query('UPDATE tenants SET student_request_at = now(), student_note = $2 WHERE id = $1', [tenantId, note.slice(0, 500)]);
+  });
 }
 
 export async function setStudentVerified(tenantId: string, approved: boolean, note: string | undefined): Promise<void> {
@@ -163,6 +169,7 @@ export interface InvoiceRow {
 
 export async function createOrder(tenantId: string, planId: string, cycle: BillingCycle): Promise<InvoiceRow> {
   return transaction(async (client) => {
+    await client.query('SELECT id FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
     const plan = (await client.query<PlanRow>(`SELECT ${PLAN_COLUMNS} FROM plans WHERE id = $1 AND published = true`, [planId])).rows[0];
     if (!plan || plan.audience === 'trial' || plan.audience === 'internal') throw new ServiceError(400, 'INVALID_PLAN', 'Paket tidak tersedia.');
     if (!plan.price_is_final) throw new ServiceError(409, 'PRICE_NOT_FINAL', 'Harga paket ini belum diumumkan. Hubungi penyedia layanan untuk mengaktifkan.');
@@ -185,6 +192,7 @@ export async function createOrder(tenantId: string, planId: string, cycle: Billi
 
 export async function markInvoicePaid(invoiceId: string, input: { method: string; reference?: string | undefined; note?: string | undefined }) {
   return transaction(async (client) => {
+    await client.query('SELECT id FROM tenants WHERE id = (SELECT tenant_id FROM invoices WHERE id = $1) FOR UPDATE', [invoiceId]);
     const invoice = (await client.query<InvoiceRow & { tenant_id: string }>(
       'SELECT id, tenant_id, number, plan_id, cycle, amount_idr, status, due_at, paid_at, method, reference, created_at FROM invoices WHERE id = $1 FOR UPDATE',
       [invoiceId],
@@ -215,7 +223,7 @@ export async function grantPlan(tenantId: string, planId: string, cycle: Billing
   return transaction(async (client) => {
     const plan = (await client.query<PlanRow>(`SELECT ${PLAN_COLUMNS} FROM plans WHERE id = $1`, [planId])).rows[0];
     if (!plan) throw new ServiceError(404, 'PLAN_NOT_FOUND', 'Plan not found');
-    const tenant = await client.query('SELECT 1 FROM tenants WHERE id = $1', [tenantId]);
+    const tenant = await client.query('SELECT 1 FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
     if (tenant.rows.length === 0) throw new ServiceError(404, 'TENANT_NOT_FOUND', 'Workspace not found');
     const period = await activatePaid(client, tenantId, plan, cycle);
     await client.query(
@@ -237,6 +245,10 @@ export async function getBillingState(tenantId: string) {
     'SELECT quota_messages, used_messages, max_devices, usage_period_start, student_verified_at, student_request_at, email FROM tenants WHERE id = $1', [tenantId],
   )).rows[0];
   const plan = sub ? (await pool.query<PlanRow>(`SELECT ${PLAN_COLUMNS} FROM plans WHERE id = $1`, [sub.plan_id])).rows[0] : undefined;
+  // A request made before the operator panel existed has no student_requests row: nobody can decide it, so the workspace must ask again.
+  // (A rejected or superseded request DOES have a row and is not "legacy".) Existing approvals stay valid.
+  const legacyPending = Boolean(tenant?.student_request_at) && !tenant?.student_verified_at && !(await pool.query(
+    'SELECT 1 FROM student_requests WHERE tenant_id = $1 LIMIT 1', [tenantId])).rows.length;
   const now = new Date();
   const status = sub ? effectiveStatus({ status: sub.status, period_end: sub.period_end }, now) : 'active';
   const window = sub ? usageWindow(new Date(sub.period_start), now) : null;
@@ -266,7 +278,7 @@ export async function getBillingState(tenantId: string) {
       devices_used: counts?.devices ?? 0, devices_limit: tenant?.max_devices ?? 0,
       members_used: counts?.members ?? 0, members_limit: plan?.max_members ?? null,
     },
-    student: { verified: Boolean(tenant?.student_verified_at), requested: Boolean(tenant?.student_request_at) },
+    student: { verified: Boolean(tenant?.student_verified_at), requested: Boolean(tenant?.student_request_at) && !legacyPending, needs_resubmission: legacyPending },
     plans: orderable.filter((p) => p.audience !== 'trial' && p.audience !== 'internal'),
     invoices,
   };

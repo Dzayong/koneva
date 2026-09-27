@@ -4,7 +4,7 @@ import pool from '../shared/database/connection';
 import { sha256 } from './services/account.service';
 import { describeAction } from './services/audit.service';
 import {
-  canGrant, canManageMember, changeMemberRole, createInvitation, maskEmail, newInviteToken, previewInvitation, removeMember,
+  canGrant, canManageMember, changeMemberRole, createInvitation, maskEmail, newInviteToken, normalizeInviteEmail, previewInvitation, removeMember,
 } from './services/team.service';
 import { ServiceError } from './services/service-error';
 
@@ -14,15 +14,22 @@ const originalQuery = database.query;
 afterEach(() => { database.query = originalQuery; });
 const code = (c: string) => (e: unknown) => e instanceof ServiceError && e.code === c;
 
-test('who may grant and manage which roles', () => {
-  assert.deepEqual((['admin', 'developer', 'viewer', 'owner'] as const).map((r) => canGrant('owner', r)), [true, true, true, true]);
-  assert.deepEqual((['admin', 'developer', 'viewer', 'owner'] as const).map((r) => canGrant('admin', r)), [false, true, true, false]);
-  assert.equal(canGrant('developer', 'viewer'), false);
-  assert.equal(canGrant('viewer', 'viewer'), false);
+test('who may grant and manage which roles: only the owner grants, only Developer', () => {
+  assert.deepEqual((['admin', 'developer', 'viewer', 'owner'] as const).map((r) => canGrant('owner', r)), [false, true, false, false]);
+  for (const actor of ['admin', 'developer', 'viewer'] as const) for (const target of ['developer', 'admin', 'viewer', 'owner'] as const) assert.equal(canGrant(actor, target), false, `${actor}->${target}`);
   assert.equal(canManageMember('admin', 'admin'), false);
   assert.equal(canManageMember('admin', 'owner'), false);
   assert.equal(canManageMember('admin', 'developer'), true);
+  assert.equal(canManageMember('developer', 'developer'), false);
   assert.equal(canManageMember('owner', 'admin'), true);
+});
+
+test('invite addresses: Gmail only, whitespace and case normalised, nothing else folded', () => {
+  assert.equal(normalizeInviteEmail('  Budi.Santoso@GMAIL.com '), 'budi.santoso@gmail.com');
+  assert.equal(normalizeInviteEmail('a.b+tag@gmail.com'), 'a.b+tag@gmail.com', 'dots and +tags are kept as typed');
+  for (const bad of ['a@yahoo.com', 'a@googlemail.com', 'a@gmail.com.evil.test', 'a@sub.gmail.com', 'a@@gmail.com', 'gmail.com', 'a b@gmail.com', '@gmail.com', 'a@gmail.co']) {
+    assert.throws(() => normalizeInviteEmail(bad), code('GMAIL_REQUIRED'), bad);
+  }
 });
 
 test('invite tokens are random and only the hash is stored; emails are masked in previews', () => {
@@ -33,15 +40,19 @@ test('invite tokens are random and only the hash is stored; emails are masked in
   assert.equal(maskEmail('budi.santoso@example.com'), 'b***@example.com');
 });
 
-test('owners cannot be invited, and admins cannot invite admins', async () => {
-  await assert.rejects(() => createInvitation('t1', { userId: 'u1', role: 'owner' }, { email: 'a@b.co', role: 'owner' }), code('INVALID_ROLE'));
-  await assert.rejects(() => createInvitation('t1', { userId: 'u1', role: 'admin' }, { email: 'a@b.co', role: 'admin' }), code('ROLE_NOT_GRANTABLE'));
-  await assert.rejects(() => createInvitation('t1', { userId: 'u1', role: 'developer' }, { email: 'a@b.co', role: 'viewer' }), code('ROLE_NOT_GRANTABLE'));
+test('only Developer can be invited, and only by the owner; owner/admin/viewer roles are refused', async () => {
+  for (const role of ['owner', 'admin', 'viewer'] as const) {
+    await assert.rejects(() => createInvitation('t1', { userId: 'u1', role: 'owner' }, { email: 'a@gmail.com', role }), code('INVALID_ROLE'), role);
+  }
+  for (const actor of ['admin', 'developer', 'viewer'] as const) {
+    await assert.rejects(() => createInvitation('t1', { userId: 'u1', role: actor }, { email: 'a@gmail.com', role: 'developer' }), code('ROLE_NOT_GRANTABLE'), actor);
+  }
+  await assert.rejects(() => createInvitation('t1', { userId: 'u1', role: 'owner' }, { email: 'a@yahoo.com', role: 'developer' }), code('GMAIL_REQUIRED'));
 });
 
 test('inviting an existing member is a conflict', async () => {
   database.query = async () => ({ rows: [{ '?column?': 1 }] });
-  await assert.rejects(() => createInvitation('t1', { userId: 'u1', role: 'owner' }, { email: 'a@b.co', role: 'viewer' }), code('ALREADY_MEMBER'));
+  await assert.rejects(() => createInvitation('t1', { userId: 'u1', role: 'owner' }, { email: 'a@gmail.com', role: 'developer' }), code('ALREADY_MEMBER'));
 });
 
 test('a valid invitation stores a hash, replaces older links for the same email, and returns the link once', async () => {
@@ -53,10 +64,11 @@ test('a valid invitation stores a hash, replaces older links for the same email,
     if (text.includes('INSERT INTO invitations')) { inserted = values ?? []; return { rows: [{ id: 'inv1' }] }; }
     return { rows: [] };
   };
-  const created = await createInvitation('t1', { userId: 'u1', role: 'owner' }, { email: 'new@b.co', role: 'developer' });
+  const created = await createInvitation('t1', { userId: 'u1', role: 'owner' }, { email: ' New@Gmail.com ', role: 'developer' });
   assert.deepEqual(seen, ['revoked-old']);
   assert.equal(inserted[3], sha256(created.token));
   assert.ok(!inserted.includes(created.token));
+  assert.equal(created.email, 'new@gmail.com');
   assert.equal(created.accept_path, `/invite/${created.token}`);
   const hours = (created.expires_at.getTime() - Date.now()) / 3_600_000;
   assert.ok(hours > 47.9 && hours <= 48);
@@ -68,26 +80,24 @@ test('an unknown, expired, used or revoked invitation looks the same: not found'
 });
 
 test('a preview shows the workspace and a masked email, never the token or full address', async () => {
-  database.query = async () => ({ rows: [{ email: 'budi@example.com', role: 'viewer', expires_at: new Date(), workspace: 'Acme', inviter: 'Sari' }] });
+  database.query = async () => ({ rows: [{ email: 'budi@example.com', role: 'developer', expires_at: new Date(), workspace: 'Acme', inviter: 'Sari' }] });
   const preview = await previewInvitation('wgi_x');
   assert.equal(preview.workspace, 'Acme');
   assert.equal(preview.email_hint, 'b***@example.com');
   assert.ok(!JSON.stringify(preview).includes('budi@example.com'));
 });
 
-test('role changes: not yourself, admins cannot touch admins or owners, owners can', async () => {
+test('role changes: not yourself, not the owner, only the owner may act, and the only target is Developer', async () => {
   const membership = (role: string) => async (text: string) => text.startsWith('SELECT role') ? { rows: [{ role }] } : { rows: [] };
-  await assert.rejects(() => changeMemberRole('t1', { userId: 'u1', role: 'owner' }, 'u1', 'viewer'), code('CANNOT_CHANGE_SELF'));
-
-  database.query = membership('admin');
-  await assert.rejects(() => changeMemberRole('t1', { userId: 'u1', role: 'admin' }, 'u2', 'viewer'), code('ROLE_NOT_GRANTABLE'));
-  database.query = membership('developer');
-  await assert.rejects(() => changeMemberRole('t1', { userId: 'u1', role: 'admin' }, 'u2', 'admin'), code('ROLE_NOT_GRANTABLE'));
-  await assert.doesNotReject(() => changeMemberRole('t1', { userId: 'u1', role: 'admin' }, 'u2', 'viewer'));
-  database.query = membership('admin');
+  await assert.rejects(() => changeMemberRole('t1', { userId: 'u1', role: 'owner' }, 'u1', 'developer'), code('CANNOT_CHANGE_SELF'));
+  database.query = membership('owner');
+  await assert.rejects(() => changeMemberRole('t1', { userId: 'u1', role: 'admin' }, 'u2', 'developer'), code('ROLE_NOT_GRANTABLE'));
+  database.query = membership('viewer'); // legacy member: the owner may explicitly make them a Developer
   await assert.doesNotReject(() => changeMemberRole('t1', { userId: 'u1', role: 'owner' }, 'u2', 'developer'));
+  for (const actor of ['admin', 'developer'] as const) await assert.rejects(() => changeMemberRole('t1', { userId: 'u1', role: actor }, 'u2', 'developer'), code('ROLE_NOT_GRANTABLE'), actor);
+  for (const target of ['admin', 'viewer', 'owner'] as const) await assert.rejects(() => changeMemberRole('t1', { userId: 'u1', role: 'owner' }, 'u2', target), code('ROLE_NOT_GRANTABLE'), target);
   database.query = async () => ({ rows: [] });
-  await assert.rejects(() => changeMemberRole('t1', { userId: 'u1', role: 'owner' }, 'u2', 'viewer'), code('MEMBER_NOT_FOUND'));
+  await assert.rejects(() => changeMemberRole('t1', { userId: 'u1', role: 'owner' }, 'u2', 'developer'), code('MEMBER_NOT_FOUND'));
 });
 
 test('removing members: not yourself, and an admin cannot remove an owner', async () => {

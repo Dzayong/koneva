@@ -98,7 +98,10 @@ test('authorize lets permitted roles through and blocks the rest with 403', () =
   assert.equal(run('viewer', 'POST', '/message/send').status, 403);
   assert.equal(run('viewer', 'GET', '/devices').nexted, true);
   assert.equal(run('viewer', 'GET', '/devices/X/qr').status, 403);
-  assert.equal(run('developer', 'DELETE', '/devices/X').status, 403);
+  assert.equal(run('developer', 'DELETE', '/devices/X').nexted, true, 'a Developer manages devices, including deleting them');
+  assert.equal(run('viewer', 'DELETE', '/devices/X').status, 403);
+  assert.equal(run('developer', 'GET', '/billing').status, 403);
+  assert.equal(run('developer', 'POST', '/team/invitations').status, 403);
   assert.equal(run('admin', 'DELETE', '/devices/X').nexted, true);
   assert.equal(run('owner', 'GET', '/unknown-route').status, 403);
   assert.equal(run(undefined, 'GET', '/devices').status, 403);

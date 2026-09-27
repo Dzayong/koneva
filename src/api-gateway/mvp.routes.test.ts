@@ -105,8 +105,12 @@ test('broadcast contract accepts snake_case device key and recipient list', () =
 });
 
 test('retry rejects a tenant-owned message that is not failed or blocked', async () => {
-  let call = 0;
-  database.query = async () => ({ rows: call++ === 0 ? [] : [{ status: 'sent' }] });
+  database.query = async (text: string) => {
+    if (text.includes('FROM subscriptions')) return { rows: [] }; // older workspace: no plan row, allowed
+    if (text.includes('AS device_status')) return { rows: [{ device_status: 'online' }] };
+    if (text.startsWith('UPDATE messages')) return { rows: [] }; // not failed/blocked: nothing updated
+    return { rows: [{ status: 'sent' }] };
+  };
   await assert.rejects(() => retryMessage(tenant.id, '00000000-0000-0000-0000-000000000001'),
     (error) => error instanceof ServiceError && error.code === 'MESSAGE_NOT_RETRYABLE');
 });

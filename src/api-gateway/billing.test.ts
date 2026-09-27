@@ -131,9 +131,14 @@ test('an order voids the previous open invoice and prices by cycle', async () =>
 test('student verification asks for a school or campus email', async () => {
   await assert.rejects(() => requestStudentVerification('t1', 'me@gmail.com', 'saya mahasiswa'), code('NOT_A_STUDENT_EMAIL'));
   const seen: unknown[][] = [];
-  database.query = async (_t, v) => { seen.push(v ?? []); return { rows: [] }; };
+  withTransaction((text, v) => {
+    if (text.startsWith('SELECT id FROM tenants')) return { rows: [{ id: 't1' }] };
+    if (text.startsWith('INSERT INTO student_requests')) seen.push(v ?? []);
+    return { rows: [] };
+  });
   await assert.doesNotReject(() => requestStudentVerification('t1', 'me@mhs.ui.ac.id', 'x'.repeat(900)));
-  assert.equal((seen[0]?.[1] as string).length, 500);
+  assert.equal(seen[0]?.[1], 'me@mhs.ui.ac.id');
+  assert.equal((seen[0]?.[2] as string).length, 500);
 });
 
 import { activatePaid, createTrial, grantPlan, markInvoicePaid, type PlanRow } from './services/billing.service';

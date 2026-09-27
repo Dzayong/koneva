@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
+import { legacyBillingWrites } from '../middleware/admin-access';
 import config from '../../shared/config';
 import pool from '../../shared/database/connection';
 import { validate } from '../middleware/validate';
@@ -73,7 +74,7 @@ router.get('/subscriptions', async (request, response) => {
 router.get('/invoices', async (request, response) => {
   response.json({ success: true, data: await listAllInvoices(typeof request.query['status'] === 'string' ? request.query['status'] : undefined) });
 });
-router.post('/invoices/:id/pay', validate({
+router.post('/invoices/:id/pay', legacyBillingWrites(), validate({
   params: uuidParam,
   body: z.object({ method: z.string().min(1).max(30), reference: z.string().max(80).optional(), note: z.string().max(500).optional() }).strict(),
 }), async (request, response) => {
@@ -84,7 +85,7 @@ router.post('/invoices/:id/void', validate({ params: uuidParam }), async (reques
   await voidInvoice((request.validated!.params as { id: string }).id);
   response.json({ success: true });
 });
-router.post('/tenant/:id/student-verify', validate({
+router.post('/tenant/:id/student-verify', legacyBillingWrites(), validate({
   params: uuidParam, body: z.object({ approved: z.boolean(), note: z.string().max(500).optional() }).strict(),
 }), async (request, response) => {
   const body = request.validated!.body as { approved: boolean; note?: string };
@@ -112,7 +113,8 @@ router.post('/device/create', validate({ body: createDeviceSchema }), async (req
 
 router.get('/tenants', async (_request, response) => {
   const rows = await pool.query(`
-    SELECT t.*, COUNT(DISTINCT d.id)::int AS device_count, COUNT(DISTINCT m.id)::int AS message_count
+    SELECT t.id, t.name, t.email, t.status, t.max_devices, t.quota_messages, t.used_messages, t.created_at,
+      COUNT(DISTINCT d.id)::int AS device_count, COUNT(DISTINCT m.id)::int AS message_count
     FROM tenants t LEFT JOIN devices d ON d.tenant_id = t.id
     LEFT JOIN messages m ON m.tenant_id = t.id GROUP BY t.id ORDER BY t.created_at DESC`);
   response.json({ success: true, data: rows.rows });
@@ -121,8 +123,8 @@ router.get('/tenants', async (_request, response) => {
 router.get('/devices', async (request, response) => {
   const status = typeof request.query.status === 'string' ? request.query.status : undefined;
   const rows = status
-    ? await pool.query('SELECT * FROM devices WHERE status = $1 ORDER BY created_at DESC', [status])
-    : await pool.query('SELECT * FROM devices ORDER BY created_at DESC');
+    ? await pool.query('SELECT id, tenant_id, device_key, label, status, health_score, created_at, updated_at FROM devices WHERE status = $1 ORDER BY created_at DESC', [status])
+    : await pool.query('SELECT id, tenant_id, device_key, label, status, health_score, created_at, updated_at FROM devices ORDER BY created_at DESC');
   response.json({ success: true, data: rows.rows });
 });
 

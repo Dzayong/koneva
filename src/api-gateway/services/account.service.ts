@@ -121,7 +121,7 @@ export async function revokeSession(token: string): Promise<void> {
 
 export interface ResolvedSession {
   sessionId: string;
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; email_verified: boolean };
   tenant: TenantContext;
   role: Role;
   workspaces: Workspace[];
@@ -131,9 +131,9 @@ export async function resolveSession(token: string, workspaceId?: string): Promi
   const hash = sha256(token);
   const { rows } = await pool.query<{
     session_id: string; expires_at: Date; last_used_at: Date | null;
-    user_id: string; email: string; name: string; user_status: string;
+    user_id: string; email: string; name: string; user_status: string; email_verified_at: Date | null;
   }>(
-    `SELECT s.id AS session_id, s.expires_at, s.last_used_at, u.id AS user_id, u.email, u.name, u.status AS user_status
+    `SELECT s.id AS session_id, s.expires_at, s.last_used_at, u.id AS user_id, u.email, u.name, u.status AS user_status, u.email_verified_at
      FROM user_sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now()`,
     [hash],
@@ -161,7 +161,7 @@ export async function resolveSession(token: string, workspaceId?: string): Promi
   const { role, ...tenant } = chosen;
   return {
     sessionId: session.session_id,
-    user: { id: session.user_id, email: session.email, name: session.name },
+    user: { id: session.user_id, email: session.email, name: session.name, email_verified: session.email_verified_at !== null },
     tenant: tenant as TenantContext,
     role,
     workspaces: memberships.map((m) => ({ id: m.id, name: m.name, role: m.role })),

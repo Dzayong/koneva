@@ -1,3 +1,4 @@
+import { requireVerifiedEmail } from '../middleware/verified-email';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import config from '../../shared/config';
@@ -22,7 +23,7 @@ router.get('/billing', async (request: Request, response: Response) => {
   });
 });
 
-router.post('/billing/orders', validate({ body: orderSchema }), async (request: Request, response: Response) => {
+router.post('/billing/orders', requireVerifiedEmail, validate({ body: orderSchema }), async (request: Request, response: Response) => {
   const body = request.validated!.body as z.infer<typeof orderSchema>;
   const invoice = await createOrder(request.tenant!.id, body.plan, body.cycle);
   response.status(201).json({

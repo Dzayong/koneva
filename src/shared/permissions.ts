@@ -1,8 +1,17 @@
 // One place that says who may do what. Roles are for people signed in to the console;
 // API keys carry a subset of the same permissions (scopes).
 
+// Customer access model: Owner (owns the workspace, one at a time) and Developer (technical integration, per workspace).
+// `admin` and `viewer` are LEGACY: they still exist in old data and keep their historical (safe) permissions, but nothing
+// new can create, invite or assign them (enforced in the service layer and by database triggers, see migration 021).
+// The KONEVA system admin is NOT a customer role: it is a separate operator account (docs/OPERATOR_PANEL.md).
 export const ROLES = ['owner', 'admin', 'developer', 'viewer'] as const;
 export type Role = (typeof ROLES)[number];
+export const CURRENT_ROLES = ['owner', 'developer'] as const;
+export const LEGACY_ROLES = ['admin', 'viewer'] as const;
+/** The only role an owner can hand out to someone else. Ownership is one per workspace and is never invited. */
+export const ASSIGNABLE_ROLES = ['developer'] as const;
+export const isLegacyRole = (role: Role): boolean => (LEGACY_ROLES as readonly string[]).includes(role);
 
 export const PERMISSIONS = [
   'devices:read', 'devices:write', 'devices:delete',
@@ -16,8 +25,9 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   owner: PERMISSIONS,
   admin: PERMISSIONS.filter((p) => p !== 'billing:manage'),
+  // Everything technical, including deleting a device. Never billing or the team.
   developer: [
-    'devices:read', 'devices:write', 'messages:read', 'messages:send', 'content:write',
+    'devices:read', 'devices:write', 'devices:delete', 'messages:read', 'messages:send', 'content:write',
     'webhooks:manage', 'keys:manage',
   ],
   viewer: ['devices:read', 'messages:read'],

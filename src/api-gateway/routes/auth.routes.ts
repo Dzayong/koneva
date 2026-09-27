@@ -6,7 +6,8 @@ import { PERMISSIONS, ROLE_PERMISSIONS } from '../../shared/permissions';
 import { getRedisClient } from '../../shared/redis';
 import { validate } from '../middleware/validate';
 import { login, resolveSession, revokeSession, sha256, signup } from '../services/account.service';
-import { acceptInvitation, previewInvitation } from '../services/team.service';
+import { acceptInvitation, previewInvitation, requestInvitationOtp } from '../services/team.service';
+import { confirmEmailVerification, requestEmailVerification } from '../services/owner-verification.service';
 import { recordSiteEvent } from '../services/site-stats.service';
 import { getSubscriptionSummary } from '../services/billing.service';
 import { recordAudit } from '../services/audit.service';
@@ -97,7 +98,23 @@ router.get('/me', async (request: Request, response: Response) => {
   });
 });
 
+// Owner email verification (any domain). Needs a signed-in session; the OTP mail and its limits are shared with invitation OTPs.
+async function sessionUser(request: Request): Promise<string> {
+  const token = bearer(request);
+  const session = token ? await resolveSession(token) : undefined;
+  if (!session) throw new ServiceError(401, 'UNAUTHORIZED', 'Invalid or expired session');
+  return session.user.id;
+}
+router.post('/email-verification/request', limited(15 * 60_000, 20), async (request: Request, response: Response) => {
+  response.json({ success: true, data: await requestEmailVerification(await sessionUser(request), request.ip) });
+});
+router.post('/email-verification/confirm', limited(15 * 60_000, 30), validate({ body: z.object({ code: z.string().regex(/^\d{6}$/) }).strict() }), async (request: Request, response: Response) => {
+  await confirmEmailVerification(await sessionUser(request), (request.validated!.body as { code: string }).code);
+  response.json({ success: true, data: { verified: true } });
+});
+
 export const acceptSchema = z.object({
+  otp: z.string().regex(/^\d{6}$/, 'The verification code has 6 digits'),
   name: z.string().trim().min(1).max(120).optional(),
   password: z.string().min(10, 'Password must be at least 10 characters').max(128).optional(),
   accept_terms: z.literal(true).optional(),
@@ -106,6 +123,11 @@ const tokenParams = z.object({ token: z.string().regex(/^wgi_[A-Za-z0-9_-]{20,}$
 
 router.get('/invitations/:token', limited(15 * 60_000, 60), validate({ params: tokenParams }), async (request: Request, response: Response) => {
   response.json({ success: true, data: await previewInvitation((request.validated!.params as { token: string }).token) });
+});
+
+// Sends the emailed proof-of-mailbox code. Fails safe with 503 while no email sender is configured.
+router.post('/invitations/:token/otp', limited(15 * 60_000, 20), validate({ params: tokenParams }), async (request: Request, response: Response) => {
+  response.json({ success: true, data: await requestInvitationOtp((request.validated!.params as { token: string }).token, request.ip) });
 });
 
 // A new person supplies name, password and the terms; someone who already has an account signs in first.
@@ -121,6 +143,7 @@ router.post('/invitations/:token/accept', limited(15 * 60_000, 30), validate({ p
   const result = await acceptInvitation(token, {
     session: session ? { userId: session.user.id, email: session.user.email } : undefined,
     newUser: !session && body.name && body.password ? { name: body.name, password: body.password } : undefined,
+    otp: body.otp,
     meta: meta(request),
   });
   await recordAudit({

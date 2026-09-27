@@ -33,7 +33,9 @@ test('keys can never carry key, team or billing management', () => {
 test('a person cannot grant a scope their own role lacks', () => {
   assert.deepEqual(assertScopesAllowed(['messages:read', 'devices:read'], 'viewer'), ['messages:read', 'devices:read']);
   assert.throws(() => assertScopesAllowed(['messages:send'], 'viewer'), (e: unknown) => e instanceof ServiceError && e.code === 'SCOPE_EXCEEDS_ROLE');
-  assert.throws(() => assertScopesAllowed(['devices:delete'], 'developer'), (e: unknown) => e instanceof ServiceError && e.code === 'SCOPE_EXCEEDS_ROLE');
+  assert.deepEqual(assertScopesAllowed(['devices:delete'], 'developer'), ['devices:delete']);
+  assert.throws(() => assertScopesAllowed(['devices:delete'], 'viewer'), (e: unknown) => e instanceof ServiceError && e.code === 'SCOPE_EXCEEDS_ROLE');
+  assert.throws(() => assertScopesAllowed(['audit:read'], 'developer'), (e: unknown) => e instanceof ServiceError && e.code === 'SCOPE_EXCEEDS_ROLE');
   assert.deepEqual(assertScopesAllowed(['messages:send', 'messages:send'], 'developer'), ['messages:send']);
 });
 
