@@ -26,8 +26,17 @@ The Device Manager reuses the application image. Both Deployments use
 `imagePullPolicy: Never`, so the images must be present on every Kind node.
 Dynamic bot workloads use the `BOT_IMAGE=wa-bot:latest` ConfigMap value.
 
+`k8s/secrets.yaml` is git-ignored and not tracked in the repo (kept local-only
+so a real deployment's values are never committed). Create it first:
+
+```bash
+cp k8s/secrets.yaml.example k8s/secrets.yaml
+```
+
 Review `k8s/secrets.yaml` before use. Its `CHANGE_ME` values are only suitable
-for an isolated disposable development cluster. Then run the verification
+for an isolated disposable development cluster; replace them (or use your
+secret manager overlay) before any real deployment — `scripts/deploy.sh`
+refuses to run while `CHANGE_ME` is still present. Then run the verification
 script from any directory:
 
 ```bash

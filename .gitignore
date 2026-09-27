@@ -20,3 +20,6 @@ docker/grafana/data/
 
 # Archives can contain .env files; never track them.
 *.tar.gz
+
+# Real k8s secrets stay local-only; k8s/secrets.yaml.example is the tracked template.
+k8s/secrets.yaml
