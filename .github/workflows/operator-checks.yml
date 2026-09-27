@@ -1,0 +1,47 @@
+# Local checks for the Operator Panel, run in CI unchanged. Each script creates and removes its own disposable
+# PostgreSQL/Redis containers with synthetic data. No secrets, no deploy, no external service, no production access.
+name: operator-checks
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: operator-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Full backend suite + operator integration (disposable PostgreSQL)
+        run: bash scripts/test-operator-local.sh --all
+      - name: Real entrypoint, rate limits, startup failures (disposable PostgreSQL + Redis)
+        run: bash scripts/test-operator-entry.sh
+      - name: Outbound controls: suspension, pause, last check, auto-reply, commands (disposable PostgreSQL + Redis, fake transport)
+        run: bash scripts/test-outbound-local.sh
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm ci
+        working-directory: dashboard
+      - name: Typecheck and lint
+        working-directory: dashboard
+        run: npx tsc --noEmit && npx eslint src tests tests-stack playwright.stack.config.ts
+      - name: Chromium for Playwright (pinned by dashboard/package.json)
+        working-directory: dashboard
+        run: npx playwright install --with-deps chromium
+      - name: UI tests (API faked in the browser)
+        working-directory: dashboard
+        run: npx playwright test
+      - name: Browser tests against the real backend (STACK-local)
+        run: bash scripts/test-operator-stack.sh
