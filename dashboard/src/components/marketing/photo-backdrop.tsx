@@ -28,7 +28,10 @@ export function PhotoBackdrop({ src, side = "right", className, blend }: Props) 
     : `linear-gradient(${toText}, #000 25%, transparent 92%), linear-gradient(to bottom, transparent, #000 22%, #000 72%, transparent)`;
   return (
     <div ref={ref} aria-hidden className={cn("pointer-events-none absolute inset-0 -z-0 overflow-hidden", className)}>
-      <motion.div style={{ y, WebkitMaskImage: mask, maskImage: mask, maskComposite: "intersect", WebkitMaskComposite: "source-in" }}
+      {/* suppressHydrationWarning: `y` is a scroll-linked MotionValue Framer Motion resolves against the real client scroll
+          position and prefers-reduced-motion, neither knowable during SSR; the client's first-paint transform legitimately
+          differs from the server's static guess. */}
+      <motion.div suppressHydrationWarning style={{ y, WebkitMaskImage: mask, maskImage: mask, maskComposite: "intersect", WebkitMaskComposite: "source-in" }}
         className={cn("absolute inset-y-[-40px] opacity-[0.28] md:opacity-[0.55]", side === "right" && "right-0 w-full md:w-[52%]", side === "left" && "left-0 w-full md:w-[52%]", side === "full" && "inset-x-0", blend)}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={src} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />

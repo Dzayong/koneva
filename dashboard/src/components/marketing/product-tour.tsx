@@ -33,7 +33,10 @@ export function ProductTour() {
       <Reveal from="pop">
       <Frame>
         {/* Muted, looping and inline so it plays without sound or a fullscreen takeover on phones. */}
-        <div ref={videoBox}><video className="aspect-video w-full bg-muted" {...(near ? { src: "/media/alur-dashboard.webm" } : {})} poster="/media/ringkasan.png"
+        {/* suppressHydrationWarning: `near` (IntersectionObserver) and `reduce` (prefers-reduced-motion) are both
+            unknowable during SSR (server always renders as if neither), so a client where the box is already in
+            view or reduced-motion is on legitimately gets a different `src`/`autoPlay`/`controls` on first paint. */}
+        <div ref={videoBox}><video suppressHydrationWarning className="aspect-video w-full bg-muted" {...(near ? { src: "/media/alur-dashboard.webm" } : {})} poster="/media/ringkasan.png"
           autoPlay={!reduce} muted loop playsInline preload="none" controls={Boolean(reduce)}
           aria-label="Rekaman layar: mendaftar, menambah nomor, memasang webhook" /></div>
       </Frame>

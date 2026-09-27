@@ -30,7 +30,10 @@ export function Reveal({ from = "up", delay = 0, className, children, as = "div"
   const reduce = useReducedMotion() ?? false;
   const Tag = motion[as];
   return (
-    <Tag initial="hidden" whileInView="show" viewport={{ once: true, margin: "0px 0px -12% 0px" }} variants={variants(from, delay, reduce)} className={cn(className)}>
+    // suppressHydrationWarning: `reduce` reflects this browser's real prefers-reduced-motion setting, which SSR
+    // cannot know (it renders assuming false); a client with the setting on legitimately renders different
+    // inline style/variant values on first paint. See StaggerItem, ReadinessRing and PhotoBackdrop for the same reason.
+    <Tag suppressHydrationWarning initial="hidden" whileInView="show" viewport={{ once: true, margin: "0px 0px -12% 0px" }} variants={variants(from, delay, reduce)} className={cn(className)}>
       {children}
     </Tag>
   );
@@ -47,5 +50,5 @@ export function Stagger({ className, children, step = 0.08 }: { className?: stri
 
 export function StaggerItem({ from = "up", className, children }: { from?: RevealFrom; className?: string; children: React.ReactNode }) {
   const reduce = useReducedMotion() ?? false;
-  return <motion.div variants={variants(from, 0, reduce)} className={cn(className)}>{children}</motion.div>;
+  return <motion.div suppressHydrationWarning variants={variants(from, 0, reduce)} className={cn(className)}>{children}</motion.div>;
 }

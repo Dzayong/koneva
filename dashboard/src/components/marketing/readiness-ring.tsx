@@ -24,7 +24,9 @@ function CountUp({ to, reduce }: { to: number; reduce: boolean | null }) {
     const controls = animate(0, to, { duration: 1.4, ease: "easeOut", onUpdate: (v) => setN(Math.round(v)) });
     return () => controls.stop();
   }, [inView, reduce, to]);
-  return <span ref={ref}>{n}</span>;
+  // suppressHydrationWarning: `n` can legitimately differ from the server's `0` on a client whose prefers-reduced-motion
+  // setting makes `reduce` true on first paint (SSR always assumes false; see Reveal for the same reason).
+  return <span ref={ref} suppressHydrationWarning>{n}</span>;
 }
 
 export function ReadinessRing() {
@@ -35,6 +37,7 @@ export function ReadinessRing() {
         <svg viewBox="0 0 128 128" className="h-full w-full -rotate-90" role="img" aria-label={`Contoh skor kesiapan ${SCORE} dari 100`}>
           <circle cx="64" cy="64" r={R} fill="none" strokeWidth="10" className="stroke-muted" />
           <motion.circle
+            suppressHydrationWarning
             cx="64" cy="64" r={R} fill="none" strokeWidth="10" strokeLinecap="round" className="stroke-primary"
             strokeDasharray={C}
             initial={{ strokeDashoffset: reduce ? C * (1 - SCORE / 100) : C }}
@@ -54,6 +57,7 @@ export function ReadinessRing() {
             <div className="flex justify-between text-sm"><span>{f.name}</span><span className="text-muted-foreground">{f.value}/{f.weight}</span></div>
             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
               <motion.div
+                suppressHydrationWarning
                 className="h-full rounded-full bg-primary/80"
                 initial={reduce ? false : { width: 0 }}
                 whileInView={{ width: `${(f.value / f.weight) * 100}%` }}
