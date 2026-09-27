@@ -272,7 +272,7 @@ export type Permission =
 export interface WorkspaceRef { id: string; name: string; role: Role }
 
 export interface Me {
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; email_verified?: boolean };
   workspace: WorkspaceRef;
   workspaces: WorkspaceRef[];
   permissions: Permission[];
@@ -317,6 +317,8 @@ export interface CreatedInvitation {
 
 export interface InvitationPreview {
   workspace: string; role: Role; invited_by: string | null; email_hint: string; expires_at: string;
+  /** The recipient must confirm an emailed code. `otp_available=false` means no email sender is configured yet. */
+  requires_otp: boolean; otp_available: boolean;
 }
 
 export interface AuditEntry {
@@ -433,7 +435,7 @@ export interface BillingState {
     messages_used: number; messages_limit: number; resets_at: string | null;
     devices_used: number; devices_limit: number; members_used: number; members_limit: number | null;
   };
-  student: { verified: boolean; requested: boolean };
+  student: { verified: boolean; requested: boolean; needs_resubmission?: boolean };
   plans: PublicPlan[];
   invoices: Invoice[];
   payment: { instructions: string; contact: string | null };

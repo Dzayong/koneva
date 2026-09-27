@@ -1,5 +1,6 @@
 "use client";
 
+import { ROLE_LABEL } from "@/lib/roles";
 import { useState } from "react";
 import { Menu } from "lucide-react";
 import { usePathname } from "next/navigation";
@@ -37,7 +38,6 @@ function pageTitle(pathname: string): string {
   return "KONEVA";
 }
 
-const ROLE_LABEL = { owner: "Owner", admin: "Admin", developer: "Developer", viewer: "Viewer" } as const;
 
 function initials(name: string | undefined): string {
   const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
@@ -87,7 +87,7 @@ export function Header() {
           </Avatar>
           <div className="hidden md:block">
             <p className="text-sm font-medium">{legacy ? "Tenant" : (user?.name ?? "…")}</p>
-            <p className="text-xs text-muted-foreground">{role ? ROLE_LABEL[role] : "Masuk"}</p>
+            <p className="text-xs text-muted-foreground">{legacy ? "Kunci tenant (lama)" : role ? ROLE_LABEL[role] : "Masuk"}</p>
           </div>
         </div>
       </div>

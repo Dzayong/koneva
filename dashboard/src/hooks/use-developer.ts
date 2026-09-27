@@ -2,7 +2,6 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { apiFailure } from "@/lib/errors";
-import type { Role } from "@/lib/types";
 
 const fail = (title: string) => (error: unknown) => toast.error(title, { description: apiFailure(error).message });
 
@@ -44,7 +43,7 @@ export function useTeam() {
 export function useInviteMember() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ email, role }: { email: string; role: Role }) => api.inviteMember(email, role),
+    mutationFn: ({ email, role }: { email: string; role: "developer" }) => api.inviteMember(email, role),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["team"] }),
   });
 }
@@ -61,7 +60,7 @@ export function useRevokeInvitation() {
 export function useChangeRole() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ userId, role }: { userId: string; role: Role }) => api.changeMemberRole(userId, role),
+    mutationFn: ({ userId, role }: { userId: string; role: "developer" }) => api.changeMemberRole(userId, role),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["team"] }); toast.success("Peran diubah"); },
     onError: fail("Gagal mengubah peran"),
   });

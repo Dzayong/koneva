@@ -14,9 +14,8 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/lib/api";
 import { apiFailure } from "@/lib/errors";
-import type { InvitationPreview, Role } from "@/lib/types";
-
-const ROLE_LABEL: Record<Role, string> = { owner: "Owner", admin: "Admin", developer: "Developer", viewer: "Viewer" };
+import { ROLE_LABEL } from "@/lib/roles";
+import type { InvitationPreview } from "@/lib/types";
 
 export default function InvitePage(props: { params: Promise<{ token: string }> }) {
   const { token } = use(props.params);
@@ -30,6 +29,17 @@ export default function InvitePage(props: { params: Promise<{ token: string }> }
   const [terms, setTerms] = useState(false);
   const [error, setError] = useState<{ message: string; signIn?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpNote, setOtpNote] = useState<string | null>(null);
+  const [wait, setWait] = useState(0);
+
+  useEffect(() => {
+    if (wait <= 0) return;
+    const timer = setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [wait]);
 
   useEffect(() => {
     api.previewInvitation(token).then(setPreview).catch(() => setInvalid(true));
@@ -37,24 +47,42 @@ export default function InvitePage(props: { params: Promise<{ token: string }> }
 
   const signedIn = isAuthenticated === true && api.hasSession();
 
+  const sendOtp = async () => {
+    setError(null); setOtpNote(null); setOtpBusy(true);
+    try {
+      const result = await api.requestInvitationOtp(token);
+      setOtpSent(true); setWait(result.resend_after);
+      setOtpNote("Kode sudah dikirim ke alamat Gmail undangan. Berlaku 10 menit.");
+    } catch (err) {
+      const failure = apiFailure(err);
+      setError({ message:
+        failure.code === "EMAIL_NOT_CONFIGURED" ? "Pengiriman email belum diaktifkan, jadi undangan belum bisa diterima. Hubungi pemilik workspace."
+        : failure.code === "OTP_COOLDOWN" ? failure.message
+        : failure.code === "OTP_LIMIT" ? "Terlalu banyak permintaan kode. Coba lagi nanti."
+        : failure.code === "INVITATION_INVALID" ? "Undangan ini sudah tidak berlaku."
+        : "Kode gagal dikirim. Coba lagi nanti." });
+    } finally { setOtpBusy(false); }
+  };
+
   const accept = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
       if (signedIn) {
-        const result = await api.acceptInvitation(token);
+        const result = await api.acceptInvitation(token, { otp });
         api.setSession(api.getSession()!, result.joined.id);
         queryClient.clear();
         router.push("/dashboard");
         return;
       }
-      const result = await api.acceptInvitation(token, { name: name.trim(), password, accept_terms: true });
+      const result = await api.acceptInvitation(token, { otp, name: name.trim(), password, accept_terms: true });
       if (result.session) loginWithSession(result.session);
     } catch (err) {
       const failure = apiFailure(err);
       setError(
-        failure.code === "ACCOUNT_EXISTS" ? { message: "Email ini sudah punya akun.", signIn: true }
+        failure.code === "OTP_INVALID" ? { message: "Kode salah, kedaluwarsa, atau sudah dipakai. Minta kode baru." }
+        : failure.code === "ACCOUNT_EXISTS" ? { message: "Email ini sudah punya akun.", signIn: true }
         : failure.code === "EMAIL_MISMATCH" ? { message: "Undangan ini dikirim ke email yang berbeda dari akun yang sedang masuk." }
         : failure.code === "INVITATION_INVALID" ? { message: "Undangan ini sudah tidak berlaku." }
         : { message: failure.message },
@@ -112,6 +140,27 @@ export default function InvitePage(props: { params: Promise<{ token: string }> }
                 </label>
               </>
             )}
+            <div className="space-y-2 rounded-lg border p-3">
+              <p className="text-sm font-medium">Verifikasi email</p>
+              {preview.otp_available ? (
+                <>
+                  <p className="text-xs text-muted-foreground">Kami kirim kode 6 digit ke alamat Gmail undangan ini ({preview.email_hint}). Alamat lain tidak bisa menerima undangan.</p>
+                  <Button type="button" variant="outline" size="sm" onClick={sendOtp} disabled={otpBusy || wait > 0}>
+                    {otpBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {otpSent ? (wait > 0 ? `Kirim ulang kode (${wait} dtk)` : "Kirim ulang kode") : "Kirim kode ke email"}
+                  </Button>
+                  {otpNote && <p role="status" className="text-xs text-muted-foreground">{otpNote}</p>}
+                  {otpSent && (
+                    <div className="space-y-2">
+                      <Label htmlFor="otp">Kode verifikasi</Label>
+                      <Input id="otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} className="font-mono tracking-widest" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p role="note" className="text-sm text-muted-foreground">Pengiriman email belum diaktifkan, jadi undangan ini belum bisa diterima. Hubungi pemilik workspace.</p>
+              )}
+            </div>
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error.message}{" "}
@@ -120,7 +169,7 @@ export default function InvitePage(props: { params: Promise<{ token: string }> }
             )}
           </CardContent>
           <CardFooter>
-            <Button type="submit" className="w-full" disabled={busy || (!signedIn && (!terms || password.length < 10 || !name.trim()))}>
+            <Button type="submit" className="w-full" disabled={busy || !preview.otp_available || otp.length !== 6 || (!signedIn && (!terms || password.length < 10 || !name.trim()))}>
               {busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Memproses…</> : signedIn ? "Terima undangan" : "Buat akun dan gabung"}
             </Button>
           </CardFooter>

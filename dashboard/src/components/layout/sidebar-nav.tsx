@@ -1,5 +1,6 @@
 "use client";
 
+import { ROLE_LABEL } from "@/lib/roles";
 import { useId } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
@@ -65,7 +66,6 @@ const groups: Array<{ label: string; items: NavItem[] }> = [
 ];
 const navigation = groups.flatMap((g) => g.items);
 
-const ROLE_LABEL = { owner: "Owner", admin: "Admin", developer: "Developer", viewer: "Viewer" } as const;
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
@@ -131,7 +131,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         <div className="mb-2 px-3">
           <p className="truncate text-sm font-medium text-sidebar-accent-foreground">{legacy ? "Akses API key" : (user?.name ?? "…")}</p>
           <p className="truncate text-xs text-sidebar-foreground">
-            {workspace?.name ?? (legacy ? "Tenant" : "…")}{role ? ` · ${ROLE_LABEL[role]}` : ""}
+            {workspace?.name ?? (legacy ? "Tenant" : "…")}{legacy ? " · Kunci tenant (lama)" : role ? ` · ${ROLE_LABEL[role]}` : ""}
           </p>
         </div>
         <button

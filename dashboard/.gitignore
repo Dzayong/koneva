@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# playwright
+/.next-stack/
+/.next-ui/
+/test-results/
+/playwright-report/

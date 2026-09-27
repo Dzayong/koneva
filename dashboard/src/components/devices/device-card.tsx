@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DeviceStatusBadge } from "@/components/devices/device-status-badge";
+import { usePermissions } from "@/hooks/use-me";
 import { useDeleteDevice, usePauseDevice, useResumeDevice } from "@/hooks/use-devices";
 import { cn, formatDate, formatPhoneNumber, getHealthConfig } from "@/lib/utils";
 import type { Device } from "@/lib/types";
@@ -59,6 +60,8 @@ export function DeviceCard({
   const pauseDevice = usePauseDevice();
   const resumeDevice = useResumeDevice();
   const deleteDevice = useDeleteDevice();
+  const { can } = usePermissions();
+  const canWrite = can("devices:write"), canDelete = can("devices:delete");
 
   const handleDelete = () => {
     if (window.confirm(`Hapus device "${device.label || device.device_key}"? Device akan diputus dan tidak bisa dikembalikan.`)) {
@@ -106,7 +109,7 @@ export function DeviceCard({
             Pindai QR
           </Button>
         )}
-        <DropdownMenu>
+        {(canWrite || canDelete) && <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="ml-auto">
               <MoreHorizontal className="h-4 w-4" />
@@ -114,7 +117,7 @@ export function DeviceCard({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {device.status === "online" && (
+            {canWrite && device.status === "online" && (
               <DropdownMenuItem
                 onClick={() => pauseDevice.mutate(device.device_key)}
                 disabled={pauseDevice.isPending}
@@ -123,7 +126,7 @@ export function DeviceCard({
                 Jeda
               </DropdownMenuItem>
             )}
-            {device.status === "paused" && (
+            {canWrite && device.status === "paused" && (
               <DropdownMenuItem
                 onClick={() => resumeDevice.mutate(device.device_key)}
                 disabled={resumeDevice.isPending}
@@ -132,13 +135,15 @@ export function DeviceCard({
                 Lanjutkan
               </DropdownMenuItem>
             )}
-            {(device.status === "online" || device.status === "paused") && <DropdownMenuSeparator />}
-            <DropdownMenuItem variant="destructive" onClick={handleDelete} disabled={deleteDevice.isPending}>
-              <Trash2 className="mr-2 h-4 w-4" />
-              Hapus
-            </DropdownMenuItem>
+            {canWrite && canDelete && (device.status === "online" || device.status === "paused") && <DropdownMenuSeparator />}
+            {canDelete && (
+              <DropdownMenuItem variant="destructive" onClick={handleDelete} disabled={deleteDevice.isPending}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Hapus
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
-        </DropdownMenu>
+        </DropdownMenu>}
       </div>
     </motion.div>
   );

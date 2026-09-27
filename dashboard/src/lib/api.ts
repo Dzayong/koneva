@@ -421,11 +421,29 @@ class ApiClient {
     return response.data.data;
   }
 
-  async acceptInvitation(token: string, body?: { name: string; password: string; accept_terms: true }): Promise<{
+  async requestEmailVerification(): Promise<{ already_verified: true } | { sent: true; expires_in: number; resend_after: number }> {
+    const response = await this.client.post<ApiSuccess<{ already_verified: true } | { sent: true; expires_in: number; resend_after: number }>>(
+      "/auth/email-verification/request", {}, { skipErrorToast: true, skipAuthRedirect: true },
+    );
+    return response.data.data;
+  }
+
+  async confirmEmailVerification(code: string): Promise<void> {
+    await this.client.post("/auth/email-verification/confirm", { code }, { skipErrorToast: true, skipAuthRedirect: true });
+  }
+
+  async requestInvitationOtp(token: string): Promise<{ sent: true; expires_in: number; resend_after: number }> {
+    const response = await this.client.post<ApiSuccess<{ sent: true; expires_in: number; resend_after: number }>>(
+      `/auth/invitations/${token}/otp`, {}, { skipErrorToast: true, skipAuthRedirect: true },
+    );
+    return response.data.data;
+  }
+
+  async acceptInvitation(token: string, body: { otp: string; name?: string; password?: string; accept_terms?: true }): Promise<{
     joined: { id: string; name: string; role: Role }; session?: AuthResult;
   }> {
     const response = await this.client.post<ApiSuccess<{ joined: { id: string; name: string; role: Role }; session?: AuthResult }>>(
-      `/auth/invitations/${token}/accept`, body ?? {}, { skipErrorToast: true, skipAuthRedirect: true },
+      `/auth/invitations/${token}/accept`, body, { skipErrorToast: true, skipAuthRedirect: true },
     );
     return response.data.data;
   }
@@ -460,7 +478,7 @@ class ApiClient {
     return response.data.data;
   }
 
-  async inviteMember(email: string, role: Role): Promise<CreatedInvitation> {
+  async inviteMember(email: string, role: "developer"): Promise<CreatedInvitation> {
     const response = await this.client.post<ApiSuccess<CreatedInvitation>>(
       "/api/v1/team/invitations", { email, role }, { skipErrorToast: true },
     );
@@ -471,7 +489,7 @@ class ApiClient {
     await this.client.delete(`/api/v1/team/invitations/${id}`, { skipErrorToast: true });
   }
 
-  async changeMemberRole(userId: string, role: Role): Promise<void> {
+  async changeMemberRole(userId: string, role: "developer"): Promise<void> {
     await this.client.patch(`/api/v1/team/members/${userId}`, { role }, { skipErrorToast: true });
   }
 

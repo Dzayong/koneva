@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmailVerificationDialog } from "@/components/account/email-verification-dialog";
 import { CycleToggle, PlanCards, rupiah } from "@/components/billing/plan-cards";
 import { useBilling, useCreateOrder, useStudentRequest } from "@/hooks/use-billing";
 import { usePermissions } from "@/hooks/use-me";
@@ -59,6 +60,9 @@ function StudentBox({ state }: { state: BillingState }) {
           e.preventDefault(); setError(null);
           request.mutate(note, { onError: (err) => { const f = apiFailure(err); setError(f.code === "NOT_A_STUDENT_EMAIL" ? "Gunakan email kampus atau sekolah (misalnya .ac.id) untuk akun Anda." : f.message); } });
         }}>
+          {state.student.needs_resubmission && (
+            <p role="note" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">Pengajuan verifikasi Anda sebelumnya belum sempat diperiksa karena sistem verifikasi diperbarui. Mohon ajukan ulang; pengajuan baru langsung masuk antrean pemeriksaan.</p>
+          )}
           <p className="text-sm text-muted-foreground">Paket Pelajar butuh verifikasi. Akun Anda harus memakai email kampus atau sekolah; tambahkan keterangan singkat (nama kampus, NIM) bila perlu.</p>
           <Textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Nama kampus / sekolah, NIM" />
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -76,6 +80,7 @@ export default function BillingPage() {
   const [cycle, setCycle] = useState<BillingCycle>("monthly");
   const [created, setCreated] = useState<{ invoice: Invoice; payment: BillingState["payment"] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [verifyOpen, setVerifyOpen] = useState(false);
 
   if (!permsLoading && !can("billing:manage")) return <p className="text-muted-foreground">Hanya pemilik workspace yang bisa membuka Tagihan.</p>;
   if (isLoading || !data) return <div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-40" /><Skeleton className="h-64" /></div>;
@@ -90,6 +95,7 @@ export default function BillingPage() {
       onSuccess: setCreated,
       onError: (err) => {
         const f = apiFailure(err);
+        if (f.code === "EMAIL_NOT_VERIFIED") { setError("Verifikasi email Anda dulu sebelum memesan paket."); setVerifyOpen(true); return; }
         setError(f.code === "STUDENT_NOT_VERIFIED" ? "Paket Pelajar butuh verifikasi dulu. Ajukan lewat kotak di bawah." : f.code === "PRICE_NOT_FINAL" ? "Harga paket ini belum final, belum bisa dipesan." : f.message);
       },
     });
@@ -97,6 +103,7 @@ export default function BillingPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-8">
+      <EmailVerificationDialog open={verifyOpen} onOpenChange={setVerifyOpen} onVerified={() => setError(null)} />
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Tagihan</h1>
         <p className="text-sm text-muted-foreground">Paket, pemakaian, dan pembayaran workspace Anda.</p>
