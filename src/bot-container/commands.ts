@@ -17,6 +17,11 @@ export interface CommandContext {
   now?: () => Date;
   /** Test hook: shorter give-up time for WhatsApp queries. */
   deadlineMs?: number;
+  /**
+   * Called immediately before anything is WRITTEN to WhatsApp (status post, profile edits). Throws a CommandFailure when the workspace is
+   * suspended or the number is paused/banned. Reads (profile.get) do not call it.
+   */
+  assertMayTransmit?: () => Promise<void>;
 }
 
 /** Failure with a stable code; the runner stores it as "CODE: message" for the API to translate. */
@@ -103,6 +108,7 @@ async function postStatus(ctx: CommandContext, p: StatusPayload) {
       ? { image: { url: p.media_url ?? '' }, ...(p.caption ? { caption: p.caption } : {}) }
       : { video: { url: p.media_url ?? '' }, ...(p.caption ? { caption: p.caption } : {}) };
   await ctx.presence?.ensureOnline();
+  await ctx.assertMayTransmit?.(); // last check: after the audience query and presence, right before the post
   const sent = await ctx.sock.sendMessage('status@broadcast', content, { statusJidList: [...new Set([me, ...recipients])] });
   void ctx.presence?.afterSend();
   return { message_id: sent?.key.id ?? null, recipients: recipients.length };
@@ -133,6 +139,7 @@ async function readProfile(ctx: CommandContext) {
 async function updateProfile(ctx: CommandContext, p: ProfileUpdate) {
   const { sock } = ctx;
   const deadline = ctx.deadlineMs ?? COMMAND_DEADLINE_MS;
+  await ctx.assertMayTransmit?.(); // last check before the first write
   if (p.name !== undefined) await withDeadline(sock.updateProfileName(p.name), deadline);
   if (p.about !== undefined) await withDeadline(sock.updateProfileStatus(p.about), deadline);
   if (p.business) {
@@ -160,6 +167,7 @@ async function setPicture(ctx: CommandContext, p: ProfilePicturePayload) {
   const { sock } = ctx;
   const jid = ownJid(sock);
   const deadline = ctx.deadlineMs ?? COMMAND_DEADLINE_MS;
+  await ctx.assertMayTransmit?.(); // last check before the write
   if (!p.image_base64 && !p.image_url) {
     await withDeadline(sock.removeProfilePicture(jid), deadline);
   } else {

@@ -36,7 +36,7 @@ test('matched inbound message sends and records an auto-reply', async () => {
   const sent = await processAutoReply(
     { id: 'in-1', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?' },
     [baseRule], sock, queryFn, silent,
-    { wait: async () => undefined, canSend: async () => ({ allowed: true, delayMs: 0,
+    { wait: async () => undefined, guard: async () => ({ allowed: true }), canSend: async () => ({ allowed: true, delayMs: 0,
       typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }) },
   );
 
@@ -92,7 +92,7 @@ test('auto-reply total delay includes reading and typing, so a flat 5 s is 5 s',
     { id: 'in-2', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?',
       key: { remoteJid: '62812@s.whatsapp.net', id: 'K1', fromMe: false } },
     [rule], sock, queryFn, silent,
-    { wait: async (ms) => { waits.push(ms); },
+    { wait: async (ms) => { waits.push(ms); }, guard: async () => ({ allowed: true }),
       canSend: async () => ({ allowed: true, delayMs: 5000, typing: { shouldSimulate: true, durationMs: 3200 },
         healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }) },
   );

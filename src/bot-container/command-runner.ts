@@ -3,6 +3,7 @@ import type { WASocket } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import { commandChannel, type CommandType } from '../shared/commands';
 import { CommandFailure, executeCommand, Reschedule, type CommandContext } from './commands';
+import { checkTransmission } from './send-guard';
 import type { PresenceRoutine } from './presence';
 
 type QueryFn = (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
@@ -71,8 +72,17 @@ export class CommandRunner {
   }
 
   private async run(row: { id: string; device_id: string; type: CommandType; payload: unknown }, sock: WASocket): Promise<void> {
-    const ctx: CommandContext = { sock, queryFn: this.queryFn, deviceKey: this.deviceKey, deviceId: row.device_id, presence: this.presence, log: this.log };
+    const guard = async (): Promise<void> => {
+      const decision = await checkTransmission(this.deviceKey, this.queryFn);
+      if (decision.allowed) return;
+      // A command is a one-off action by a person: when blocked it is CANCELLED (failed with a code), never held or re-run after recovery.
+      const code = decision.reason === 'workspace_suspended' ? 'WORKSPACE_SUSPENDED' : decision.reason === 'device_paused' ? 'DEVICE_PAUSED' : decision.reason === 'device_banned' ? 'DEVICE_BANNED' : 'NOT_ALLOWED';
+      throw new CommandFailure(code, 'Not sent: the workspace is suspended or the number is paused or banned.');
+    };
+    const ctx: CommandContext = { sock, queryFn: this.queryFn, deviceKey: this.deviceKey, deviceId: row.device_id, presence: this.presence, log: this.log, assertMayTransmit: guard };
+    const writes = row.type === 'status.post' || row.type === 'profile.update' || row.type === 'profile.picture';
     try {
+      if (writes) await guard(); // first check; the commands repeat it right before the actual write
       const result = await executeCommand(row.type, row.payload, ctx);
       await this.queryFn(
         `UPDATE device_commands SET status = 'done', result = $2::jsonb, finished_at = now() WHERE id = $1`,

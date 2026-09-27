@@ -3,6 +3,10 @@ import config from '../../shared/config';
 import { getRedisClient } from '../../shared/redis';
 import { commandChannel, STATUS_DAILY_LIMIT, type CommandType } from '../../shared/commands';
 import { ServiceError } from './service-error';
+import { assertSubscriptionActive } from './billing.service';
+
+/** Commands that WRITE to WhatsApp. Reads (profile.get) stay available to a suspended workspace: it keeps its numbers and data. */
+const WRITE_COMMANDS: ReadonlySet<CommandType> = new Set(['status.post', 'profile.update', 'profile.picture']);
 
 export interface CommandRow {
   views?: number;
@@ -27,6 +31,10 @@ export async function enqueueCommand(
 ): Promise<CommandRow> {
   const device = await findDevice(tenantId, deviceKey);
   if (device.status === 'banned') throw new ServiceError(409, 'DEVICE_BANNED', 'This number is banned; commands are not accepted');
+  if (WRITE_COMMANDS.has(type)) {
+    await assertSubscriptionActive(pool, tenantId); // 402 PLAN_INACTIVE for a suspended/expired workspace
+    if (device.status === 'paused') throw new ServiceError(409, 'DEVICE_PAUSED', 'This number is paused; posts and profile changes are not accepted until it is resumed');
+  }
 
   if (type === 'status.post') {
     const used = (await pool.query<{ n: number }>(

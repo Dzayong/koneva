@@ -164,6 +164,11 @@ export async function listMessages(
 }
 
 export async function retryMessage(tenantId: string, messageId: string): Promise<MessageRow> {
+  // A retry is a new send: it needs a live plan and an online number, exactly like the first attempt (it does not use quota again).
+  await assertSubscriptionActive(pool, tenantId);
+  const target = (await pool.query<{ device_status: string | null }>(
+    `SELECT d.status AS device_status FROM messages m LEFT JOIN devices d ON d.id = m.device_id WHERE m.id = $1 AND m.tenant_id = $2`, [messageId, tenantId])).rows[0];
+  if (target && target.device_status !== 'online') throw new ServiceError(503, 'DEVICE_OFFLINE', 'Device is not online');
   const result = await pool.query<MessageRow>(
     `UPDATE messages SET status='queued', error_message=NULL
      WHERE id=$1 AND tenant_id=$2 AND status IN ('failed','blocked') RETURNING *`,

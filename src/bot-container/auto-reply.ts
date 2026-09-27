@@ -3,6 +3,7 @@ import type { WASocket, WAMessageKey } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import type Redis from 'ioredis';
 import { renderMessageTemplate } from '../shared/utils/message-template';
+import { checkTransmission, type TransmitDecision } from './send-guard';
 import { canSendMessage, type AntiBanDecision } from './anti-ban';
 import type { QueryFn } from './health-score';
 
@@ -112,6 +113,8 @@ export function matchesAutoReply(rule: AutoReplyRule, content: string): boolean 
 
 interface AutoReplyDependencies {
   canSend?: (deviceKey: string) => Promise<AntiBanDecision>;
+  /** Test hook for the administrative guard (workspace suspension, pause, ban). Default: the real check against the database. */
+  guard?: (deviceKey: string) => Promise<TransmitDecision>;
   wait?: (milliseconds: number) => Promise<void>;
   /** When set, going online and reading are owned by the presence routine. */
   presence?: Pick<PresenceRoutine, 'beforeReply' | 'afterSend'>;
@@ -168,6 +171,16 @@ export async function processAutoReply(
     return false;
   }
 
+  // Administrative state (suspended workspace, paused or banned number). Auto-replies are events, not queued jobs: a reply that is
+  // blocked is simply not sent, and nothing answers the same message retroactively after a recovery.
+  const guard = dependencies.guard ?? ((deviceKey: string) => checkTransmission(deviceKey, queryFn));
+  const early = await guard(message.deviceKey);
+  if (!early.allowed) {
+    await logActivity(queryFn, rule, message, content, 'blocked', early.reason ?? 'blocked', null);
+    log.warn('Auto-reply blocked by administrative state', { ruleId: rule.id, reason: early.reason });
+    return false;
+  }
+
   const wait = dependencies.wait ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   // Answer on the chat the message arrived on; rebuilding a JID from the
   // number breaks for @lid chats.
@@ -191,6 +204,13 @@ export async function processAutoReply(
       await sock.sendPresenceUpdate('composing', jid);
       await wait(typingMs);
       await sock.sendPresenceUpdate('paused', jid);
+    }
+    // LAST CHECK before the transport call: the waits, reading and typing above can last many seconds.
+    const last = await guard(message.deviceKey);
+    if (!last.allowed) {
+      await logActivity(queryFn, rule, message, content, 'blocked', last.reason ?? 'blocked', null);
+      log.warn('Auto-reply stopped before sending: administrative state changed', { ruleId: rule.id, reason: last.reason });
+      return false;
     }
     const sent = await sock.sendMessage(jid, { text: content });
     void dependencies.presence?.afterSend();

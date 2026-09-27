@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { mediaUrl, MEDIA_TYPES } from '../../shared/media-url';
 import type { TenantContext } from '../../shared/types/api';
 import { validate } from '../middleware/validate';
+import pool from '../../shared/database/connection';
+import { assertSubscriptionActive } from '../services/billing.service';
 import { queueMessage } from '../services/message.service';
 
 const router = Router();
@@ -20,6 +22,8 @@ export const broadcastSchema = z.object({
 
 export async function createBroadcast(request: Request, response: Response): Promise<void> {
   const input = request.validated!.body as z.infer<typeof broadcastSchema>;
+  // A suspended workspace queues nothing at all: one clear refusal instead of hundreds of per-recipient failures.
+  await assertSubscriptionActive(pool, request.tenant!.id);
   const broadcastId = randomUUID();
   const results: Array<{ phone_number: string; message_id?: string; status: 'queued' | 'failed'; error?: string }> = [];
   for (const [index, recipient] of input.recipients.entries()) {

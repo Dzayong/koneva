@@ -12,7 +12,8 @@ import {
 import type { Logger } from 'winston';
 import { query } from '../shared/database/connection';
 import { calculateHealthScore, getDeviceByKey, type QueryFn } from './health-score';
-import { canSendMessage, type AntiBanDenialReason } from './anti-ban';
+import { canSendMessage, type AntiBanDecision, type AntiBanDenialReason, type CanSendMessageOptions } from './anti-ban';
+import { checkTransmission, isDefinitelyNotSent, type TransmitDecision } from './send-guard';
 import { dispatchWebhook, type WebhookEventType } from './webhook';
 import {
   antiBanDenialsTotal,
@@ -256,6 +257,8 @@ export interface QueueProcessorDeps {
   delay?: (ms: number) => Promise<void>;
   /** Puts the number online before it types and sends, and lets it drift offline afterwards. */
   presence?: Pick<PresenceRoutine, 'ensureOnline' | 'afterSend'>;
+  /** Test hook: replaces the anti-ban pacing decision. The administrative guard below is never replaced. */
+  canSend?: (deviceKey: string, options: CanSendMessageOptions) => Promise<AntiBanDecision>;
 }
 
 async function failAttempt(
@@ -295,7 +298,46 @@ async function failAttempt(
   throw new Error(errorMessage);
 }
 
-async function processJob(
+/**
+ * What happens when the administrative guard says no (the message is NOT handed to WhatsApp in any of these cases):
+ *  - workspace_suspended / device_banned / device_not_found: the message is CANCELLED: status failed with that reason, tenant told by webhook,
+ *    no automatic retry and nothing sent after a later recovery (a late OTP or campaign does more harm than a clear failure; the tenant can
+ *    retry it by hand once the workspace is active again).
+ *  - device_paused, normal priority: DEFERRED. The message stays queued and is tried again later; it goes out once, after the device resumes.
+ *  - device_paused, urgent (OTP): CANCELLED like the first group, never held for later.
+ */
+async function applyTransmitBlock(
+  decision: TransmitDecision, job: Job<QueueJobData>, message: MessageRecord, deviceKey: string,
+  connection: Redis, queryFn: QueryFn, log: Logger,
+): Promise<never> {
+  const reason = decision.reason ?? 'blocked';
+  antiBanDenialsTotal.inc({ device_key: deviceKey, reason });
+  if (reason === 'device_paused' && message.priority !== 'urgent') {
+    log.warn('Device paused, deferring message', { messageId: message.id });
+    await updateMessageStatus(message.id, { status: 'queued', errorMessage: 'device_paused' }, queryFn);
+    await getQueueByName(queueName(deviceKey), connection).add(
+      JOB_NAME, { messageId: message.id } satisfies QueueJobData,
+      { delay: RETRY_LATER_DELAY_MS, attempts: MAX_ATTEMPTS, backoff: { type: 'exponential', delay: BACKOFF_BASE_MS }, removeOnComplete: { age: 24 * 3_600, count: 1_000 }, removeOnFail: false },
+    );
+    // The current job ends normally; the new delayed job is the only live one for this message.
+    throw new DeferredForLater(reason);
+  }
+  await updateMessageStatus(message.id, { status: 'failed', errorMessage: reason }, queryFn);
+  messagesFailedTotal.inc({ device_key: deviceKey, reason });
+  await dispatchWebhook(message.tenantId, {
+    event: 'message.failed', device_key: message.deviceKey, message_id: message.id, to: message.to,
+    status: 'failed', reason, timestamp: nowIso(),
+  }, { queryFn });
+  log.warn('Message cancelled by administrative state', { messageId: message.id, reason, detail: decision.detail, jobId: job.id });
+  throw new UnrecoverableError(`Not sent: ${reason}`);
+}
+
+/** Internal signal: the job is finished for now because a fresh delayed job carries the message. */
+class DeferredForLater extends Error {
+  constructor(readonly reason: string) { super(`deferred: ${reason}`); }
+}
+
+export async function processJob(
   job: Job<QueueJobData>,
   deviceKey: string,
   deps: QueueProcessorDeps,
@@ -306,6 +348,9 @@ async function processJob(
   const startedAt = Date.now();
   try {
     await processJobBody(job, deviceKey, deps, connection, queryFn, log);
+  } catch (error) {
+    if (error instanceof DeferredForLater) return; // postponed on purpose: this job is done, the delayed one continues
+    throw error;
   } finally {
     queueJobDurationSeconds.observe({ device_key: deviceKey }, (Date.now() - startedAt) / 1000);
   }
@@ -329,6 +374,11 @@ async function processJobBody(
     return;
   }
 
+  // First administrative check: a message whose workspace was suspended (or number banned/paused) after it was queued stops here,
+  // urgent queue included. The last check is repeated right before the transport call below.
+  const early = await checkTransmission(message.deviceKey, queryFn, deps.now?.());
+  if (!early.allowed) await applyTransmitBlock(early, job, message, deviceKey, connection, queryFn, log);
+
   if (!deps.isConnected() || !deps.getSocket()) {
     await failAttempt(
       job,
@@ -343,7 +393,7 @@ async function processJobBody(
     return;
   }
 
-  const decision = await canSendMessage(message.deviceKey, {
+  const decision = await (deps.canSend ?? canSendMessage)(message.deviceKey, {
     queryFn,
     content: message.content,
     recipient: message.to,
@@ -435,6 +485,11 @@ async function processJobBody(
     }
   }
 
+  // LAST CHECK before the transport call. Nothing that can take time (pacing delay, typing simulation, presence) sits between this
+  // read and sendMessage. Once sendMessage has started it cannot be recalled: a suspension that lands during that call does not undo it.
+  const last = await checkTransmission(message.deviceKey, queryFn, deps.now?.());
+  if (!last.allowed) await applyTransmitBlock(last, job, message, deviceKey, connection, queryFn, log);
+
   let sendResult;
   try {
     sendResult = await withSpan(
@@ -444,8 +499,22 @@ async function processJobBody(
     );
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    await failAttempt(job, message, deviceKey, connection, queryFn, log, errorMessage, 'send_error');
-    return;
+    if (isDefinitelyNotSent(err)) {
+      // Nothing left the socket: a retry cannot duplicate the message.
+      await failAttempt(job, message, deviceKey, connection, queryFn, log, errorMessage, 'send_error');
+      return;
+    }
+    // The outcome is UNCERTAIN (a timeout may follow a message WhatsApp already accepted). Never retry automatically:
+    // mark it, tell the tenant, and keep the job in the dead-letter queue for inspection. A person may retry it by hand.
+    log.error('Send outcome uncertain; not retrying automatically', { messageId: message.id, error: errorMessage });
+    await updateMessageStatus(message.id, { status: 'failed', errorMessage: 'delivery_uncertain' }, queryFn);
+    await moveToDeadLetter(deviceKey, job.data, connection, log);
+    messagesFailedTotal.inc({ device_key: deviceKey, reason: 'delivery_uncertain' });
+    await dispatchWebhook(message.tenantId, {
+      event: 'message.failed', device_key: message.deviceKey, message_id: message.id, to: message.to,
+      status: 'failed', reason: 'delivery_uncertain', timestamp: nowIso(),
+    }, { queryFn });
+    throw new UnrecoverableError('delivery_uncertain');
   }
 
   void deps.presence?.afterSend();
