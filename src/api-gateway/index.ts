@@ -7,6 +7,8 @@ import pool from '../shared/database/connection';
 import { getRedisClient } from '../shared/redis';
 import logger from '../shared/utils/logger';
 import { adminAuth, authorize, tenantAuth } from './middleware/auth';
+import { adminNetworkGuard } from './middleware/admin-access';
+import { assertMailerConfig } from './services/mailer';
 import adminRoutes from './routes/admin.routes';
 import deviceRoutes from './routes/device.routes';
 import messageRoutes from './routes/message.routes';
@@ -29,7 +31,14 @@ import publicRoutes from './routes/public.routes';
 import { sweepSubscriptions } from './services/billing.service';
 import { auditTrail } from './middleware/audit';
 import { ServiceError } from './services/service-error';
+import { createOperatorRouter } from './operator/router';
+import { readOperatorConfig } from './operator/config';
+import { cleanupOperatorData, idempotencyRetentionDays } from './operator/maintenance';
+import { startOtpMaintenance } from './services/otp-maintenance';
 
+assertMailerConfig(); // invalid mail settings stop startup; unset = OTP features fail safe
+const operatorConfig = readOperatorConfig();
+const operatorRetentionDays = operatorConfig.enabled ? idempotencyRetentionDays() : 0; // invalid retention stops startup
 const app = express();
 // Explicit opt-in for the local personal proxy; direct deployments remain off.
 const proxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
@@ -38,6 +47,8 @@ if (Number.isInteger(proxyHops) && proxyHops > 0 && proxyHops <= 2) {
 }
 app.disable('x-powered-by');
 app.use(helmet());
+// Own parser, errors and rate limits; never inherits tenant CORS or generic error logging.
+app.use('/operator', createOperatorRouter(pool, operatorConfig));
 app.use(cors(config.env === 'production' ? {
   origin: process.env.CORS_ORIGIN?.split(',').map(s => s.trim()) ?? false,
   credentials: true,
@@ -79,7 +90,7 @@ app.use('/auth', authRoutes);
 app.use('/public', publicRoutes);
 app.use('/api/v1', tenantAuth, authorize, auditTrail, messageRoutes, deviceRoutes, tenantRoutes,
   contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, deviceContentRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes, billingRoutes);
-app.use('/admin', adminAuth, adminRoutes);
+app.use('/admin', adminNetworkGuard(), adminAuth, adminRoutes);
 app.use((_request, response) => response.status(404).json({
   success: false, error: { code: 'NOT_FOUND', message: 'Route not found' },
 }));
@@ -94,6 +105,7 @@ const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => 
     return;
   }
   if (error instanceof ServiceError) {
+    if (error.retryAfter) response.set('Retry-After', String(error.retryAfter));
     response.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
     return;
   }
@@ -112,6 +124,17 @@ const runSweep = (): void => {
     .catch((error: unknown) => logger.error('Subscription sweep failed', { error: error instanceof Error ? error.message : String(error) }));
 };
 const runPurge = (): void => { void purgeOldCommands().catch((error: unknown) => logger.error('Command purge failed', { error: error instanceof Error ? error.message : String(error) })); };
+// Expired operator sessions/challenges/throttle buckets and idempotency rows past retention. Never audit or business data.
+const runOperatorCleanup = (): void => {
+  cleanupOperatorData(pool, operatorRetentionDays)
+    .then((counts) => { if (Object.values(counts).some((n) => n > 0)) logger.info('Operator data cleaned', counts); })
+    .catch((error: unknown) => logger.error('Operator cleanup failed', { error: error instanceof Error ? error.message : String(error) }));
+};
+startOtpMaintenance(pool); // OTP tables are customer-facing: cleaned whether or not the operator panel is on
+if (operatorConfig.enabled) {
+  setTimeout(runOperatorCleanup, 60_000).unref();
+  setInterval(runOperatorCleanup, 60 * 60_000).unref();
+}
 setTimeout(runPurge, 45_000).unref();
 setInterval(runPurge, 60 * 60_000).unref();
 setTimeout(runSweep, 30_000).unref();
