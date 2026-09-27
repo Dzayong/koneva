@@ -35,28 +35,30 @@ Port :13000 **tidak diakses** untuk menyusun dokumen ini — datanya dari `docke
 
 ### Ketidakcocokan dokumentasi vs konfigurasi yang ditemukan
 
-1. **":13200" tidak dan/atau tidak lagi berarti satu hal yang konsisten.** `playwright.stack.config.ts` memakainya sebagai *default fallback* untuk `STACK_WEB_PORT`, tetapi `scripts/test-operator-stack.sh` — satu-satunya jalur resmi yang dipakai T0.3 — **selalu meng-override** ke `13300`. Proses `next-server` yang nyatanya sedang berjalan di `:13200` saat ini tidak berasal dari skrip resmi manapun; tampaknya dimulai manual pada sesi sebelumnya untuk pratinjau visual (`npx next dev -p 13200`), dan sebelum task ini **tidak diberi env `KONEVA_SANDBOX`** apa pun. Task hari ini (banner DEV + guard) diimplementasikan mengikuti instruksi eksplisit owner untuk `:13200`; disiplinnya sekarang ada di **env var `KONEVA_SANDBOX=1` yang harus diset eksplisit setiap kali proses itu dimulai**, bukan pada angka port itu sendiri — lihat `dashboard/playwright.sandbox.config.ts` dan bagian "DEV banner" di bawah.
+1. **":13200" tidak dan/atau tidak lagi berarti satu hal yang konsisten.** `playwright.stack.config.ts` memakainya sebagai *default fallback* untuk `STACK_WEB_PORT`, tetapi `scripts/test-operator-stack.sh` — satu-satunya jalur resmi yang dipakai T0.3 — **selalu meng-override** ke `13300`. Proses `next-server` yang sebelumnya berjalan di `:13200` (sebelum 2026-09-28 sore) tidak berasal dari skrip resmi manapun dan tidak diberi `KONEVA_SANDBOX`. **Diperbarui 2026-09-28 sore:** proses itu diidentifikasi dulu (PID/cwd/env, bukan ditebak) sebelum dihentikan dengan `kill <PID>` persis (bukan `pkill -f` pola luas), lalu dashboard **dan** harness API-nya (`:13210`/`:13211`/`:18091`) di-restart bersama dengan `KONEVA_SANDBOX=1`. Dibuktikan lewat `curl http://localhost:13200/` — banner DEV benar-benar ada di HTML yang disajikan. Disiplinnya tetap pada **env var `KONEVA_SANDBOX=1` yang harus diset eksplisit setiap kali proses itu dimulai**, bukan pada angka port itu sendiri — lihat `dashboard/playwright.sandbox.config.ts` dan bagian "DEV banner" di bawah.
 2. **`docs/HANDOFF.md` §2 tidak menyebut `MANAGER_PORT` (18001) atau `REDIS_PORT` (56379)** untuk stack personal, walau keduanya didefinisikan di `docker/docker-compose.personal.yml`/`.env.personal.example`. Tidak diperbaiki di sini (di luar scope task ini mengedit HANDOFF selain aturan :13000 baru); dicatat agar tidak dianggap tidak ada.
 3. **Port `15432`** yang sedang live (Postgres, tampak dari `ss -ltnp` saat dokumen ini ditulis) tidak berasal dari skrip resmi manapun (`test-operator-*.sh` memakai port acak via `-p 127.0.0.1::5432`, bukan port tetap 15432). Kemungkinan sisa dari sesi manual sebelumnya. Tidak dihentikan oleh task ini (di luar scope; berpotensi container Claude sendiri dari sesi lalu, bukan milik proses lain).
 
-## ATURAN KERAS :13000
+## ATURAN DEPLOY PER GERBANG (`:13000`)
 
-Tidak ada bagian dari task ini yang mengizinkan akses ke `:13000`. Proses wajib sebelum instance `:13000` boleh
-disentuh (dicatat juga di `docs/HANDOFF.md` dan `docs/STATUS_PROYEK.md`):
+`:13000` hanya boleh diubah lewat persetujuan **batch per Gerbang**, bukan per task — agen tidak menyentuhnya di
+luar itu. Proses wajib sebelum deploy batch (dicatat juga di `docs/HANDOFF.md` dan `docs/STATUS_PROYEK.md`):
 
 1. Claude menyelesaikan perubahan lokal, lalu melaporkan diff/bukti tes dan kondisi sistem apa adanya.
 2. PM (Codex) memeriksa bukti dan mengonfirmasi.
 3. Owner memberi konfirmasi eksplisit.
-4. Baru deploy/update `:13000` dijalankan.
+4. Baru deploy **batch Gerbang** ke `:13000` dijalankan.
 
-Tanpa keempat langkah itu selesai, agen dilarang mengakses, mengubah, me-restart, atau deploy ke `:13000`. Agen
-bekerja di `:13200`/`:13300`/harness disposable saja.
+Tanpa keempat langkah itu selesai, agen dilarang mengakses, mengubah, me-restart, atau deploy ke `:13000` —
+untuk task apa pun. Gerbang 0 belum lulus selama T0.4 belum selesai (lihat `STATUS_PROYEK.md`), jadi belum ada
+batch yang memenuhi syarat deploy. Agen bekerja di `:13200`/`:13300`/harness disposable saja.
 
 ## DEV banner dan sandbox (`:13200`)
 
 - **Mekanisme:** `dashboard/src/lib/sandbox.ts` (`isSandbox()`) membaca `process.env.KONEVA_SANDBOX` **di server, per-request**, lewat `next/server`'s `connection()` di `dashboard/src/components/dev-banner.tsx` — bukan `NEXT_PUBLIC_*` (yang dibekukan saat `next build`, sehingga satu build artifact yang dipromosikan ke beberapa environment akan menampilkan nilai yang sama di semua tempat) dan bukan deteksi port di browser (`window.location.port`).
 - **Fail-closed:** env var tidak diset atau bernilai apa pun selain string `"1"` persis → banner **tidak tampil**, dan (lihat di bawah) transport WhatsApp tetap `real` (perilaku `:13000` tidak berubah).
 - **Kill-switch WhatsApp:** `src/shared/sandbox.ts` (`whatsappTransportMode()`), dipanggil paling awal di `src/bot-container/connection.ts`'s `connect()` — sebelum `loadSession`/`fetchLatestBaileysVersion`/`makeWASocket` apa pun. `KONEVA_SANDBOX=1` memaksa `mock` tanpa bisa dioverride oleh `WHATSAPP_TRANSPORT=real` (tidak ada jalur tidak sengaja untuk menyalakannya kembali). Bukti: `src/bot-container/connection.test.ts`.
+- **Verifikasi live 2026-09-28:** pairing dashboard+harness `:13200` **tidak punya proses `bot-container`/`device-manager` REAL sama sekali** — hanya stub `fakeManager` (port `18091`) yang mencatat panggilan tanpa Baileys. Proses `bot-container`/`device-manager` REAL yang terlihat di `ps aux` (`node dist/src/bot-container/index.js`, dst.) dicek `DATABASE_URL`-nya dan mengarah ke host `postgres` (jaringan compose `wa-personal`) — **bukan** Postgres disposable `127.0.0.1:15432` milik harness `:13200` — dikonfirmasi struktural terpisah dari `:13000`, tidak disentuh.
 - **Allowlist email:** `src/shared/sandbox.ts` (`isSandboxEmailAllowed()`), dipanggil di `src/api-gateway/services/mailer.ts`'s `sendInvitationOtp()` sebelum transport `gmail-api` (transport asli) dipakai. Allowlist kosong secara default (menolak semua); `dev-outbox` (file lokal) tidak terpengaruh karena memang tidak pernah keluar mesin. Bukti: `src/api-gateway/services/mailer.test.ts`.
 - **Tes banner:** `dashboard/playwright.sandbox.config.ts` + `dashboard/tests-sandbox/dev-banner.spec.ts` (banner tampil, `KONEVA_SANDBOX=1` di env proses itu sendiri) dan `dashboard/tests/marketing/dev-banner.spec.ts` (banner tidak tampil, config default tanpa `KONEVA_SANDBOX` — port 13100, bukan `:13000` sungguhan).
 

@@ -26,18 +26,31 @@
 > Update 2026-09-28 (Claude): [ENVIRONMENT_MAP.md](ENVIRONMENT_MAP.md) added — port/service/DB/mock-vs-live map derived
 > from actual config (not :13000 access). DEV sandbox banner + fail-closed WhatsApp/email guards for `:13200`
 > (`KONEVA_SANDBOX=1`): `dashboard/src/components/dev-banner.tsx`, `src/shared/sandbox.ts`, wired into
-> `src/bot-container/connection.ts` and `src/api-gateway/services/mailer.ts`. See "ATURAN KERAS :13000" below —
-> new, explicit 4-step process gates any future `:13000` deploy; nothing in this update touched `:13000`.
+> `src/bot-container/connection.ts` and `src/api-gateway/services/mailer.ts`. See "ATURAN DEPLOY PER GERBANG" below —
+> deploy to `:13000` is now explicitly a per-Gerbang-batch decision, not per task; nothing in this update touched `:13000`.
+> Update 2026-09-28 (Claude, same day, follow-up): identified the live `:13200` process by PID/cwd/env before touching
+> it (cwd = this repo's `dashboard/`, wired to the operator-stack harness on `:13210`) instead of using a broad
+> `pkill`; stopped it by exact PID and restarted both the dashboard and the harness with `KONEVA_SANDBOX=1`. Confirmed
+> live: the DEV banner renders in `:13200`'s actual HTML (`curl`), and the real `:13000` `bot-container`/`device-manager`
+> Docker processes seen in `ps aux` were checked and confirmed to point at a *different* Postgres (the `wa-personal`
+> compose network) than this harness's disposable one, i.e. structurally unrelated to `:13200`. Generated a new,
+> dedicated SSH key for GitHub push (`~/.ssh/koneva_github_deploy`, not `mps_key`, which stays VPS-only) — the
+> private key was never printed; only its public key/fingerprint were shared with the owner to register as a GitHub
+> deploy key. Push is still blocked (see T0.4 in `STATUS_PROYEK.md`): the new key is not yet registered on GitHub.
 
-## ATURAN KERAS :13000
+## ATURAN DEPLOY PER GERBANG (`:13000`)
+
+Deploy ke `:13000` dilakukan **per batch setelah satu Gerbang selesai, bukan per task**. Sebelum deploy batch:
 
 1. Claude menyelesaikan perubahan lokal, lalu melaporkan diff/bukti tes dan kondisi sistem apa adanya.
 2. PM (Codex) memeriksa bukti dan mengonfirmasi.
 3. Owner memberi konfirmasi eksplisit.
-4. Baru deploy/update `:13000` dijalankan.
+4. Baru deploy **batch Gerbang** ke `:13000` dijalankan.
 
-Tanpa keempat langkah itu selesai, agen dilarang mengakses, mengubah, me-restart, atau deploy ke `:13000`. Agen
-bekerja di `:13200`/`:13300`/harness disposable saja. Detail port/service/mock-vs-live: [ENVIRONMENT_MAP.md](ENVIRONMENT_MAP.md).
+Tanpa keempat langkah itu selesai, agen dilarang mengakses, mengubah, me-restart, atau deploy ke `:13000` —
+untuk task apa pun, bukan hanya yang menyentuh `:13000` secara langsung. Gerbang 0 belum lulus selama T0.4 belum
+selesai (lihat `STATUS_PROYEK.md`); karena itu belum ada batch Gerbang yang memenuhi syarat deploy. Agen bekerja
+di `:13200`/`:13300`/harness disposable saja. Detail port/service/mock-vs-live: [ENVIRONMENT_MAP.md](ENVIRONMENT_MAP.md).
 
 Ditulis 2026-09-26 oleh Claude Code (Sonnet 5), atas permintaan pemilik proyek (Dzaki). Bahasa percakapan dengan
 pemilik: **Indonesia**. Kode dan dokumen teknis: Inggris (kecuali UI, yang Indonesia).
