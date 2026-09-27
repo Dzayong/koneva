@@ -1,0 +1,4 @@
+paid_devices,infrastructure_idr,arpa_idr,revenue_idr,support_and_variable_idr,payment_reserve_idr,incident_reserve_idr,service_cost_per_device_before_revenue_reserves_idr,contribution_after_infra_idr,contribution_margin_pct,business_overhead_idr,surplus_before_tax_and_acquisition_idr,average_price_for_40pct_service_margin_idr,average_price_for_50pct_service_margin_idr
+10,600000,107000.0,1070000.0,150000,10700.0,53500.0,75000.0,255800.0,23.91,3000000,-2744200.0,138889,170455
+50,2200000,107000.0,5350000.0,750000,53500.0,267500.0,59000.0,2079000.0,38.86,3000000,-921000.0,109260,134091
+100,4400000,107000.0,10700000.0,1500000,107000.0,535000.0,59000.0,4158000.0,38.86,3000000,1158000.0,109260,134091

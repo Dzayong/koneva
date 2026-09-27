@@ -1,5 +1,29 @@
 # HANDOFF: laporan kerja untuk agent berikutnya (Codex/Claude)
 
+> Update 2026-09-26 (Codex/Astra): backend Panel Operator now exists locally; see
+> [OPERATOR_PANEL.md](OPERATOR_PANEL.md) for the reviewed contract, configuration, migration 018, validation and limits.
+> Update 2026-09-26 (Claude): Operator Panel frontend (`dashboard/src/app/operator`) and TOTP MFA (migration 019) are done **locally**.
+> Evidence: UI (65 Playwright tests, mocked API), STACK-local (28 browser tests against a real disposable Postgres + real router +
+> Next proxy: `bash scripts/test-operator-stack.sh`), backend suite 277/277 (`bash scripts/test-operator-local.sh --all`). LIVE: none.
+> Update 2026-09-26 (Claude, hardening stage): MFA security log (migration 020), owner-run provisioning/reset/key-rotation scripts, key-mismatch
+> fail-safe, `/admin` network + legacy-write restrictions, hourly cleanup (idempotency retention 7 days), CI definition, legacy-student notice,
+> real-`index.ts` tests (`bash scripts/test-operator-entry.sh`). Review candidate only; see the same file for what remains.
+> Update 2026-09-26 (Claude, roles): customer roles are now Owner + Developer (legacy admin/viewer kept, not assignable), Gmail-only invitations with email OTP
+> (fails safe until an email sender exists), Developer can delete devices. See [ROLES.md](ROLES.md) (migration 021 impact + owner decisions).
+> Update (Codex): Gmail API OAuth sender support is now implemented for **invitation email OTP only**. No Google account was connected and no email was sent. `EMAIL_TRANSPORT` remains `none` unless configured. It requires Gmail API OAuth with only `gmail.send`; see the "Gmail sender for invitation OTP" section in [OPERATOR_PANEL.md](OPERATOR_PANEL.md). Operator MFA remains TOTP.
+> Update 2026-09-27 (Claude): OTP limits (recipient/invitation/workspace/sender/IP, rolling, shared across processes, Gmail-alias-aware limiter keys) and Owner
+> email verification before inviting/paying are implemented locally (migration 022); tests pin email off. Alerting for the 70 % threshold is still open. See [ROLES.md](ROLES.md).
+> Update 2026-09-27 (Claude): the OTP 70 % / cap alert is now shown in the Operator Panel (`/operator/alerts`, `audit:read`); implemented locally, not deployed, no push channel.
+> Update 2026-09-27 (Claude): outbound controls audit: workspace suspension / device pause now stop queued jobs, urgent jobs, auto-replies and device write commands at a last check before the WhatsApp transport;
+> uncertain sends are no longer retried automatically. Local/fake-transport evidence only. See [OUTBOUND_CONTROLS.md](OUTBOUND_CONTROLS.md).
+> **Baca dulu: [HANDOFF_TO_CODEX_2026-09-27.md](HANDOFF_TO_CODEX_2026-09-27.md)** — ringkasan lengkap pekerjaan Claude saat Codex rate-limited (harga, cost-meter, perbaikan bug lokal, batas mana yang owner ubah langsung).
+> Update 2026-09-27 (owner decision, mid-session): pricing changed locally to match the PM research candidates (Pelajar Rp29.000, Solo/`umkm` Rp99.000 renamed, new Tim Rp149.000
+> tier), migration 023. Hypothesis prices per the research, not validated; see [PRICING_UPDATE_2026-09-27.md](PRICING_UPDATE_2026-09-27.md) for open items. Not deployed.
+> Not production-ready: see "Remaining operational work" in [OPERATOR_PANEL.md](OPERATOR_PANEL.md). Nothing was committed or deployed.
+> It is disabled by default and cannot be enabled in production before MFA. No commit/deploy/production migration was
+> performed. Claude's uncommitted dashboard files were preserved. The historical status sections below describe the
+> earlier deployed baseline, not this uncommitted local implementation.
+
 Ditulis 2026-09-26 oleh Claude Code (Sonnet 5), atas permintaan pemilik proyek (Dzaki). Bahasa percakapan dengan
 pemilik: **Indonesia**. Kode dan dokumen teknis: Inggris (kecuali UI, yang Indonesia).
 
@@ -129,7 +153,7 @@ Legenda verifikasi: **LIVE** = terbukti di nomor WhatsApp asli; **STACK** = dija
 4. Riwayat profil nomor dari chat history (hanya angka ringkasan, isi pesan TIDAK disimpan; sudah disetujui pemilik).
    "Jalur cepat" untuk nomor lama. Butuh sambung ulang nomor uji karena riwayat hanya datang saat pairing.
 5. Asisten gaya-bicara (LLM, opt-in per nomor; mulai dari mode Draf).
-6. Auto-reply belum mengecek paket (workspace `suspended` tetap membalas otomatis). Penyapu langganan hanya mencatat.
+6. ~~Auto-reply belum mengecek paket~~ **Sudah ditutup lokal (2026-09-27)**: pemeriksaan administratif terakhir (`send-guard.ts`) sebelum transport untuk antrean, auto-reply, dan perintah tulis device; lihat [OUTBOUND_CONTROLS.md](OUTBOUND_CONTROLS.md). Penyapu langganan tetap hanya mencatat (status efektif dihitung dari tanggal).
 7. Email: belum ada layanan email (verifikasi email, reset kata sandi, verifikasi pelajar otomatis).
 8. Kepemilikan: transfer owner / keluar workspace belum ada.
 9. Grup: ID grup tidak disimpan di pesan masuk/webhook; kirim ke grup belum ada (opt-in dengan batas sendiri disarankan).

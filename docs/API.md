@@ -153,10 +153,16 @@ keep working. If you belong to several workspaces, select one with the `x-worksp
 
 | Role | Can do |
 |---|---|
-| `owner` | Everything, including billing and the team |
-| `admin` | Everything except billing |
-| `developer` | Read and connect numbers, send messages, manage webhooks and content, manage API keys. Cannot delete numbers, manage the team or billing |
-| `viewer` | Read numbers and messages only. Cannot see the QR code |
+| `owner` | The customer who owns the workspace (one per workspace). Everything, including billing, the team, and every Developer power, without a second membership |
+| `developer` | Technical integration: add, configure, connect, pause and **delete** numbers, send messages, webhooks, content, API keys. Cannot touch billing or the team, and cannot invite, remove or promote anyone |
+| `admin` (legacy) | Existing memberships only: everything except billing. Can no longer be assigned or invite |
+| `viewer` (legacy) | Existing memberships only: read numbers and messages, no QR. Can no longer be assigned |
+
+Inviting, changing the team and ordering (`POST /billing/orders`) answer `403 EMAIL_NOT_VERIFIED` until the Owner has verified their email. `/auth/me` returns `user.email_verified`.
+
+Owner and Developer are memberships of a workspace, not account types: one account can be Owner of one workspace and
+Developer of another. The KONEVA system administrator is a separate operator account (Operator Panel), not a role here.
+See [ROLES.md](ROLES.md).
 
 A route with no permission rule is denied. The QR code counts as a write-level permission because whoever
 scans it controls the number.
@@ -165,7 +171,7 @@ scans it controls the number.
 ### API keys with limited access
 
 Create keys for your systems instead of sharing a person's access. Manage them signed in (`keys:manage`):
-developers, admins and owners can; a key cannot create keys.
+developers and owners can (legacy admins too); a key cannot create keys.
 
 | Method | Path | Notes |
 |---|---|---|
@@ -183,13 +189,16 @@ only `messages:send`.
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | `/api/v1/team` | owner, admin | Members and pending invitations. |
-| POST | `/api/v1/team/invitations` | owner, admin | `{ email, role }`. Returns a link (`/invite/wgi_...`) to share yourself. Works once, for that email only, and expires in 48 hours. Admins can invite developers and viewers; only owners invite admins. |
-| DELETE | `/api/v1/team/invitations/:id` | owner, admin | Revokes a pending link. |
-| PATCH | `/api/v1/team/members/:id` | owner, admin | `{ role }`. Not for yourself. Admins cannot change admins or owners. |
-| DELETE | `/api/v1/team/members/:id` | owner, admin | Removes someone from the workspace. |
-| GET | `/auth/invitations/:token` | public | Workspace, role and a masked email, so the person knows what they are accepting. |
-| POST | `/auth/invitations/:token/accept` | public | New person: `{ name, password, accept_terms: true }`. Someone who already has an account signs in first and sends their session token; the email must match the invitation. |
+| GET | `/api/v1/team` | owner (legacy admin: read) | Members and pending invitations. |
+| POST | `/api/v1/team/invitations` | owner | `{ email, role: "developer" }`. The address must be `@gmail.com` (whitespace/case normalised, nothing else folded). Returns a link (`/invite/wgi_...`) to share yourself. Works once, only for that address after an emailed OTP, and expires in 48 hours. `400 GMAIL_REQUIRED`, `400` for any other role. |
+| DELETE | `/api/v1/team/invitations/:id` | owner | Revokes a pending link. |
+| PATCH | `/api/v1/team/members/:id` | owner | `{ role: "developer" }`: the only change possible (turns a legacy admin/viewer into a Developer, by explicit decision). Not for yourself or the owner. |
+| DELETE | `/api/v1/team/members/:id` | owner (legacy admin: developers/viewers) | Removes someone from the workspace. |
+| GET | `/auth/invitations/:token` | public | Workspace, role, masked email, `requires_otp`, `otp_available`. |
+| POST | `/auth/invitations/:token/otp` | public | Emails a 6-digit code (10 minutes, 5 wrong tries, 60 s between sends) to the invited address. Limits: 3/hour per invitation, 3/hour and 6/24 h per recipient inbox (Gmail aliases share a bucket), 10/24 h per workspace, 200/24 h overall, 20 requests/15 min per IP; over a limit `429 OTP_RATE_LIMITED` (overall: `503 OTP_CAPACITY_REACHED`) with `Retry-After`. `503 EMAIL_NOT_CONFIGURED` while no sender is configured: nothing is counted or created and there is no bypass. |
+| POST | `/auth/email-verification/request` | session | Mails a code to the account's own address (any domain). Same mailer and limits. `{ already_verified: true }` if done. |
+| POST | `/auth/email-verification/confirm` | session | `{ code }`. `422 OTP_INVALID` for a wrong/expired/used code. Sets `email_verified_at`. |
+| POST | `/auth/invitations/:token/accept` | public | `{ otp, name, password, accept_terms: true }` for a new person; someone with an account signs in first, sends their session token and `{ otp }`. The signed-in address must equal the invited one (`403 EMAIL_MISMATCH`, checked before the code is tried). `401 OTP_INVALID` covers wrong, expired, used and exhausted codes. |
 
 ### Audit log
 
@@ -269,6 +278,10 @@ WhatsApp does not tell us why an account is refused, so `banned` means "suspecte
 unofficial connection; WhatsApp states that unofficial apps can lead to a temporary or permanent ban.
 
 ## Plans and billing
+
+The separate session-authenticated operator API is documented in [OPERATOR_PANEL.md](OPERATOR_PANEL.md).
+It is disabled by default and currently limited to isolated development/testing pending MFA. The legacy `/admin`
+maintenance endpoints below remain separate; their admin key never authenticates `/operator`.
 
 Billing is manual: the owner orders a plan, pays outside the system, and the operator confirms.
 

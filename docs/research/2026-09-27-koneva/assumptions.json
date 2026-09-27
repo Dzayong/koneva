@@ -1,0 +1,48 @@
+{
+  "as_of": "2026-09-27",
+  "status": "Illustrative proposal; not measured or approved",
+  "currency": "IDR",
+  "paid_devices": [
+    10,
+    50,
+    100
+  ],
+  "infrastructure_monthly": [
+    600000,
+    2200000,
+    4400000
+  ],
+  "support_minutes_per_device_month": 12,
+  "support_hourly_value": 50000,
+  "other_variable_cost_per_device_month": 5000,
+  "payment_fee_fraction": 0.01,
+  "incident_credit_reserve_fraction": 0.05,
+  "fixed_business_overhead_monthly": 3000000,
+  "plan_mix": [
+    {
+      "plan": "Pelajar bersubsidi",
+      "price": 29000,
+      "fraction": 0.1
+    },
+    {
+      "plan": "Solo",
+      "price": 99000,
+      "fraction": 0.6
+    },
+    {
+      "plan": "Tim",
+      "price": 149000,
+      "fraction": 0.3
+    }
+  ],
+  "exclusions": [
+    "Output VAT if applicable",
+    "Corporate/personal income tax",
+    "Acquisition costs",
+    "Past development cost",
+    "LLM",
+    "Official WhatsApp/Meta fees",
+    "Dedicated proxy",
+    "Proven HA SLA"
+  ]
+}
