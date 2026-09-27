@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
+import { useState } from "react";
+import { motion, useReducedMotion, useIsomorphicLayoutEffect } from "framer-motion";
 import { MessageCircleReply, Image as ImageIcon, Sprout } from "lucide-react";
 
 // Mirrors the real warm-up stages in src/bot-container/anti-ban.ts.
@@ -12,7 +13,20 @@ const STAGES = [
 ] as const;
 
 export function WarmupFlow() {
-  const reduce = useReducedMotion();
+  // framer-motion's useReducedMotion() reads window.matchMedia synchronously on the client's first render
+  // (motion-dom's initPrefersReducedMotion runs during render, not in an effect), while SSR always returns
+  // null. On a client whose OS has reduced motion on, that makes the very first hydration pass already
+  // disagree with the SSR-rendered opacity/transform/width -- a real hydration mismatch, not a value that
+  // only diverges later. `mounted` stays false (both server and this first client render agree, since the
+  // initial state is a literal, not a browser read) until useIsomorphicLayoutEffect flips it just before the
+  // browser paints -- before whileInView's IntersectionObserver can fire, including when the page loads
+  // already scrolled to this section (e.g. a direct #harga link). So the first render always matches SSR
+  // exactly (no suppressHydrationWarning needed), and the real preference still applies before any entrance
+  // animation is ever visible.
+  const [mounted, setMounted] = useState(false);
+  const prefersReduced = useReducedMotion();
+  useIsomorphicLayoutEffect(() => setMounted(true), []);
+  const reduce = mounted && prefersReduced;
   return (
     <div className="relative grid gap-4 md:grid-cols-4">
       <div aria-hidden className="absolute top-[52px] right-8 left-8 hidden h-px bg-gradient-to-r from-transparent via-border to-transparent md:block" />
