@@ -55,6 +55,12 @@ test.describe("marketing page hydration (UI evidence)", () => {
     await expect(terms).toContainText("365 hari terakhir");
     await expect(terms).toContainText("tidak berlaku untuk pesan urgent");
     await expect(terms).toContainText("Status aktif atau jeda tidak mengubah harga khusus itu");
+    await expect(terms).toContainText("pembayaran ganda atau kesalahan sistem");
+    await expect(terms).toContainText("paling lambat 7 hari kerja");
+    await expect(terms).toContainText("workspace dapat ditangguhkan oleh penyedia layanan");
+    await expect(terms).toContainText("biaya langganan yang Anda bayarkan dalam 3 bulan terakhir");
+    await expect(terms).toContainText("Pengadilan Negeri Bandung");
+    await expect(terms).toContainText("layanan berakhir otomatis tanpa pengembalian dana");
     await expect(page.getByText("Draf untuk ditinjau.")).toBeVisible();
 
     await page.goto("/privasi");
@@ -66,7 +72,13 @@ test.describe("marketing page hydration (UI evidence)", () => {
     await expect(privacy).toContainText("20.000 pesan/bulan (±667/hari)");
     await expect(privacy).toContainText("tidak mencatat bukti consent");
     await expect(privacy).toContainText("tidak menjadi daftar blokir yang dikelola pelanggan lintas perangkat");
-    await expect(privacy).toContainText("Backup dan salinan pemulihan");
+    await expect(privacy).toContainText("tidak diblokir oleh deteksi ini walau penerima telah meminta berhenti");
+    await expect(privacy).toContainText("Isi dan status pesan: 90 hari");
+    await expect(privacy).toContainText("Log keamanan: 12 bulan");
+    await expect(privacy).toContainText("Invoice: 10 tahun");
+    await expect(privacy).toContainText("koneva.id26@gmail.com");
+    await expect(privacy).toContainText("belum menetapkan vendor hosting produksi");
+    await expect(privacy).toContainText("workspace dapat ditangguhkan oleh penyedia layanan");
     await expect(page.getByText("Draf untuk ditinjau.")).toBeVisible();
   });
 

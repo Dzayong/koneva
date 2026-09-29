@@ -55,3 +55,9 @@ Guard implementation: `src/bot-container/send-guard.ts` (`checkTransmission`), o
 - The 5-minute re-check granularity for paused numbers and the fact that suspension is derived from plan dates (the hourly sweeper only records) are unchanged.
 - **Idempotency of the send API is missing**: `external_id` is stored but not unique, so a repeated request creates a second message. See [CONSENT_OPTOUT_DESIGN.md](CONSENT_OPTOUT_DESIGN.md) section 3 for the design and estimate.
 - Webhook contract vs WAHA/Stripe patterns: HMAC signature and in-process retries exist; there is **no stable event id, no signed timestamp header and no replay endpoint** (gap, estimated there too).
+
+## 6. Owner-approved urgent-message rule (2026-09-29)
+
+- A message may be marked `priority: "urgent"` only when it is necessary to operate the service, such as an OTP or payment confirmation. It must not be used for promotions or to bypass an opt-out request. Promotional messages must stop after a recipient sends a recognized stop request.
+- Misuse of urgent priority is reviewed and the service provider may suspend the workspace.
+- **Enforcement limitation:** the API currently accepts the caller-provided `priority` value and the send guard bypasses opt-out checks for urgent messages. It does not verify that an urgent message is actually transactional, nor automatically suspend a workspace for misuse. This section records the owner policy; it is not evidence of automated enforcement. Any future enforcement change needs its own tests and release review.
