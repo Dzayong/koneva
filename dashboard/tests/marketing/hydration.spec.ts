@@ -3,8 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * Guards the public marketing page against SSR/CSR hydration mismatches. UI evidence only; no backend,
  * database or WhatsApp number is touched. `/public/plans` and `/public/info` are mocked in the browser so
- * the "Harga" section (which WarmupFlow's section sits right above) actually renders instead of being
- * skipped for lack of data, matching the reported repro (opening the page at #harga).
+ * pricing cards and the initial #harga anchor can be checked deterministically.
  */
 const HYDRATION_KEYWORDS = /hydrat/i;
 
@@ -33,6 +32,44 @@ function collectHydrationIssues(page: Page) {
 }
 
 test.describe("marketing page hydration (UI evidence)", () => {
+  test("the #harga target stays present and shows loaded plan prices", async ({ page }) => {
+    await mockPublicEndpoints(page);
+    await page.goto("/#harga");
+
+    const pricing = page.locator("#harga");
+    await expect(pricing).toBeVisible();
+    await expect(pricing.getByRole("heading", { name: "Pelajar" })).toBeVisible();
+    await expect(pricing).toContainText("Rp 29.000/bulan");
+  });
+
+  test("terms and privacy show the new monthly catalog and honest consent/retention limits", async ({ page }) => {
+    await mockPublicEndpoints(page);
+    await page.goto("/syarat");
+    const terms = page.locator("article");
+    await expect(terms).toContainText("Pelajar Rp29.000");
+    await expect(terms).toContainText("Asisten Pribadi Rp59.000");
+    await expect(terms).toContainText("Tim UKM Rp99.000");
+    await expect(terms).toContainText("Bisnis CS Rp199.000");
+    await expect(terms).toContainText("fair-use");
+    await expect(terms).toContainText("tidak otomatis dikecualikan");
+    await expect(terms).toContainText("365 hari terakhir");
+    await expect(terms).toContainText("tidak berlaku untuk pesan urgent");
+    await expect(terms).toContainText("Status aktif atau jeda tidak mengubah harga khusus itu");
+    await expect(page.getByText("Draf untuk ditinjau.")).toBeVisible();
+
+    await page.goto("/privasi");
+    const privacy = page.locator("article");
+    await expect(privacy).toContainText("Pelajar Rp29.000");
+    await expect(privacy).toContainText("Asisten Pribadi Rp59.000");
+    await expect(privacy).toContainText("Tim UKM Rp99.000");
+    await expect(privacy).toContainText("Rp199.000");
+    await expect(privacy).toContainText("20.000 pesan/bulan (±667/hari)");
+    await expect(privacy).toContainText("tidak mencatat bukti consent");
+    await expect(privacy).toContainText("tidak menjadi daftar blokir yang dikelola pelanggan lintas perangkat");
+    await expect(privacy).toContainText("Backup dan salinan pemulihan");
+    await expect(page.getByText("Draf untuk ditinjau.")).toBeVisible();
+  });
+
   for (const reducedMotion of ["no-preference", "reduce"] as const) {
     for (const path of ["/", "/#harga"]) {
       test(`no hydration console error at ${path} (prefers-reduced-motion: ${reducedMotion})`, async ({ browser }) => {

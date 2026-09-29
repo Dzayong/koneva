@@ -208,12 +208,16 @@ export function LandingPage() {
 
         {/* Harga: sky = kepercayaan untuk keputusan uang. Angka muncul setelah operator menetapkan final.
             Bulanan saja: checkout tahunan sudah ditutup untuk pesanan baru (T1.1). */}
-        {plans.data && plans.data.length > 0 && (
-          <Section tone="sky" id="harga" label="Paket dan harga" backdrop={<PhotoBackdrop src="/media/photos/homeoffice.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
-            <Heading eyebrow="Paket" title="Harga yang jelas, tanpa kejutan" text="Percobaan gratis 14 hari saat mendaftar. Ditagih bulanan. Pembayaran dikonfirmasi manual oleh penyedia layanan." />
+        <Section tone="sky" id="harga" label="Paket dan harga" backdrop={<PhotoBackdrop src="/media/photos/homeoffice.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
+          <Heading eyebrow="Paket" title="Harga yang jelas, tanpa kejutan" text="Percobaan gratis 14 hari saat mendaftar. Ditagih bulanan. Pembayaran dikonfirmasi manual oleh penyedia layanan." />
+          {plans.data && plans.data.length > 0 ? (
             <Reveal from="pop" className="mt-10"><PlanCards plans={plans.data} cycle="monthly" /></Reveal>
-          </Section>
-        )}
+          ) : (
+            <p role={plans.isError ? "alert" : "status"} aria-live="polite" className="mt-10 rounded-xl border bg-card p-5 text-sm text-muted-foreground">
+              {plans.isPending ? "Memuat paket dan harga…" : plans.isError ? "Paket belum dapat dimuat. Silakan muat ulang halaman." : "Paket belum tersedia saat ini."}
+            </p>
+          )}
+        </Section>
 
         {/* FAQ: jawaban jujur, juga terbaca mesin pencari dan asisten AI lewat data terstruktur */}
         <Section tone="cream" id="faq" label="Pertanyaan umum">
