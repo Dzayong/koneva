@@ -1,5 +1,7 @@
 # HANDOFF: laporan kerja untuk agent berikutnya (Codex/Claude)
 
+> Update 2026-09-29 (Codex): owner menerima bukti T0.1; deploy key GitHub terdaftar; `develop` berada di `44010df`; CI hosted `operator-checks` run #5 lulus untuk backend dan dashboard. T0.4 dan Gerbang 0 selesai. Tidak ada deploy; lihat [STATUS_PROYEK.md](STATUS_PROYEK.md) untuk status terkini.
+
 > Update 2026-09-26 (Codex/Astra): backend Panel Operator now exists locally; see
 > [OPERATOR_PANEL.md](OPERATOR_PANEL.md) for the reviewed contract, configuration, migration 018, validation and limits.
 > Update 2026-09-26 (Claude): Operator Panel frontend (`dashboard/src/app/operator`) and TOTP MFA (migration 019) are done **locally**.
@@ -48,8 +50,7 @@ Deploy ke `:13000` dilakukan **per batch setelah satu Gerbang selesai, bukan per
 4. Baru deploy **batch Gerbang** ke `:13000` dijalankan.
 
 Tanpa keempat langkah itu selesai, agen dilarang mengakses, mengubah, me-restart, atau deploy ke `:13000` —
-untuk task apa pun, bukan hanya yang menyentuh `:13000` secara langsung. Gerbang 0 belum lulus selama T0.4 belum
-selesai (lihat `STATUS_PROYEK.md`); karena itu belum ada batch Gerbang yang memenuhi syarat deploy. Agen bekerja
+untuk task apa pun, bukan hanya yang menyentuh `:13000` secara langsung. Gerbang 0 selesai pada 2026-09-29 (lihat `STATUS_PROYEK.md`); status itu tidak mengizinkan deploy. Agen bekerja
 di `:13200`/`:13300`/harness disposable saja. Detail port/service/mock-vs-live: [ENVIRONMENT_MAP.md](ENVIRONMENT_MAP.md).
 
 Ditulis 2026-09-26 oleh Claude Code (Sonnet 5), atas permintaan pemilik proyek (Dzaki). Bahasa percakapan dengan
