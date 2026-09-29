@@ -11,7 +11,7 @@ import pool from '../shared/database/connection';
 import { getOrCreatePersona } from '../shared/persona';
 import { createBroadcast } from '../api-gateway/routes/broadcast.routes';
 import { enqueueCommand } from '../api-gateway/services/command.service';
-import { retryMessage } from '../api-gateway/services/message.service';
+import { queueMessage, releaseHeldMessages, retryMessage, sweepQuotaHolds } from '../api-gateway/services/message.service';
 import { ServiceError } from '../api-gateway/services/service-error';
 import { processAutoReply, type AutoReplyRule } from './auto-reply';
 import { CommandRunner } from './command-runner';
@@ -321,5 +321,87 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
   await t.test('the queue names used by the gateway and the worker agree (urgent traffic has its own queue but the same guard)', () => {
     assert.equal(queueName('K1'), 'K1'); assert.equal(urgentQueueName('K1'), 'K1-urgent');
     assert.ok(root.length > 0);
+  });
+
+  // ---- T1.1: hard quota holds instead of dropping, transactional exemption, release ------------------------------
+  const setQuota = (tenantId: string, quota: number, used: number) =>
+    pool.query('UPDATE tenants SET quota_messages=$2, used_messages=$3, usage_period_start=now()-interval \'1 day\' WHERE id=$1', [tenantId, quota, used]);
+  const send = (d: { deviceKey: string; tenantId: string }, over: Partial<Parameters<typeof queueMessage>[1]> = {}) =>
+    queueMessage(d.tenantId, { device_key: d.deviceKey, to: '6281234567890', message: 'halo uji', ...over });
+
+  await t.test('over quota: the message is HELD, never dropped or silently failed, and does not count as sent', async () => {
+    const ws = await workspace(); const d = await device(ws);
+    await setQuota(ws, 5, 5); // already at the cap
+    const result = await send(d);
+    assert.equal(result.status, 'quota_hold');
+    assert.equal((await row(result.id))?.status, 'quota_hold', 'held in the database, not failed/blocked');
+    const tenant = (await pool.query<{ used_messages: number }>('SELECT used_messages FROM tenants WHERE id=$1', [ws])).rows[0]!;
+    assert.equal(tenant.used_messages, 5, 'a held message is not counted as used');
+  });
+
+  await t.test('OTP/transactional exemption: a server-verified code bypasses the hard quota and is never held', async () => {
+    const ws = await workspace(); const d = await device(ws);
+    await setQuota(ws, 5, 5); // already at the cap -- a normal send would be held
+    const result = await send(d, { message: 'Kode OTP Anda: 482913', otp_code: '482913' });
+    assert.equal(result.status, 'queued', 'exempt sends are never held even at the cap');
+    assert.equal(result.quota_exempt, true);
+    const tenant = (await pool.query<{ used_messages: number }>('SELECT used_messages FROM tenants WHERE id=$1', [ws])).rows[0]!;
+    assert.equal(tenant.used_messages, 5, 'exempt sends never increment used_messages');
+  });
+
+  await t.test('the exemption is not just `priority: urgent`: setting urgent alone still counts against quota and can be held', async () => {
+    const ws = await workspace(); const d = await device(ws);
+    await setQuota(ws, 5, 5);
+    const result = await send(d, { priority: 'urgent' }); // no otp_code at all
+    assert.equal(result.status, 'quota_hold', 'priority alone never grants the exemption');
+  });
+
+  await t.test('the exemption is not a free-form flag: the code must actually be inside the message, short, and without media', async () => {
+    const ws = await workspace(); const d = await device(ws);
+    await setQuota(ws, 5, 5);
+    const detached = await send(d, { message: 'Halo, ini pesan biasa', otp_code: '482913' }); // code not in message
+    assert.equal(detached.status, 'quota_hold');
+    const withMedia = await send(d, { message: 'Kode OTP: 482913', otp_code: '482913', media_url: 'https://example.test/x.png' });
+    assert.equal(withMedia.status, 'quota_hold', 'a code alongside media is not treated as a short transactional message');
+  });
+
+  await t.test('the exemption itself is rate-limited per recipient: repeated claims stop being exempt and fall back to counting against quota', async () => {
+    const ws = await workspace(); const d = await device(ws);
+    await setQuota(ws, 1000, 0);
+    let exemptCount = 0; let heldOrQueuedNormally = 0;
+    for (let i = 0; i < 6; i += 1) {
+      const r = await send(d, { message: `Kode OTP Anda: ${100000 + i}`, otp_code: String(100000 + i) });
+      if (r.quota_exempt) exemptCount += 1; else heldOrQueuedNormally += 1;
+    }
+    assert.ok(exemptCount <= 3, `at most the configured per-recipient limit should be exempt, got ${exemptCount}`);
+    assert.ok(heldOrQueuedNormally > 0, 'once the limit is spent, further "OTP" sends are no longer exempt -- they are not rejected either');
+  });
+
+  await t.test('releaseHeldMessages: a held message is promoted to queued, in order, once the tenant has headroom again', async () => {
+    const ws = await workspace(); const d = await device(ws);
+    await setQuota(ws, 5, 5);
+    const first = await send(d, { message: 'pesan pertama tertahan' });
+    const second = await send(d, { message: 'pesan kedua tertahan' });
+    assert.equal(first.status, 'quota_hold'); assert.equal(second.status, 'quota_hold');
+    await setQuota(ws, 5, 4); // one slot of headroom opens up (e.g. after a plan change)
+    const released = await releaseHeldMessages(ws);
+    assert.equal(released.released, 1, 'only as many as there is headroom for');
+    assert.equal((await row(first.id))?.status, 'queued', 'oldest held message first');
+    assert.equal((await row(second.id))?.status, 'quota_hold', 'the rest stays held, not dropped');
+    const tenant = (await pool.query<{ used_messages: number }>('SELECT used_messages FROM tenants WHERE id=$1', [ws])).rows[0]!;
+    assert.equal(tenant.used_messages, 5);
+  });
+
+  await t.test('sweepQuotaHolds releases across every tenant that has a hold, never touching an unrelated workspace', async () => {
+    const wsA = await workspace(); const dA = await device(wsA);
+    const wsB = await workspace(); const dB = await device(wsB);
+    await setQuota(wsA, 5, 5); await setQuota(wsB, 5, 5);
+    const heldA = await send(dA); const heldB = await send(dB);
+    assert.equal(heldA.status, 'quota_hold'); assert.equal(heldB.status, 'quota_hold');
+    await setQuota(wsA, 5, 4); // only A gets headroom
+    const swept = await sweepQuotaHolds();
+    assert.ok(swept.released >= 1);
+    assert.equal((await row(heldA.id))?.status, 'queued');
+    assert.equal((await row(heldB.id))?.status, 'quota_hold', 'B never had headroom, so it is untouched by A\'s release');
   });
 });

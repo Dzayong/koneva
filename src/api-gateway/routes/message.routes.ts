@@ -14,6 +14,7 @@ export const sendSchema = z.object({
   media_type: z.enum(MEDIA_TYPES).default('image'),
   external_id: z.string().max(64).optional(),
   priority: z.enum(['normal', 'urgent']).default('normal'),
+  otp_code: z.string().regex(/^[0-9]{4,10}$/).optional(),
 }).superRefine((v, ctx) => {
   if (!v.media_url && v.message.trim().length === 0) ctx.addIssue({ code: 'custom', path: ['message'], message: 'message is required unless media_url is given' });
 });
@@ -29,7 +30,9 @@ const listSchema = z.object({
 router.post('/message/send', validate({ body: sendSchema }), async (request, response) => {
   const input = request.validated!.body as z.infer<typeof sendSchema>;
   const message = await queueMessage(request.tenant!.id, input);
-  const data = { message_id: message.id, status: 'queued' as const };
+  // Reports the message's real status: 'quota_hold' when the monthly quota is spent (the send was kept, not
+  // dropped), 'queued' otherwise -- never hardcoded, so a client can tell the two apart and show it.
+  const data = { message_id: message.id, status: message.status as 'queued' | 'quota_hold' };
   response.status(202).json({ success: true, data, ...data });
 });
 

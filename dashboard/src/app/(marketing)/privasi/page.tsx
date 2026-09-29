@@ -34,7 +34,8 @@ export default function PrivacyPage() {
           </ul></section>
 
         <section><h2>2. Untuk apa</h2>
-          <p>Untuk menjalankan layanan (mengirim, menerima, dan melacak pesan), menjaga keamanan dan mencegah penyalahgunaan, menagih dan mengelola paket, memberikan dukungan, dan memperbaiki layanan. Kami tidak menjual data Anda dan tidak memakainya untuk iklan.</p></section>
+          <p>Untuk menjalankan layanan (mengirim, menerima, dan melacak pesan), menjaga keamanan dan mencegah penyalahgunaan, menagih dan mengelola paket, memberikan dukungan, dan memperbaiki layanan. Kami tidak menjual data Anda dan tidak memakainya untuk iklan.</p>
+          <p>Setiap paket berlangganan punya batas pesan per bulan yang ditegakkan sistem. Paket Bisnis CS menampilkan <strong>&ldquo;Unlimited pesan*&rdquo;</strong> dengan batas fair-use terlihat jelas <strong>20.000 pesan/bulan (±667/hari)</strong>. Kode OTP dan pesan transaksional lain, yang diverifikasi otomatis oleh sistem, tidak dihitung dalam batas ini. Saat batas tercapai, pesan ditahan sementara (tidak dibuang) sampai kuota tersedia lagi.</p></section>
 
         <section><h2>3. Berbagi data</h2>
           <p>Data tidak dibagikan kepada pihak lain kecuali: (a) ke server Anda sendiri lewat webhook; (b) ke penyedia infrastruktur yang menjalankan layanan (<span className={TODO}>[DIISI: penyedia hosting dan lokasi server]</span>); (c) bila diwajibkan hukum. Pesan diteruskan ke WhatsApp sebagaimana layaknya pengiriman pesan.</p></section>

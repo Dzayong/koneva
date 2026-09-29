@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion, useScroll, useTransform, type Variants } from "framer-motion";
 import { ArrowRight, BellRing, CheckCheck, Gauge, ShieldCheck, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { CycleToggle, PlanCards } from "@/components/billing/plan-cards";
+import { PlanCards } from "@/components/billing/plan-cards";
 import { KonevaLogo } from "@/components/brand/koneva-logo";
 import { Faq } from "@/components/marketing/faq";
 import { HeroDemo } from "@/components/marketing/hero-demo";
@@ -22,7 +22,6 @@ import { WarmupFlow } from "@/components/marketing/warmup-flow";
 import { useAuth } from "@/hooks/use-auth";
 import { usePublicPlans } from "@/hooks/use-billing";
 import { track } from "@/lib/track";
-import type { BillingCycle } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const rise: Variants = {
@@ -96,7 +95,6 @@ const AUDIENCES: Array<{ title: string; text: string; cta: string; href: string;
 export function LandingPage() {
   const reduce = useReducedMotion();
   const plans = usePublicPlans();
-  const [cycle, setCycle] = useState<BillingCycle>("monthly");
   const heroRef = useRef<HTMLElement>(null);
   const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
   const demoY = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : -70]);
@@ -208,14 +206,12 @@ export function LandingPage() {
           <div className="mt-8"><HowItWorks /></div>
         </Section>
 
-        {/* Harga: sky = kepercayaan untuk keputusan uang. Angka muncul setelah operator menetapkan final. */}
+        {/* Harga: sky = kepercayaan untuk keputusan uang. Angka muncul setelah operator menetapkan final.
+            Bulanan saja: checkout tahunan sudah ditutup untuk pesanan baru (T1.1). */}
         {plans.data && plans.data.length > 0 && (
           <Section tone="sky" id="harga" label="Paket dan harga" backdrop={<PhotoBackdrop src="/media/photos/homeoffice.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <Heading eyebrow="Paket" title="Harga yang jelas, tanpa kejutan" text="Percobaan gratis 14 hari saat mendaftar. Pembayaran dikonfirmasi manual oleh penyedia layanan." />
-              <Reveal from="left"><CycleToggle value={cycle} onChange={setCycle} /></Reveal>
-            </div>
-            <Reveal from="pop" className="mt-10"><PlanCards plans={plans.data} cycle={cycle} /></Reveal>
+            <Heading eyebrow="Paket" title="Harga yang jelas, tanpa kejutan" text="Percobaan gratis 14 hari saat mendaftar. Ditagih bulanan. Pembayaran dikonfirmasi manual oleh penyedia layanan." />
+            <Reveal from="pop" className="mt-10"><PlanCards plans={plans.data} cycle="monthly" /></Reveal>
           </Section>
         )}
 

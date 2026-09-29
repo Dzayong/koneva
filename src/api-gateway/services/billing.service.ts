@@ -12,10 +12,15 @@ export interface PlanRow {
   id: string; name: string; audience: string; price_month_idr: number; price_year_idr: number;
   max_devices: number; monthly_messages: number; max_members: number; trial_days: number | null;
   requires_student_verification: boolean; price_is_final: boolean; published: boolean; sort_order: number; features: string[];
+  /** Display-only override for the raw monthly_messages number, e.g. "Unlimited pesan*" for Bisnis CS (id 'tim').
+   * The real enforced cap is always monthly_messages; NULL means "show the raw number" (every other plan). */
+  quota_headline: string | null;
+  /** Fine-print shown alongside quota_headline, e.g. the fair-use figure. NULL when quota_headline is NULL. */
+  quota_note: string | null;
 }
 
 const PLAN_COLUMNS = `id, name, audience, price_month_idr, price_year_idr, max_devices, monthly_messages, max_members,
-  trial_days, requires_student_verification, price_is_final, published, sort_order, features`;
+  trial_days, requires_student_verification, price_is_final, published, sort_order, features, quota_headline, quota_note`;
 
 const INACTIVE_MESSAGE: Partial<Record<SubscriptionStatus, string>> = {
   expired: 'Masa uji coba sudah berakhir. Pilih paket di halaman Tagihan untuk melanjutkan mengirim.',
@@ -93,6 +98,7 @@ export async function listPublicPlans() {
     price_month_idr: p.price_is_final ? p.price_month_idr : null,
     price_year_idr: p.price_is_final ? p.price_year_idr : null,
     price_is_final: p.price_is_final,
+    quota_headline: p.quota_headline, quota_note: p.quota_note,
   }));
 }
 
@@ -168,12 +174,22 @@ export interface InvoiceRow {
 }
 
 export async function createOrder(tenantId: string, planId: string, cycle: BillingCycle): Promise<InvoiceRow> {
+  // Annual checkout is closed for new orders (T1.1); only a subscription that is ALREADY on a yearly cycle keeps
+  // reading as yearly (handled by getBillingState/invoices, never re-priced here). No yearly price is invented.
+  if (cycle === 'yearly') throw new ServiceError(400, 'ANNUAL_CHECKOUT_CLOSED', 'Checkout tahunan sudah ditutup untuk pesanan baru. Pilih siklus bulanan.');
   return transaction(async (client) => {
     await client.query('SELECT id FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
     const plan = (await client.query<PlanRow>(`SELECT ${PLAN_COLUMNS} FROM plans WHERE id = $1 AND published = true`, [planId])).rows[0];
     if (!plan || plan.audience === 'trial' || plan.audience === 'internal') throw new ServiceError(400, 'INVALID_PLAN', 'Paket tidak tersedia.');
     if (!plan.price_is_final) throw new ServiceError(409, 'PRICE_NOT_FINAL', 'Harga paket ini belum diumumkan. Hubungi penyedia layanan untuk mengaktifkan.');
-    const amount = priceFor(plan, cycle);
+    // Grandfather: a subscription that already carries an override for THIS plan (set once, at migration time, for
+    // pre-existing Pelajar subscribers) keeps paying that price on renewal instead of the current catalog price.
+    // activatePaid() never touches price_override_idr, so it survives every renewal untouched; a plan CHANGE away
+    // from 'pelajar' has no override to read here, so switching plans always uses the current catalog price.
+    const current = (await client.query<{ plan_id: string; price_override_idr: number | null }>(
+      'SELECT plan_id, price_override_idr FROM subscriptions WHERE tenant_id = $1', [tenantId],
+    )).rows[0];
+    const amount = (current?.plan_id === plan.id && current.price_override_idr != null) ? current.price_override_idr : priceFor(plan, cycle);
     if (amount <= 0) throw new ServiceError(409, 'PRICE_NOT_SET', 'Harga paket belum diatur.');
     if (plan.requires_student_verification) {
       const tenant = (await client.query<{ student_verified_at: Date | null }>('SELECT student_verified_at FROM tenants WHERE id = $1', [tenantId])).rows[0];
@@ -266,6 +282,12 @@ export async function getBillingState(tenantId: string) {
     ...p, price_month_idr: p.price_is_final ? p.price_month_idr : null, price_year_idr: p.price_is_final ? p.price_year_idr : null,
   }));
   const daysLeft = sub?.period_end ? Math.ceil((new Date(sub.period_end).getTime() - now.getTime()) / 86_400_000) : null;
+  // held: messages waiting because the regular quota is full (never dropped). exempt_used: OTP/transactional sends
+  // in the current window, which never counted against messages_used -- shown so the exemption is never a mystery.
+  const held = (await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM messages WHERE tenant_id = $1 AND status = 'quota_hold'`, [tenantId])).rows[0]?.n ?? 0;
+  const exemptUsed = window ? (await pool.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM messages WHERE tenant_id = $1 AND quota_exempt = true AND created_at >= $2`, [tenantId, window.start],
+  )).rows[0]?.n ?? 0 : 0;
 
   return {
     subscription: sub ? {
@@ -274,7 +296,8 @@ export async function getBillingState(tenantId: string) {
     } : null,
     usage: {
       messages_used: rolled ? 0 : (tenant?.used_messages ?? 0), messages_limit: tenant?.quota_messages ?? 0,
-      resets_at: window?.end ?? null,
+      resets_at: window?.end ?? null, messages_held: held, exempt_used: exemptUsed,
+      quota_headline: plan?.quota_headline ?? null, quota_note: plan?.quota_note ?? null,
       devices_used: counts?.devices ?? 0, devices_limit: tenant?.max_devices ?? 0,
       members_used: counts?.members ?? 0, members_limit: plan?.max_members ?? null,
     },

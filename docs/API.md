@@ -21,7 +21,7 @@ fields on send and QR responses remain temporarily for frontend compatibility.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/api/v1/message/send` | tenant | 202 = queued, not delivered |
+| POST | `/api/v1/message/send` | tenant | 202; `status: "queued"` or `"quota_hold"` (see [Plans and billing](#plans-and-billing)), never delivered yet |
 | GET | `/api/v1/messages` | tenant | filters: `device_key`, `status`, `direction`, `search` |
 | GET | `/api/v1/messages/:id` | tenant | includes `status_history` |
 | POST | `/api/v1/messages/:id/retry` | tenant | retry failed/blocked messages |
@@ -235,9 +235,35 @@ rests and content rules. They still respect a paused or banned number and the da
 are never deferred: if refused, the message is marked `failed` right away and a `message.failed`
 webhook is sent, because a late OTP is useless.
 
-A new number is capped by warm-up (about 4-5 messages on day 1), so a fresh number is not ready for
-OTP traffic. Templated, high-volume OTP sending to many strangers is the pattern WhatsApp is most
-likely to treat as automated; volume and risk on your own numbers are your responsibility.
+**`priority: "urgent"` is a pacing hint only — it does not exempt a send from the monthly plan
+quota.** For that, also pass `otp_code` (see below). A new number is capped by warm-up (about 4-5
+messages on day 1), so a fresh number is not ready for OTP traffic. Templated, high-volume OTP
+sending to many strangers is the pattern WhatsApp is most likely to treat as automated; volume and
+risk on your own numbers are your responsibility.
+
+### Quota-exempt transactional sends (`otp_code`)
+
+The monthly plan quota (see [Plans and billing](#plans-and-billing)) counts every send except ones
+the server itself classifies as transactional. `priority: "urgent"` is **not** that classification —
+any caller could set it on an ordinary message. Instead, pass `otp_code`, a 4-10 digit numeric string:
+
+```json
+{ "device_key": "WAPI-XXXXXXXX", "to": "6281234567890", "priority": "urgent",
+  "message": "Kode OTP Anda: 482913", "otp_code": "482913" }
+```
+
+A send is exempt from the quota only when **all** of these hold, checked server-side:
+
+- `otp_code` is present and matches `^[0-9]{4,10}$`;
+- `message` actually contains that exact code as a substring, is 200 characters or fewer, and has no
+  `media_url` — the shape of a real one-time code, not a repurposed broadcast;
+- the (workspace, recipient) pair has not already claimed the exemption too many times recently (a
+  rolling per-recipient/per-workspace limit, so the exemption itself cannot become unlimited
+  quota-free volume).
+
+When any check fails the send is **never rejected because of it** — it is simply not exempt, so it
+counts against quota like any other message, and (see below) may be held rather than sent if the
+quota is already spent.
 
 ### Pacing per number (persona)
 
@@ -285,18 +311,42 @@ maintenance endpoints below remain separate; their admin key never authenticates
 
 Billing is manual: the owner orders a plan, pays outside the system, and the operator confirms.
 
+**Catalog (T1.1):** Pelajar (`pelajar`, Rp29.000/1 device/1.000 pesan/1 anggota, needs student verification),
+Asisten Pribadi (`asisten`, Rp59.000/1/5.000/1), Tim UKM (`umkm`, Rp99.000/3/10.000/3 — id kept stable from the
+older "UMKM" plan), Bisnis CS (`tim`, Rp199.000/5 device/10 anggota). Bisnis CS's real enforced monthly cap is
+20.000 messages (fair-use); `GET /public/plans` and `GET /api/v1/billing` expose this as `quota_headline`
+("Unlimited pesan*") and `quota_note` (the fair-use figure) alongside the plain `monthly_messages` number — every
+surface (pricing, Syarat, Privasi, dashboard) shows the same two strings, never a separately hand-written copy.
+
+**Annual checkout is closed for new orders.** `POST /api/v1/billing/orders` only accepts `"cycle": "monthly"`;
+`"cycle": "yearly"` now answers `400 ANNUAL_CHECKOUT_CLOSED` before any other validation. Existing yearly
+subscriptions and their invoice history are unaffected and remain fully readable.
+
+**Grandfathered pricing.** A subscription created before the 2026-09-29 price change keeps paying its original
+rate on every renewal for as long as it stays on the same plan (internally: a `price_override_idr` snapshot on
+the subscription row, never rewritten by a renewal, never applied if the plan is changed). Past invoice amounts
+are historical records and are never rewritten by a later price change either way.
+
 | Endpoint | Who | What |
 |---|---|---|
-| `GET /public/plans` | anyone | Published plans. Prices are `null` until the operator marks them final. |
-| `GET /api/v1/billing` | owner | Subscription, usage (messages, numbers, members), invoices, payment instructions. |
-| `POST /api/v1/billing/orders` `{plan, cycle}` | owner | Creates an invoice (`monthly`/`yearly`). Replaces the previous unpaid one. |
+| `GET /public/plans` | anyone | Published plans, with `quota_headline`/`quota_note`. Prices are `null` until the operator marks them final. |
+| `GET /api/v1/billing` | owner | Subscription, usage (messages held/exempt included, numbers, members), invoices, payment instructions. |
+| `POST /api/v1/billing/orders` `{plan, cycle: "monthly"}` | owner | Creates an invoice. Replaces the previous unpaid one. `cycle: "yearly"` is refused (see above). |
 | `POST /api/v1/billing/student-request` `{note}` | owner | Asks for student verification (campus/school email required). |
 | `GET /auth/me` | any member | Includes `subscription` (status, days left) for the banner. |
 
-Order errors: `409 PRICE_NOT_FINAL`, `409 STUDENT_NOT_VERIFIED`, `400 INVALID_PLAN`.
-Enforcement: `402 PLAN_INACTIVE` (send / add number), `402 PLAN_MEMBER_LIMIT` (invite),
-`429 QUOTA_EXCEEDED` (monthly messages, with reset date). A late payment keeps working
-for a 7-day grace period, then sending stops; reading data still works.
+Order errors: `400 ANNUAL_CHECKOUT_CLOSED`, `409 PRICE_NOT_FINAL`, `409 STUDENT_NOT_VERIFIED`, `400 INVALID_PLAN`.
+
+**Quota enforcement holds, it does not drop.** Once the monthly message quota is spent, a send is accepted
+(`202`) but comes back with `"status": "quota_hold"` instead of `"queued"` — the message is kept, never
+dropped or silently failed, and `GET /api/v1/billing`'s `usage.messages_held` reports how many are waiting.
+Held messages are released automatically, oldest first, the moment the workspace has headroom again (a new
+billing window, an upgrade, or another message finishing this period) — checked on every send and swept every
+few minutes server-side, so a hold never outlives the quota that caused it for long. A server-verified
+transactional send (`otp_code`, see above) is never held: it always sends immediately and never counts toward
+`usage.messages_used` (see `usage.exempt_used`). Other enforcement: `402 PLAN_INACTIVE` (send / add number),
+`402 PLAN_MEMBER_LIMIT` (invite). A late payment keeps working for a 7-day grace period, then sending stops;
+reading data still works.
 
 Operator (admin key): `GET/PATCH /plans`, `GET /subscriptions`, `GET /invoices`,
 `POST /invoices/:id/pay|void`, `POST /tenant/:id/student-verify`,

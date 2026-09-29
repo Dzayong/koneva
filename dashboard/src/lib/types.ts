@@ -401,6 +401,10 @@ export interface PublicPlan {
   price_month_idr: number | null;
   price_year_idr: number | null;
   price_is_final: boolean;
+  /** Display override for monthly_messages, e.g. "Unlimited pesan*" (Bisnis CS). Null: show the raw number. */
+  quota_headline: string | null;
+  /** Fine print shown with quota_headline, e.g. the fair-use figure. Null when quota_headline is null. */
+  quota_note: string | null;
 }
 
 export interface SubscriptionSummary {
@@ -433,6 +437,13 @@ export interface BillingState {
   } | null;
   usage: {
     messages_used: number; messages_limit: number; resets_at: string | null;
+    /** Messages held because the regular quota is spent -- kept, not dropped, and released automatically. */
+    messages_held: number;
+    /** OTP/transactional sends this period, verified server-side; never counted in messages_used. */
+    exempt_used: number;
+    /** Display override for the current plan's limit (e.g. "Unlimited pesan*"); null on every plan but Bisnis CS. */
+    quota_headline: string | null;
+    quota_note: string | null;
     devices_used: number; devices_limit: number; members_used: number; members_limit: number | null;
   };
   student: { verified: boolean; requested: boolean; needs_resubmission?: boolean };

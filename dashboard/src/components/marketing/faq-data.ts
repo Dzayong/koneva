@@ -22,7 +22,7 @@ export const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "Bagaimana dengan OTP yang harus cepat?",
-    a: "Pesan dengan prioritas urgent memakai antrean sendiri dan tidak menunggu jeda pengiriman biasa, sehingga cocok untuk kode OTP. Pesan biasa tetap diberi jeda agar pola pengiriman tidak terlihat seperti mesin. Karena jalur ini tidak resmi, jangan menjadikannya satu-satunya cara untuk login atau transaksi penting; siapkan jalur cadangan seperti SMS atau email.",
+    a: "Pesan dengan prioritas urgent memakai antrean sendiri dan tidak menunggu jeda pengiriman biasa, sehingga cocok untuk kode OTP. Pesan OTP/transaksional yang diverifikasi otomatis oleh sistem juga tidak dihitung dalam kuota paket bulanan. Pesan biasa tetap diberi jeda agar pola pengiriman tidak terlihat seperti mesin. Karena jalur ini tidak resmi, jangan menjadikannya satu-satunya cara untuk login atau transaksi penting; siapkan jalur cadangan seperti SMS atau email.",
   },
   {
     q: "Bagaimana saya tahu pesan terkirim, dibaca, atau nomor bermasalah?",
@@ -34,7 +34,7 @@ export const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "Berapa harga dan apakah ada uji coba?",
-    a: "Setiap akun baru mendapat uji coba gratis 14 hari tanpa kartu kredit. Paket awal ditujukan untuk pelajar dan UMKM, dengan pilihan bulanan atau tahunan. Harga akan tertera di halaman ini setelah ditetapkan. Pembayaran saat ini dikonfirmasi manual oleh penyedia layanan.",
+    a: "Setiap akun baru mendapat uji coba gratis 14 hari tanpa kartu kredit. Ada empat paket bulanan, dari Pelajar sampai Bisnis CS — lihat daftar harga di halaman ini. Checkout tahunan sudah ditutup untuk pesanan baru. Pembayaran saat ini dikonfirmasi manual oleh penyedia layanan.",
   },
   {
     q: "Data apa yang disimpan?",

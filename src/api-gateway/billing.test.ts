@@ -93,7 +93,7 @@ function withTransaction(handler: (text: string, values?: unknown[]) => { rows: 
 const plan = (over: Record<string, unknown> = {}) => ({
   id: 'umkm', name: 'UMKM', audience: 'umkm', price_month_idr: 99000, price_year_idr: 990000, max_devices: 3,
   monthly_messages: 10000, max_members: 3, trial_days: null, requires_student_verification: false, price_is_final: true,
-  published: true, sort_order: 2, features: [], ...over,
+  published: true, sort_order: 2, features: [], quota_headline: null, quota_note: null, ...over,
 });
 
 test('an order needs a real plan and a final price', async () => {
@@ -113,19 +113,49 @@ test('the student plan cannot be ordered before verification', async () => {
   await assert.rejects(() => createOrder('t1', 'pelajar', 'monthly'), code('STUDENT_NOT_VERIFIED'));
 });
 
-test('an order voids the previous open invoice and prices by cycle', async () => {
+test('annual checkout is closed for new orders (T1.1): yearly is refused before any query runs', async () => {
+  await assert.rejects(() => createOrder('t1', 'umkm', 'yearly'), code('ANNUAL_CHECKOUT_CLOSED'));
+});
+
+test('an order voids the previous open invoice and prices at the current catalog rate', async () => {
   const statements: string[] = [];
   let amount: unknown;
   withTransaction((text, values) => {
     statements.push(text);
     if (text.includes('FROM plans')) return { rows: [plan()] };
+    if (text.startsWith('SELECT plan_id, price_override_idr')) return { rows: [] }; // no existing subscription: no override
     if (text.startsWith('INSERT INTO invoices')) { amount = values?.[3]; return { rows: [{ id: 'i1', number: 'INV-202609-0001', status: 'unpaid' }] }; }
     return { rows: [] };
   });
-  const invoice = await createOrder('t1', 'umkm', 'yearly');
-  assert.equal(amount, 990000);
+  const invoice = await createOrder('t1', 'umkm', 'monthly');
+  assert.equal(amount, 99000);
   assert.equal(invoice.number, 'INV-202609-0001');
   assert.ok(statements.findIndex((s) => s.includes("SET status = 'void'")) < statements.findIndex((s) => s.startsWith('INSERT INTO invoices')));
+});
+
+test('grandfather: a subscription with an override for the SAME plan is charged the override, not the catalog price', async () => {
+  let amount: unknown;
+  withTransaction((text, values) => {
+    if (text.includes('FROM plans')) return { rows: [plan({ id: 'pelajar', price_month_idr: 29000 })] };
+    if (text.startsWith('SELECT plan_id, price_override_idr')) return { rows: [{ plan_id: 'pelajar', price_override_idr: 19000 }] };
+    if (text.startsWith('INSERT INTO invoices')) { amount = values?.[3]; return { rows: [{ id: 'i1', number: 'INV-1', status: 'unpaid' }] }; }
+    return { rows: [] };
+  });
+  await createOrder('t1', 'pelajar', 'monthly');
+  assert.equal(amount, 19000, 'grandfathered Pelajar renews at the old 19.000, not the new 29.000 catalog price');
+});
+
+test('grandfather does not follow a plan change: switching plans pays the catalog price even with a stale override on the row', async () => {
+  let amount: unknown;
+  withTransaction((text, values) => {
+    if (text.includes('FROM plans')) return { rows: [plan({ id: 'asisten', price_month_idr: 59000 })] };
+    // The override on file belongs to a DIFFERENT plan (pelajar); it must not leak into an order for 'asisten'.
+    if (text.startsWith('SELECT plan_id, price_override_idr')) return { rows: [{ plan_id: 'pelajar', price_override_idr: 19000 }] };
+    if (text.startsWith('INSERT INTO invoices')) { amount = values?.[3]; return { rows: [{ id: 'i1', number: 'INV-1', status: 'unpaid' }] }; }
+    return { rows: [] };
+  });
+  await createOrder('t1', 'asisten', 'monthly');
+  assert.equal(amount, 59000);
 });
 
 test('student verification asks for a school or campus email', async () => {
@@ -146,7 +176,7 @@ import { activatePaid, createTrial, grantPlan, markInvoicePaid, type PlanRow } f
 const planRow = (over: Partial<PlanRow> = {}): PlanRow => ({
   id: 'umkm', name: 'UMKM', audience: 'umkm', price_month_idr: 99000, price_year_idr: 990000, max_devices: 3,
   monthly_messages: 10000, max_members: 3, trial_days: null, requires_student_verification: false, price_is_final: true,
-  published: true, sort_order: 2, features: [], ...over,
+  published: true, sort_order: 2, features: [], quota_headline: null, quota_note: null, ...over,
 });
 
 function fakeClient(current?: { plan_id: string; period_start: Date; period_end: Date | null }) {

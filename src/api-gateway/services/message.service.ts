@@ -6,6 +6,8 @@ import { getRedisClient } from '../../shared/redis';
 import type { PaginatedResponse, SendMessageRequest } from '../../shared/types/api';
 import { ServiceError } from './service-error';
 import { assertSubscriptionActive, currentUsage } from './billing.service';
+import { looksLikeTransactional, reserveTransactionalExemption } from './message-exempt-limits';
+import logger from '../../shared/utils/logger';
 
 const messageQueues = new Map<string, Queue>();
 
@@ -48,6 +50,7 @@ interface MessageRow extends QueryResultRow {
   status: string;
   external_id: string | null;
   priority?: string;
+  quota_exempt?: boolean;
   created_at: Date;
 }
 
@@ -55,13 +58,15 @@ export async function queueMessage(
   tenantId: string,
   input: SendMessageRequest,
 ): Promise<MessageRow> {
+  // Classification happens BEFORE the send transaction and is never the client's `priority` field: it requires the
+  // request's own otp_code to genuinely appear in the message content (short, no media) AND a per-recipient/tenant
+  // rate limit not already spent. See message-exempt-limits.ts. A failed/skipped claim never blocks the send --
+  // it just means this particular send counts against quota like any other.
+  const exempt = looksLikeTransactional({ message: input.message, mediaUrl: input.media_url, otpCode: input.otp_code })
+    && await reserveTransactionalExemption(tenantId, input.to);
+
   const message = await transaction(async (client: PoolClient) => {
     await assertSubscriptionActive(client, tenantId);
-    const usage = await currentUsage(client, tenantId);
-    if (usage.used >= usage.quota) {
-      const resets = usage.resetsAt ? ` Kuota direset ${usage.resetsAt.toISOString().slice(0, 10)}.` : '';
-      throw new ServiceError(429, 'QUOTA_EXCEEDED', `Kuota pesan paket ini sudah habis.${resets}`);
-    }
 
     const deviceResult = await client.query<{ id: string; status: string }>(
       'SELECT id, status FROM devices WHERE tenant_id = $1 AND device_key = $2',
@@ -73,19 +78,31 @@ export async function queueMessage(
       throw new ServiceError(503, 'DEVICE_OFFLINE', 'Device is not online');
     }
 
+    // Exempt sends skip the quota check entirely and never count toward used_messages. Everything else is held,
+    // not dropped or rejected, once the regular quota is spent -- a periodic sweep (see sweepQuotaHolds) and every
+    // fresh billing window release held messages in order once headroom exists (see releaseHeldMessages).
+    const overQuota = !exempt && await (async () => {
+      const usage = await currentUsage(client, tenantId);
+      return usage.used >= usage.quota;
+    })();
+    const status = overQuota ? 'quota_hold' : 'queued';
+    const priority = exempt ? 'urgent' : (input.priority ?? 'normal');
+
     const result = await client.query<MessageRow>(
       `INSERT INTO messages
-         (tenant_id, device_id, device_key, to_number, content, external_id, status, priority, type, media_url)
-       VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, $9) RETURNING *`,
-      [tenantId, device.id, input.device_key, input.to, input.message, input.external_id ?? null, input.priority ?? 'normal',
-        input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null],
+         (tenant_id, device_id, device_key, to_number, content, external_id, status, priority, type, media_url, quota_exempt)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [tenantId, device.id, input.device_key, input.to, input.message, input.external_id ?? null, status, priority,
+        input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt],
     );
-    await client.query('UPDATE tenants SET used_messages = used_messages + 1 WHERE id = $1', [tenantId]);
+    if (status === 'queued' && !exempt) await client.query('UPDATE tenants SET used_messages = used_messages + 1 WHERE id = $1', [tenantId]);
     return result.rows[0]!;
   });
 
+  if (message.status === 'quota_hold') return message; // held, not enqueued; released later without ever being dropped
+
   try {
-    await enqueueStoredMessage(input.device_key, message.id, message.id, input.priority ?? 'normal');
+    await enqueueStoredMessage(input.device_key, message.id, message.id, (message.priority as 'normal' | 'urgent' | undefined) ?? 'normal');
   } catch (error) {
     await pool.query(
       `UPDATE messages SET status = 'failed', error_message = $2 WHERE id = $1`,
@@ -95,6 +112,50 @@ export async function queueMessage(
   }
 
   return message;
+}
+
+/**
+ * Releases messages held by quota_hold, oldest first, up to however much headroom the tenant now has -- called
+ * periodically (sweepQuotaHolds) and right after a plan change/renewal, so a hold never outlives the quota that
+ * caused it by more than one sweep interval. Exempt messages are never held in the first place, so nothing here
+ * revisits exemption.
+ */
+export async function releaseHeldMessages(tenantId: string, now: Date = new Date()): Promise<{ released: number }> {
+  const toRelease = await transaction(async (client) => {
+    const usage = await currentUsage(client, tenantId, now);
+    const remaining = Math.max(0, usage.quota - usage.used);
+    if (remaining <= 0) return [];
+    const held = (await client.query<{ id: string; device_key: string; priority: string | null }>(
+      `SELECT id, device_key, priority FROM messages WHERE tenant_id = $1 AND status = 'quota_hold' ORDER BY created_at ASC LIMIT $2 FOR UPDATE`,
+      [tenantId, remaining],
+    )).rows;
+    if (held.length === 0) return [];
+    await client.query(`UPDATE messages SET status = 'queued' WHERE id = ANY($1::uuid[])`, [held.map((h) => h.id)]);
+    await client.query('UPDATE tenants SET used_messages = used_messages + $2 WHERE id = $1', [tenantId, held.length]);
+    return held;
+  });
+  for (const row of toRelease) {
+    try {
+      await enqueueStoredMessage(row.device_key, row.id, row.id, row.priority === 'urgent' ? 'urgent' : 'normal');
+    } catch (error) {
+      // Left as 'queued' in the DB even though enqueueing failed here: the existing stuck-message sweep in the
+      // bot container (queue.ts) already re-queues rows whose status says queued but have no matching job, exactly
+      // like any other lost enqueue (see docs/HANDOFF.md "Antrean andal"). Not re-marked quota_hold: it already
+      // has its quota slot counted, and holding it again would double-count on the next release.
+      logger.error('releaseHeldMessages: enqueue failed after release', { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { released: toRelease.length };
+}
+
+/** Every tenant with at least one held message, oldest hold first, so no one tenant's backlog starves another. */
+export async function sweepQuotaHolds(): Promise<{ tenants: number; released: number }> {
+  const tenants = (await pool.query<{ tenant_id: string }>(
+    `SELECT DISTINCT tenant_id FROM messages WHERE status = 'quota_hold'`,
+  )).rows;
+  let released = 0;
+  for (const { tenant_id } of tenants) released += (await releaseHeldMessages(tenant_id)).released;
+  return { tenants: tenants.length, released };
 }
 
 export async function getMessageStatus(tenantId: string, messageId: string) {

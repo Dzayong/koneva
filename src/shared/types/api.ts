@@ -44,14 +44,25 @@ export interface SendMessageRequest {
   media_url?: string | undefined;
   media_type?: 'image' | 'video' | 'document' | undefined;
   external_id?: string | undefined;
-  /** 'urgent' is for OTP and other time-critical transactional messages. */
+  /** 'urgent' is for OTP and other time-critical transactional messages. This is a routing/pacing hint only --
+   * it does NOT exempt a send from the monthly quota. See `otp_code` for the quota exemption. */
   priority?: 'normal' | 'urgent' | undefined;
+  /**
+   * A short numeric code (4-10 digits) that must also appear inside `message`. When present and verified
+   * server-side (see message-exempt-limits.ts), the send is classified as transactional/OTP and does not count
+   * against the monthly quota. Not a trust-me flag: the code must genuinely be in the message, media is not
+   * allowed alongside it, and a per-recipient/tenant rate limit applies so the exemption itself cannot become
+   * unlimited free volume.
+   */
+  otp_code?: string | undefined;
 }
 
 export interface SendMessageResponse {
   success: true;
   message_id: string;
-  status: 'queued';
+  /** 'quota_hold' means the regular monthly quota is spent: the message is kept, not dropped, and is queued
+   * automatically once quota frees up (a new billing window, an upgrade, or another message finishing). */
+  status: 'queued' | 'quota_hold';
 }
 
 export interface CreateTenantRequest {

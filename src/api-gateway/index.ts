@@ -29,6 +29,7 @@ import deviceContentRoutes from './routes/device-content.routes';
 import billingRoutes from './routes/billing.routes';
 import publicRoutes from './routes/public.routes';
 import { sweepSubscriptions } from './services/billing.service';
+import { sweepQuotaHolds } from './services/message.service';
 import { auditTrail } from './middleware/audit';
 import { ServiceError } from './services/service-error';
 import { createOperatorRouter } from './operator/router';
@@ -124,6 +125,13 @@ const runSweep = (): void => {
     .catch((error: unknown) => logger.error('Subscription sweep failed', { error: error instanceof Error ? error.message : String(error) }));
 };
 const runPurge = (): void => { void purgeOldCommands().catch((error: unknown) => logger.error('Command purge failed', { error: error instanceof Error ? error.message : String(error) })); };
+// Messages held because the monthly quota was full: released, in order, as soon as any tenant has headroom again
+// (a new billing window, an upgrade, or another send finishing this period). Never dropped while held.
+const runQuotaRelease = (): void => {
+  sweepQuotaHolds()
+    .then((counts) => { if (counts.released > 0) logger.info('Held messages released', counts); })
+    .catch((error: unknown) => logger.error('Quota hold sweep failed', { error: error instanceof Error ? error.message : String(error) }));
+};
 // Expired operator sessions/challenges/throttle buckets and idempotency rows past retention. Never audit or business data.
 const runOperatorCleanup = (): void => {
   cleanupOperatorData(pool, operatorRetentionDays)
@@ -139,6 +147,8 @@ setTimeout(runPurge, 45_000).unref();
 setInterval(runPurge, 60 * 60_000).unref();
 setTimeout(runSweep, 30_000).unref();
 setInterval(runSweep, 60 * 60_000).unref();
+setTimeout(runQuotaRelease, 40_000).unref();
+setInterval(runQuotaRelease, 2 * 60_000).unref();
 
 function shutdown(): void {
   server.close(() => process.exit(0));

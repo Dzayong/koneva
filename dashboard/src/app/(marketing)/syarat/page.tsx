@@ -45,10 +45,13 @@ export default function TermsPage() {
           </ul>
           <p>Kami dapat membatasi atau menghentikan akun yang melanggar, dengan atau tanpa pemberitahuan lebih dulu bila diperlukan untuk melindungi layanan atau pihak lain.</p></section>
 
-        <section><h2>5. Paket, uji coba, dan pembayaran</h2>
+        <section><h2>5. Paket, kuota, uji coba, dan pembayaran</h2>
           <ul>
             <li>Akun baru mendapat uji coba gratis 14 hari dengan batas yang tertera di dashboard.</li>
-            <li>Paket berbayar tersedia bulanan atau tahunan. Harga tertera di halaman utama setelah ditetapkan.</li>
+            <li>Paket berbayar ditagih bulanan. Checkout tahunan sudah ditutup untuk pesanan baru; langganan tahunan yang sudah ada sebelumnya tetap berjalan sampai masanya habis.</li>
+            <li>Setiap paket punya batas pesan per bulan. Paket Bisnis CS menampilkan <strong>&ldquo;Unlimited pesan*&rdquo;</strong> dengan batas fair-use terlihat jelas <strong>20.000 pesan/bulan (±667/hari)</strong> — bukan catatan kaki kecil. Kode OTP dan pesan transaksional lain (diverifikasi otomatis oleh sistem, bukan pilihan bebas pengguna) tidak dihitung dalam kuota manapun.</li>
+            <li>Saat kuota bulanan habis, pesan berikutnya <strong>ditahan, tidak dibuang</strong>, dan otomatis terkirim begitu kuota tersedia lagi (naik paket, atau reset periode berikutnya); dashboard menawarkan naik paket saat itu terjadi.</li>
+            <li>Pelanggan Pelajar dengan harga langganan lama tetap pada harga tersebut selama langganannya aktif; harga baru hanya berlaku untuk pesanan baru.</li>
             <li>Pembayaran saat ini dikonfirmasi manual oleh penyedia layanan; paket aktif setelah pembayaran dikonfirmasi.</li>
             <li>Bila pembayaran terlambat, pengiriman tetap berjalan selama masa tenggang 7 hari, lalu dihentikan sementara. Data tetap dapat dilihat.</li>
             <li>Paket Pelajar memerlukan verifikasi.</li>

@@ -9,24 +9,55 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmailVerificationDialog } from "@/components/account/email-verification-dialog";
-import { CycleToggle, PlanCards, rupiah } from "@/components/billing/plan-cards";
+import { PlanCards, rupiah } from "@/components/billing/plan-cards";
 import { useBilling, useCreateOrder, useStudentRequest } from "@/hooks/use-billing";
 import { usePermissions } from "@/hooks/use-me";
 import { apiFailure } from "@/lib/errors";
-import type { BillingCycle, BillingState, Invoice, PublicPlan } from "@/lib/types";
+import type { BillingState, Invoice, PublicPlan } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
+
+// Annual checkout is closed for new orders (T1.1); only monthly is offered here. An existing yearly
+// subscription's own cycle still reads correctly from `sub.cycle` and its invoice history, unaffected by this.
+const MONTHLY_ONLY = "monthly" as const;
 
 const STATUS_LABEL: Record<string, string> = {
   trial: "Masa percobaan", active: "Aktif", past_due: "Terlambat bayar", suspended: "Dihentikan sementara", expired: "Berakhir", cancelled: "Dibatalkan",
 };
 const INVOICE_LABEL: Record<Invoice["status"], string> = { unpaid: "Belum dibayar", paid: "Lunas", void: "Dibatalkan" };
 
-function UsageRow({ label, used, limit }: { label: string; used: number; limit: number | null }) {
+function UsageRow({ label, used, limit, headline }: { label: string; used: number; limit: number | null; headline?: string | null }) {
   const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   return (
     <div className="space-y-1.5">
-      <div className="flex justify-between text-sm"><span>{label}</span><span className="text-muted-foreground">{used.toLocaleString("id-ID")}{limit ? ` / ${limit.toLocaleString("id-ID")}` : ""}</span></div>
+      <div className="flex justify-between text-sm">
+        <span>{label}</span>
+        <span className="text-muted-foreground">{headline ?? `${used.toLocaleString("id-ID")}${limit ? ` / ${limit.toLocaleString("id-ID")}` : ""}`}</span>
+      </div>
       {limit ? <Progress value={pct} /> : null}
+    </div>
+  );
+}
+
+/** T1.1 meter: usage, limit, reset time, and why OTP/transactional sends don't move the bar. Shows a clear
+ * upgrade path (not a silent drop) the moment anything is held for lack of quota. */
+function MessageMeter({ usage }: { usage: BillingState["usage"] }) {
+  return (
+    <div className="space-y-2">
+      <UsageRow label="Pesan bulan ini" used={usage.messages_used} limit={usage.messages_limit} headline={usage.quota_headline} />
+      {usage.quota_note && <p className="text-xs text-muted-foreground">{usage.quota_note}</p>}
+      <p className="text-xs text-muted-foreground">
+        {usage.resets_at && `Direset ${formatDate(usage.resets_at)}.`}{" "}
+        {usage.exempt_used > 0 && `${usage.exempt_used.toLocaleString("id-ID")} pesan OTP/transaksional bulan ini tidak dihitung dalam kuota.`}
+      </p>
+      {usage.messages_held > 0 && (
+        <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          <p className="font-medium">{usage.messages_held.toLocaleString("id-ID")} pesan tertahan menunggu kuota</p>
+          <p className="mt-1 text-muted-foreground">
+            Kuota bulan ini sudah habis. Pesan tetap tersimpan dan akan otomatis terkirim begitu kuota tersedia lagi (naik paket, atau reset periode berikutnya) — tidak ada yang dibuang.
+            {" "}Naik paket di bawah untuk mengirim segera.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -77,7 +108,6 @@ export default function BillingPage() {
   const { can, isLoading: permsLoading } = usePermissions();
   const { data, isLoading } = useBilling();
   const order = useCreateOrder();
-  const [cycle, setCycle] = useState<BillingCycle>("monthly");
   const [created, setCreated] = useState<{ invoice: Invoice; payment: BillingState["payment"] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [verifyOpen, setVerifyOpen] = useState(false);
@@ -91,7 +121,7 @@ export default function BillingPage() {
 
   const choose = (plan: PublicPlan) => {
     setError(null);
-    order.mutate({ plan: plan.id, cycle }, {
+    order.mutate({ plan: plan.id, cycle: MONTHLY_ONLY }, {
       onSuccess: setCreated,
       onError: (err) => {
         const f = apiFailure(err);
@@ -120,11 +150,10 @@ export default function BillingPage() {
             {sub.status === "past_due" ? `. Masa tenggang ${sub.grace_days} hari sejak jatuh tempo.` : ""}
           </p>
           <div className="grid gap-4 sm:grid-cols-3">
-            <UsageRow label="Pesan bulan ini" used={data.usage.messages_used} limit={data.usage.messages_limit} />
+            <MessageMeter usage={data.usage} />
             <UsageRow label="Nomor" used={data.usage.devices_used} limit={data.usage.devices_limit} />
             <UsageRow label="Anggota tim" used={data.usage.members_used} limit={data.usage.members_limit} />
           </div>
-          {data.usage.resets_at && <p className="text-xs text-muted-foreground">Kuota pesan direset {formatDate(data.usage.resets_at)}.</p>}
         </section>
       )}
 
@@ -133,10 +162,10 @@ export default function BillingPage() {
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Pilih atau ganti paket</h2>
-          <CycleToggle value={cycle} onChange={setCycle} />
         </div>
+        <p className="text-xs text-muted-foreground">Semua paket ditagih bulanan. Checkout tahunan sudah ditutup untuk pesanan baru.</p>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <PlanCards plans={data.plans} cycle={cycle} currentPlanId={sub?.plan_id} onChoose={choose} busyPlanId={order.isPending ? order.variables?.plan : null} />
+        <PlanCards plans={data.plans} cycle={MONTHLY_ONLY} currentPlanId={sub?.plan_id} onChoose={choose} busyPlanId={order.isPending ? order.variables?.plan : null} />
         {data.plans.some((p) => !p.price_is_final) && <p className="text-xs text-muted-foreground">Sebagian harga masih dalam penetapan dan belum bisa dipesan.</p>}
       </section>
 

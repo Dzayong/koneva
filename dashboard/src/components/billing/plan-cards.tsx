@@ -54,10 +54,16 @@ export function PlanCards({ plans, cycle, currentPlanId, onChoose, busyPlanId, c
             </div>
             <p className="mt-3 text-2xl font-semibold tracking-tight">{main}</p>
             {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+            {plan.quota_headline && (
+              <p className="mt-2 text-sm font-medium text-primary">
+                {plan.quota_headline}
+                {plan.quota_note && <span className="block text-xs font-normal text-muted-foreground">{plan.quota_note}</span>}
+              </p>
+            )}
             <ul className="mt-4 flex-1 space-y-2 text-sm">
               {(plan.features.length > 0 ? plan.features : [
                 `${num(plan.max_devices)} nomor WhatsApp`,
-                `${num(plan.monthly_messages)} pesan per bulan`,
+                plan.quota_headline ?? `${num(plan.monthly_messages)} pesan per bulan`,
                 `${num(plan.max_members)} anggota tim`,
                             ]).map((f) => (
                 <li key={f} className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />{f}</li>
