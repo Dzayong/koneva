@@ -1,6 +1,6 @@
 # HANDOFF: laporan kerja untuk agent berikutnya (Codex/Claude)
 
-> Update 2026-09-29 (Codex): owner menerima bukti T0.1; deploy key GitHub terdaftar; `develop` berada di `44010df`; CI hosted `operator-checks` run #5 lulus untuk backend dan dashboard. T0.4 dan Gerbang 0 selesai. Tidak ada deploy; lihat [STATUS_PROYEK.md](STATUS_PROYEK.md) untuk status terkini.
+> Update 2026-09-29 (Codex): owner melaporkan T1.1 selesai lokal pada `develop` commit `48e2323` dan sudah dipush; preview harga dikonfirmasi dan perbaikannya di-commit lokal sebagai `c839cdf`; belum push, `master` serta `:13000` tidak berubah. T1.2 draf lokal memakai keputusan owner untuk KONEVA/kontak Bandung, pembatalan/refund, retensi kategori, target respons 1/7 hari kerja, urgent hanya untuk pesan perlu layanan dengan suspend bila disalahgunakan, dan tanggal berlaku saat diterbitkan. Konfigurasi repo menunjukkan environment personal/dev berjalan lokal, tetapi tidak membuktikan vendor atau lokasi hosting produksi; naskah menyatakan belum ada vendor produksi dan diperbarui saat migrasi. Penghapusan retensi terjadwal belum lengkap (T1.5). Perlu isi batas tanggung jawab/penyelesaian sengketa dan telaah hukum sebelum publikasi. T1.2 serta draf legal belum di-commit/push. Lihat [STATUS_PROYEK.md](STATUS_PROYEK.md) untuk status terkini.
 
 > Update 2026-09-26 (Codex/Astra): backend Panel Operator now exists locally; see
 > [OPERATOR_PANEL.md](OPERATOR_PANEL.md) for the reviewed contract, configuration, migration 018, validation and limits.
