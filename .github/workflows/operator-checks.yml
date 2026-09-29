@@ -22,7 +22,7 @@ jobs:
         run: bash scripts/test-operator-local.sh --all
       - name: Real entrypoint, rate limits, startup failures (disposable PostgreSQL + Redis)
         run: bash scripts/test-operator-entry.sh
-      - name: Outbound controls: suspension, pause, last check, auto-reply, commands (disposable PostgreSQL + Redis, fake transport)
+      - name: 'Outbound controls: suspension, pause, last check, auto-reply, commands (disposable PostgreSQL + Redis, fake transport)'
         run: bash scripts/test-outbound-local.sh
   dashboard:
     runs-on: ubuntu-latest
