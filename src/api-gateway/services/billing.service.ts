@@ -179,7 +179,10 @@ export async function createOrder(tenantId: string, planId: string, cycle: Billi
   // reading as yearly (handled by getBillingState/invoices, never re-priced here). No yearly price is invented.
   if (cycle === 'yearly') throw new ServiceError(400, 'ANNUAL_CHECKOUT_CLOSED', 'Checkout tahunan sudah ditutup untuk pesanan baru. Pilih siklus bulanan.');
   return transaction(async (client) => {
-    await client.query('SELECT id FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
+    const tenant = (await client.query<{ name: string; email: string | null }>(
+      'SELECT name,email FROM tenants WHERE id = $1 FOR UPDATE', [tenantId],
+    )).rows[0];
+    if (!tenant) throw new ServiceError(404, 'TENANT_NOT_FOUND', 'Workspace not found');
     await expireStudentVerificationForTenant(client, tenantId);
     const plan = (await client.query<PlanRow>(`SELECT ${PLAN_COLUMNS} FROM plans WHERE id = $1 AND published = true`, [planId])).rows[0];
     if (!plan || plan.audience === 'trial' || plan.audience === 'internal') throw new ServiceError(400, 'INVALID_PLAN', 'Paket tidak tersedia.');
@@ -197,10 +200,10 @@ export async function createOrder(tenantId: string, planId: string, cycle: Billi
     // Only one open invoice at a time, so a customer is never unsure which one to pay.
     await client.query(`UPDATE invoices SET status = 'void' WHERE tenant_id = $1 AND status = 'unpaid'`, [tenantId]);
     return (await client.query<InvoiceRow>(
-      `INSERT INTO invoices (tenant_id, number, plan_id, cycle, amount_idr, due_at)
-       VALUES ($1, 'INV-' || to_char(now(), 'YYYYMM') || '-' || lpad(nextval('invoice_number_seq')::text, 4, '0'), $2, $3, $4, now() + interval '7 days')
+      `INSERT INTO invoices (tenant_id, number, plan_id, cycle, amount_idr, due_at, billing_name_snapshot, billing_email_snapshot)
+       VALUES ($1, 'INV-' || to_char(now(), 'YYYYMM') || '-' || lpad(nextval('invoice_number_seq')::text, 4, '0'), $2, $3, $4, now() + interval '7 days', $5, $6)
        RETURNING id, number, plan_id, cycle, amount_idr, status, due_at, paid_at, method, reference, created_at`,
-      [tenantId, plan.id, cycle, amount],
+      [tenantId, plan.id, cycle, amount, tenant.name, tenant.email],
     )).rows[0]!;
   });
 }
@@ -234,13 +237,15 @@ export async function grantPlan(tenantId: string, planId: string, cycle: Billing
   return transaction(async (client) => {
     const plan = (await client.query<PlanRow>(`SELECT ${PLAN_COLUMNS} FROM plans WHERE id = $1`, [planId])).rows[0];
     if (!plan) throw new ServiceError(404, 'PLAN_NOT_FOUND', 'Plan not found');
-    const tenant = await client.query('SELECT 1 FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
-    if (tenant.rows.length === 0) throw new ServiceError(404, 'TENANT_NOT_FOUND', 'Workspace not found');
+    const tenant = (await client.query<{ name: string; email: string | null }>(
+      'SELECT name,email FROM tenants WHERE id = $1 FOR UPDATE', [tenantId],
+    )).rows[0];
+    if (!tenant) throw new ServiceError(404, 'TENANT_NOT_FOUND', 'Workspace not found');
     const period = await activatePaid(client, tenantId, plan, cycle);
     await client.query(
-      `INSERT INTO invoices (tenant_id, number, plan_id, cycle, amount_idr, status, due_at, paid_at, method, note)
-       VALUES ($1, 'INV-' || to_char(now(), 'YYYYMM') || '-' || lpad(nextval('invoice_number_seq')::text, 4, '0'), $2, $3, 0, 'paid', now(), now(), 'grant', $4)`,
-      [tenantId, plan.id, cycle, note],
+      `INSERT INTO invoices (tenant_id, number, plan_id, cycle, amount_idr, status, due_at, paid_at, method, note, billing_name_snapshot, billing_email_snapshot)
+       VALUES ($1, 'INV-' || to_char(now(), 'YYYYMM') || '-' || lpad(nextval('invoice_number_seq')::text, 4, '0'), $2, $3, 0, 'paid', now(), now(), 'grant', $4, $5, $6)`,
+      [tenantId, plan.id, cycle, note, tenant.name, tenant.email],
     );
     return period;
   });
@@ -342,7 +347,8 @@ export async function listSubscriptions(filter: { status?: string | undefined; q
 
 export async function listAllInvoices(status: string | undefined) {
   return (await pool.query(
-    `SELECT i.id, i.number, t.name AS workspace, t.email, i.plan_id, i.cycle, i.amount_idr, i.status, i.due_at, i.paid_at, i.method, i.reference
+    `SELECT i.id, i.number, COALESCE(i.billing_name_snapshot,t.name) AS workspace,
+            COALESCE(i.billing_email_snapshot,t.email) AS email, i.plan_id, i.cycle, i.amount_idr, i.status, i.due_at, i.paid_at, i.method, i.reference
      FROM invoices i JOIN tenants t ON t.id = i.tenant_id WHERE ($1::text IS NULL OR i.status = $1)
      ORDER BY i.created_at DESC LIMIT 200`, [status ?? null],
   )).rows;

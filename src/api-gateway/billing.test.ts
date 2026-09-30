@@ -86,7 +86,11 @@ test('visitors never see a price the operator has not made final', async () => {
 
 // Runs createOrder against a transaction whose statements are answered by `handler`.
 function withTransaction(handler: (text: string, values?: unknown[]) => { rows: unknown[] }) {
-  const client = { query: async (text: string, values?: unknown[]) => (/^(BEGIN|COMMIT|ROLLBACK)/.test(text) ? { rows: [] } : handler(text, values)), release() {} };
+  const client = { query: async (text: string, values?: unknown[]) => (/^(BEGIN|COMMIT|ROLLBACK)/.test(text)
+    ? { rows: [] }
+    : text.startsWith('SELECT name,email FROM tenants')
+      ? { rows: [{ name: 'Synthetic Workspace', email: 'synthetic@example.test' }] }
+      : handler(text, values)), release() {} };
   database.connect = async () => client;
 }
 
@@ -109,13 +113,15 @@ test('an order needs a real plan and a final price', async () => {
 
 test('the paid Pelajar order can be created before evidence verification', async () => {
   let inserted = false;
-  withTransaction((text) => {
+  let invoiceValues: unknown[] | undefined;
+  withTransaction((text, values) => {
     if (text.includes('FROM plans')) return { rows: [plan({ id: 'pelajar', requires_student_verification: true, price_month_idr: 29000 })] };
-    if (text.startsWith('INSERT INTO invoices')) { inserted = true; return { rows: [{ id: 'i1', number: 'INV-1' }] }; }
+    if (text.startsWith('INSERT INTO invoices')) { inserted = true; invoiceValues = values; return { rows: [{ id: 'i1', number: 'INV-1' }] }; }
     return { rows: [] };
   });
   await createOrder('t1', 'pelajar', 'monthly');
   assert.equal(inserted, true);
+  assert.deepEqual(invoiceValues?.slice(4), ['Synthetic Workspace', 'synthetic@example.test'], 'invoice captures its billing identity before a later account purge');
 });
 
 test('annual checkout is closed for new orders (T1.1): yearly is refused before any query runs', async () => {

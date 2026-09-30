@@ -71,8 +71,11 @@ test.describe("T1.1 plans, quota and grandfather (STACK-local)", () => {
     // specific amount paragraph the Payment panel renders right after "Tagihan INV-...", not just any match.
     const amountLine = page.getByText("Tagihan INV-").locator("xpath=following-sibling::p[1]");
     await expect(amountLine).toHaveText("Rp 19.000");
-    const invoice = (await db.query("SELECT amount_idr FROM invoices WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 1", [owner.tenant])).rows[0];
+    const invoice = (await db.query(`SELECT i.amount_idr,i.billing_name_snapshot,i.billing_email_snapshot,t.name,t.email
+      FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE i.tenant_id=$1 ORDER BY i.created_at DESC LIMIT 1`, [owner.tenant])).rows[0];
     expect(invoice.amount_idr).toBe(19000); // the grandfathered 19.000, never the new 29.000 catalog price
+    expect(invoice.billing_name_snapshot).toBe(invoice.name);
+    expect(invoice.billing_email_snapshot).toBe(invoice.email); // invoice identity remains readable after account data is scrubbed
 
     // ---- quota hold: the meter shows a held message with a clear upgrade path, not a silent failure ----
     // The send pipeline itself (queueMessage -> quota_hold, never dropped) is already proven end-to-end with a

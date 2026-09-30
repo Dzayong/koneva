@@ -12,7 +12,8 @@ const SUB = `CASE WHEN s.tenant_id IS NULL THEN NULL ELSE json_build_object('pla
 const STUDENT = `CASE WHEN t.student_verified_at IS NOT NULL THEN json_build_object('status','approved')
   ELSE (SELECT json_build_object('status',sr.status) FROM student_requests sr WHERE sr.tenant_id=t.id ORDER BY sr.requested_at DESC,sr.id DESC LIMIT 1) END`;
 const INVOICE_COLUMNS = `i.id,i.number,i.cycle,i.amount_idr,i.status,i.created_at,i.due_at,i.version,
-  json_build_object('id',t.id,'name',t.name) AS workspace, json_build_object('id',p.id,'name',p.name) AS plan`;
+  json_build_object('id',t.id,'name',COALESCE(i.billing_name_snapshot,t.name)) AS workspace,
+  json_build_object('id',p.id,'name',p.name) AS plan`;
 
 // Legacy billing columns are UTC timestamp-without-time-zone. JSON SQL construction loses pg's Date parser.
 function utcIso(value: string | Date | null): string | null {
@@ -33,13 +34,13 @@ async function page(db: Pool, select: string, from: string, where: string, order
 
 export async function listInvoices(db: Pool, filter: PageFilter) {
   return page(db, INVOICE_COLUMNS, 'FROM invoices i JOIN tenants t ON t.id=i.tenant_id JOIN plans p ON p.id=i.plan_id',
-    "($1::text IS NULL OR i.status=$1) AND ($2::text IS NULL OR i.number ILIKE '%' || $2 || '%' OR t.name ILIKE '%' || $2 || '%')",
+    "($1::text IS NULL OR i.status=$1) AND ($2::text IS NULL OR i.number ILIKE '%' || $2 || '%' OR COALESCE(i.billing_name_snapshot,t.name) ILIKE '%' || $2 || '%')",
     'i.created_at DESC,i.id DESC', [filter.status ?? null, filter.q ?? null], filter);
 }
 export async function invoiceDetail(db: Pool | PoolClient, id: string) {
   const row = (await db.query(`SELECT ${INVOICE_COLUMNS}, i.paid_at,i.method,i.reference,i.note,
     CASE WHEN o.id IS NULL THEN NULL ELSE json_build_object('id',o.id,'name',o.name) END AS confirmed_by,
-    json_build_object('id',t.id,'name',t.name,'owner',${OWNER}) AS workspace,
+    json_build_object('id',t.id,'name',COALESCE(i.billing_name_snapshot,t.name),'owner',${OWNER}) AS workspace,
     ${SUB} AS subscription, ${STUDENT} AS student
     FROM invoices i JOIN tenants t ON t.id=i.tenant_id JOIN plans p ON p.id=i.plan_id
     LEFT JOIN operators o ON o.id=i.confirmed_by LEFT JOIN subscriptions s ON s.tenant_id=t.id ${OWNER_JOIN} WHERE i.id=$1`, [id])).rows[0];

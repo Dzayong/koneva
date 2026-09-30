@@ -167,8 +167,26 @@ sending them externally.
 ```
 
 The script archives PostgreSQL, Redis, and WhatsApp sessions, writes a SHA-256
-checksum, removes local backups older than `BACKUP_RETENTION_DAYS` (default 7),
-and uploads to S3 when `S3_BUCKET` is set. Example server cron:
+checksum, and prints a timestamped 30-day rotation dry-run. It does not remove
+anything by default. Review the report before enabling deletion. S3/GCS upload
+is refused until version, replica, soft-delete, and retention-hold purging can
+be verified end to end; deleting a current object alone is not enough.
+
+Local deletion requires both an explicit command and two operator gates, after
+the storage volume's snapshots/replicas have been verified to expire within the
+same 30-day limit:
+
+```bash
+BACKUP_RETENTION_EXECUTE_ENABLED=true BACKUP_LOCAL_PURGE_VERIFIED=true \
+  ./scripts/backup.sh --execute
+```
+
+The personal-stack backup follows the same interface. Its report fails closed
+when an expired partial snapshot is found, so it cannot report successful
+rotation while an old incomplete archive remains. `--execute` deletes only
+completed snapshots with the script's exact name/checksum format. Cron runs
+without `--execute` and therefore reports candidates without deleting them.
+Example server cron:
 
 ```cron
 15 2 * * * cd /opt/wa-gateway && ./scripts/backup.sh >> /var/log/wa-gateway-backup.log 2>&1
@@ -176,7 +194,26 @@ and uploads to S3 when `S3_BUCKET` is set. Example server cron:
 
 Test restoration quarterly. A backup that has never been restored is unverified.
 
-## 6. Rollback
+## 6. Database retention (not activated)
+
+Migration `026_data_retention.sql` and `scripts/data-retention.ts` define five
+database report categories and four constrained delete routines. The ten-year
+invoice category is report-only; the database trigger rejects invoice deletes.
+The runner requires a dedicated non-superuser login explicitly made a member
+of `koneva_retention_executor` and an explicit `RETENTION_DATABASE_URL`; it
+never falls back to the application's `DATABASE_URL`. One-shot runs default to
+aggregate-only dry-run. `--schedule` runs the same dry-runs daily at 03:00 UTC
+and has no delete path.
+
+T1.5 does not install a live scheduler or enable deletion. Wait for owner review
+of its disposable test evidence and explicit approval before doing the separate
+multi-day synthetic exercise against the sandbox at `:13200`. Keep that sandbox
+on its disposable database. Do not point this runner at production or `:13000`
+for the T1.5 verification. That later test and any production deployment are
+separate gates; completion of this code task is not authorization to activate
+retention deletion.
+
+## 7. Rollback
 
 ```bash
 ./scripts/deploy.sh rollback

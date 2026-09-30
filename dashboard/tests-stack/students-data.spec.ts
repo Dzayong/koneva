@@ -29,7 +29,7 @@ test.describe("student verification (STACK-local)", () => {
     expect(audit).not.toContain("998877");
   });
 
-  test("reject needs a reason (server enforces it too) and leaves the workspace unverified", async ({ page }) => {
+  test("an invalid decision needs a reason (server enforces it too) and opens the seven-day correction window", async ({ page }) => {
     const s = await studentRequest();
     const api = await apiSignIn(op);
     const noReason = await call(`/student-requests/${s.id}/decision`, { base: PROXY, session: api, method: "POST", key: randomUUID(), body: { decision: "reject", expected: { request_id: s.id, version: 1 } } });
@@ -40,8 +40,11 @@ test.describe("student verification (STACK-local)", () => {
     await dialog.getByLabel("Tolak").check();
     await dialog.getByLabel(/Alasan/).fill("Email bukan email kampus");
     await dialog.getByRole("button", { name: "Tolak" }).last().click();
-    await expect(dialog.getByText(/Keputusan tercatat: Ditolak/)).toBeVisible();
-    expect((await db.query("SELECT student_verified_at FROM tenants WHERE id=$1", [s.tenant])).rows[0].student_verified_at).toBeNull();
+    await expect(dialog.getByText(/Keputusan tercatat: Perlu perbaikan/)).toBeVisible();
+    const decision = (await db.query("SELECT status,correction_due_at FROM student_requests WHERE id=$1", [s.id])).rows[0];
+    expect(decision.status).toBe("correction_required");
+    expect(new Date(decision.correction_due_at).getTime()).toBeGreaterThan(Date.now() + 6 * 86_400_000);
+    expect((await db.query("SELECT student_verified_at,student_invalid_decisions FROM tenants WHERE id=$1", [s.tenant])).rows[0]).toMatchObject({ student_verified_at: null, student_invalid_decisions: 1 });
   });
 
   test("resubmission supersedes the old request, history is kept, and the old request can no longer be decided", async ({ page }) => {

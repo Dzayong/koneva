@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/personal-common.sh"
+source "$(dirname -- "${BASH_SOURCE[0]}")/backup-retention.sh"
+backup_retention_mode "$@"
 personal_load
 personal_lock
 umask 077
-[[ ${RETENTION_DAYS:-7} =~ ^[1-9][0-9]*$ ]] || die 'RETENTION_DAYS must be positive.'
+RETENTION_DAYS=${RETENTION_DAYS:-30}
+backup_retention_validate "$BACKUP_DIR" "$RETENTION_DAYS" personal
 mkdir -p "$BACKUP_DIR"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup="$(mktemp -d "$BACKUP_DIR/.incomplete-$stamp-XXXXXX")"
@@ -35,10 +38,4 @@ final="$BACKUP_DIR/backup-$stamp"
 [[ ! -e $final ]] || die 'Backup timestamp collision'
 mv "$backup" "$final"
 echo "Backup complete: $final (includes secrets; keep private)."
-# Delete only our validated complete backup directories below this exact root.
-while IFS= read -r -d '' expired; do
-  [[ $(basename "$expired") =~ ^backup-[0-9]{8}T[0-9]{6}Z$ ]] || continue
-  [[ -f $expired/SHA256SUMS ]] || continue
-  rm -r -- "$expired"
-  echo "Expired backup removed: $expired (retention ${RETENTION_DAYS:-7} days)"
-done < <(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -name 'backup-*' -mtime "+${RETENTION_DAYS:-7}" -print0)
+backup_retention_report personal "$BACKUP_DIR"
