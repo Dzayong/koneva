@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import pool, { transaction } from '../../shared/database/connection';
+import logger from '../../shared/utils/logger';
 import { ServiceError } from './service-error';
 
 export type RecipientConsentStatus = 'opted_in' | 'opted_out';
@@ -27,9 +28,19 @@ export async function assertRecipientConsent(
   );
   const status = result.rows[0]?.status as RecipientConsentStatus | undefined;
   if (status === 'opted_out') {
+    logger.warn('Promotional send denied by recipient consent', {
+      tenant_id: tenantId,
+      recipient_last4: phoneNumber.slice(-4),
+      error_code: 'RECIPIENT_OPTED_OUT',
+    });
     throw new ServiceError(409, 'RECIPIENT_OPTED_OUT', 'Recipient has opted out of promotional messages');
   }
   if (status !== 'opted_in') {
+    logger.warn('Promotional send denied by recipient consent', {
+      tenant_id: tenantId,
+      recipient_last4: phoneNumber.slice(-4),
+      error_code: 'RECIPIENT_CONSENT_REQUIRED',
+    });
     throw new ServiceError(409, 'RECIPIENT_CONSENT_REQUIRED', 'Record recipient consent before sending promotional messages');
   }
 }
