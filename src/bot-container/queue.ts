@@ -23,6 +23,8 @@ import {
 } from './metrics';
 import { withSpan } from './tracing';
 import type { EnqueueMessageInput, QueueJobData, MessageRecord, MessageStatus } from './types';
+import { getStoredRecipientConsent, withRecipientConsentLock } from '../shared/recipient-consent';
+import { ApiError } from './errors';
 
 const defaultQueryFn: QueryFn = (text, params) => query(text, params);
 
@@ -30,6 +32,10 @@ const JOB_NAME = 'send';
 const MAX_ATTEMPTS = 3;
 const BACKOFF_BASE_MS = 5_000;
 const RETRY_LATER_DELAY_MS = 5 * 60_000;
+
+class RecipientConsentDenied extends Error {
+  constructor(readonly code: 'RECIPIENT_CONSENT_REQUIRED' | 'RECIPIENT_OPTED_OUT') { super(code); }
+}
 
 const TRANSIENT_DENIAL_REASONS = new Set<AntiBanDenialReason>([
   'device_paused',
@@ -116,6 +122,7 @@ interface MessageRow {
   whatsapp_message_id: string | null;
   error_message: string | null;
   priority: MessageRecord['priority'];
+  quota_exempt: boolean;
   created_at: Date;
 }
 
@@ -132,7 +139,8 @@ function mapMessageRow(row: MessageRow): MessageRecord {
     status: row.status,
     whatsappMessageId: row.whatsapp_message_id,
     errorMessage: row.error_message,
-    priority: row.priority,
+    priority: row.quota_exempt ? 'urgent' : 'normal',
+    quotaExempt: row.quota_exempt,
     createdAt: row.created_at,
   };
 }
@@ -140,7 +148,7 @@ function mapMessageRow(row: MessageRow): MessageRecord {
 async function getMessageById(id: string, queryFn: QueryFn): Promise<MessageRecord | undefined> {
   const { rows } = await queryFn(
     `SELECT id, tenant_id, device_id, device_key, to_number, content, media_url, type, status,
-            whatsapp_message_id, error_message, priority, created_at
+            whatsapp_message_id, error_message, priority, COALESCE(quota_exempt, false) AS quota_exempt, created_at
      FROM messages WHERE id = $1`,
     [id],
   );
@@ -191,12 +199,19 @@ export async function enqueueMessage(
   if (!device) {
     throw new Error(`Device not found: ${deviceKey}`);
   }
+  return withRecipientConsentLock(device.tenantId, input.to, async () => {
+  const consent = await getStoredRecipientConsent(queryFn, device.tenantId, input.to);
+  if (consent !== 'opted_in') {
+    const code = consent === 'opted_out' ? 'RECIPIENT_OPTED_OUT' : 'RECIPIENT_CONSENT_REQUIRED';
+    throw new ApiError(409, code.toLocaleLowerCase(),
+      consent === 'opted_out' ? 'Recipient has opted out of promotional messages' : 'Record recipient consent before sending promotional messages');
+  }
 
   const { rows } = await queryFn(
     `INSERT INTO messages (tenant_id, device_id, device_key, to_number, content, type, status, priority)
      VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7)
      RETURNING id`,
-    [device.tenantId, device.id, device.deviceKey, input.to, input.content, input.type, input.priority ?? 'normal'],
+    [device.tenantId, device.id, device.deviceKey, input.to, input.content, input.type, 'normal'],
   );
   const row = rows[0] as { id: string } | undefined;
   if (!row) {
@@ -204,7 +219,8 @@ export async function enqueueMessage(
   }
 
   const jobData: QueueJobData = { messageId: row.id };
-  const urgent = input.priority === 'urgent';
+  // This internal endpoint has no server-verified transactional classifier. A caller's `priority` is never authority.
+  const urgent = false;
   await getQueueByName(urgent ? urgentQueueName(deviceKey) : queueName(deviceKey), connection).add(JOB_NAME, jobData, {
     // An OTP that arrives late is useless, so urgent jobs get one quick retry only.
     attempts: urgent ? 2 : MAX_ATTEMPTS,
@@ -213,7 +229,8 @@ export async function enqueueMessage(
     removeOnFail: false,
   });
 
-  return row.id;
+    return row.id;
+  });
 }
 
 /**
@@ -369,9 +386,25 @@ async function processJobBody(
     throw new UnrecoverableError(`Message not found: ${job.data.messageId}`);
   }
 
-  if (message.status === 'sent' || message.status === 'delivered' || message.status === 'read') {
+  if (message.status !== 'queued') {
     log.info('Message already handled, skipping', { messageId: message.id, status: message.status });
     return;
+  }
+
+  const initialConsent = await getStoredRecipientConsent(queryFn, message.tenantId, message.to);
+  if (!message.quotaExempt && initialConsent !== 'opted_in') {
+    const code = initialConsent === 'opted_out' ? 'RECIPIENT_OPTED_OUT' : 'RECIPIENT_CONSENT_REQUIRED';
+    await updateMessageStatus(message.id, { status: 'blocked', errorMessage: code.toLocaleLowerCase() }, queryFn);
+    log.warn('Queued message blocked by recipient consent', {
+      tenantId: message.tenantId, recipientLast4: message.to.replace(/\D/g, '').slice(-4),
+      messageId: message.id, errorCode: code,
+    });
+    messagesFailedTotal.inc({ device_key: deviceKey, reason: code.toLocaleLowerCase() });
+    await dispatchWebhook(message.tenantId, {
+      event: 'message.failed', device_key: message.deviceKey, message_id: message.id,
+      to: message.to, status: 'failed', reason: code, timestamp: nowIso(),
+    }, { queryFn });
+    throw new UnrecoverableError(code);
   }
 
   // First administrative check: a message whose workspace was suspended (or number banned/paused) after it was queued stops here,
@@ -492,12 +525,32 @@ async function processJobBody(
 
   let sendResult;
   try {
-    sendResult = await withSpan(
-      'message.send',
-      { device_key: deviceKey, message_id: message.id, 'message.type': message.type },
-      () => sock.sendMessage(jid, toMessageContent(message)),
-    );
+    sendResult = await withRecipientConsentLock(message.tenantId, message.to, async () => {
+      const currentConsent = await getStoredRecipientConsent(queryFn, message.tenantId, message.to);
+      if (!message.quotaExempt && currentConsent !== 'opted_in') {
+        throw new RecipientConsentDenied(currentConsent === 'opted_out' ? 'RECIPIENT_OPTED_OUT' : 'RECIPIENT_CONSENT_REQUIRED');
+      }
+      const last = await checkTransmission(message.deviceKey, queryFn, deps.now?.());
+      if (!last.allowed) await applyTransmitBlock(last, job, message, deviceKey, connection, queryFn, log);
+      return withSpan(
+        'message.send',
+        { device_key: deviceKey, message_id: message.id, 'message.type': message.type },
+        () => sock.sendMessage(jid, toMessageContent(message)),
+      );
+    });
   } catch (err) {
+    if (err instanceof RecipientConsentDenied) {
+      await updateMessageStatus(message.id, { status: 'blocked', errorMessage: err.code.toLocaleLowerCase() }, queryFn);
+      log.warn('Message stopped before transport by recipient consent', {
+        tenantId: message.tenantId, recipientLast4: message.to.replace(/\D/g, '').slice(-4),
+        messageId: message.id, errorCode: err.code,
+      });
+      await dispatchWebhook(message.tenantId, {
+        event: 'message.failed', device_key: message.deviceKey, message_id: message.id,
+        to: message.to, status: 'failed', reason: err.code, timestamp: nowIso(),
+      }, { queryFn });
+      throw new UnrecoverableError(err.code);
+    }
     const errorMessage = err instanceof Error ? err.message : String(err);
     if (isDefinitelyNotSent(err)) {
       // Nothing left the socket: a retry cannot duplicate the message.

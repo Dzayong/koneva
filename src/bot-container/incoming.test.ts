@@ -4,6 +4,7 @@ import type { WAMessage } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import { handleIncomingMessage, isIgnoredChat, resolveSenderNumber } from './incoming';
 import type { QueryFn } from './health-score';
+import { parseConsentKeyword } from '../shared/recipient-consent';
 
 const silent = { info() {}, warn() {}, error() {}, debug() {} } as unknown as Logger;
 
@@ -45,6 +46,16 @@ test('status broadcasts and newsletters are ignored chats', () => {
   assert.equal(isIgnoredChat('status@broadcast'), true);
   assert.equal(isIgnoredChat('1203@newsletter'), true);
   assert.equal(isIgnoredChat('6281@s.whatsapp.net'), false);
+});
+
+test('consent commands ignore punctuation/case but must be standalone', () => {
+  assert.equal(parseConsentKeyword('  STOP!!! '), 'stop');
+  assert.equal(parseConsentKeyword('Berhenti...'), 'stop');
+  assert.equal(parseConsentKeyword('(MULAI)'), 'start');
+  assert.equal(parseConsentKeyword('Start!'), 'start');
+  assert.equal(parseConsentKeyword('Please STOP'), undefined);
+  assert.equal(parseConsentKeyword('STOP diskon'), undefined);
+  assert.equal(parseConsentKeyword('S T O P'), undefined);
 });
 
 test('a direct message with participant "" is saved and returns a reply JID', async () => {

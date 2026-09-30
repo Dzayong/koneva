@@ -72,5 +72,7 @@ export interface MessageRecord {
   whatsappMessageId: string | null;
   errorMessage: string | null;
   priority: 'normal' | 'urgent';
+  /** Set only by the API gateway's server-verified transactional exemption. */
+  quotaExempt?: boolean;
   createdAt: Date;
 }

@@ -54,15 +54,15 @@ paths:
     get: { summary: Message detail and status history, responses: { "200": { $ref: '#/components/responses/Success' } } }
   /api/v1/messages/{id}/retry:
     parameters: [ { $ref: '#/components/parameters/Id' } ]
-    post: { summary: Retry failed or blocked message, responses: { "202": { $ref: '#/components/responses/Success' }, "409": { $ref: '#/components/responses/Error' } } }
+    post: { summary: Retry failed or blocked message (recipient consent is checked again), responses: { "202": { $ref: '#/components/responses/Success' }, "409": { $ref: '#/components/responses/Error' } } }
   /api/v1/message/send:
     post:
-      summary: Queue one message
+      summary: Queue one message; promotional sends require opt-in (409 if missing or opted out)
       requestBody: { $ref: '#/components/requestBodies/SendMessage' }
       responses: { "202": { $ref: '#/components/responses/Success' } }
   /api/v1/broadcast:
     post:
-      summary: Queue a message for up to 500 recipients
+      summary: Queue for up to 500 recipients; consent refusals are returned per recipient
       requestBody: { $ref: '#/components/requestBodies/Broadcast' }
       responses: { "202": { $ref: '#/components/responses/Success' } }
   /api/v1/contacts:
@@ -81,6 +81,22 @@ paths:
     get: { summary: Get contact, responses: { "200": { $ref: '#/components/responses/Success' } } }
     patch: { summary: Update contact, requestBody: { $ref: '#/components/requestBodies/Contact' }, responses: { "200": { $ref: '#/components/responses/Success' } } }
     delete: { summary: Delete contact, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/contacts/{id}/consent:
+    parameters: [ { $ref: '#/components/parameters/Id' } ]
+    get: { summary: Read current recipient consent and audit history, responses: { "200": { $ref: '#/components/responses/Success' }, "404": { $ref: '#/components/responses/Error' } } }
+    put:
+      summary: Record manual consent; requires a signed-in workspace user and source note (API keys are refused)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, source_note]
+              properties:
+                status: { type: string, enum: [opted_in, opted_out] }
+                source_note: { type: string, minLength: 1, maxLength: 500 }
+      responses: { "200": { $ref: '#/components/responses/Success' }, "400": { $ref: '#/components/responses/Error' }, "403": { $ref: '#/components/responses/Error' }, "404": { $ref: '#/components/responses/Error' } }
   /api/v1/auto-reply-rules:
     get:
       summary: List auto-reply rules

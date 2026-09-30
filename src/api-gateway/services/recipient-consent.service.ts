@@ -1,13 +1,12 @@
 import type { PoolClient } from 'pg';
 import pool, { transaction } from '../../shared/database/connection';
 import logger from '../../shared/utils/logger';
+import { normalizeRecipientNumber, withRecipientConsentLock } from '../../shared/recipient-consent';
 import { ServiceError } from './service-error';
 
-export type RecipientConsentStatus = 'opted_in' | 'opted_out';
+export { normalizeRecipientNumber } from '../../shared/recipient-consent';
 
-export function normalizeRecipientNumber(value: string): string {
-  return value.replace(/\D/g, '');
-}
+export type RecipientConsentStatus = 'opted_in' | 'opted_out';
 
 interface ConsentQuery {
   query(text: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
@@ -82,7 +81,12 @@ export async function recordManualContactConsent(
 ): Promise<Record<string, unknown>> {
   const trimmedNote = sourceNote.trim();
   if (!trimmedNote) throw new ServiceError(400, 'CONSENT_SOURCE_REQUIRED', 'A source note is required to record manual consent');
-  return transaction(async (client: PoolClient) => {
+  const lookup = await pool.query<{ phone_number: string }>(
+    `SELECT regexp_replace(phone_number, '[^0-9]', '', 'g') AS phone_number
+     FROM contacts WHERE id = $1 AND tenant_id = $2`, [contactId, tenantId]);
+  const lockedPhone = lookup.rows[0]?.phone_number;
+  if (!lockedPhone) throw new ServiceError(404, 'CONTACT_NOT_FOUND', 'Contact not found');
+  return withRecipientConsentLock(tenantId, lockedPhone, () => transaction(async (client: PoolClient) => {
     const contact = await client.query<{ phone_number: string }>(
       `SELECT regexp_replace(phone_number, '[^0-9]', '', 'g') AS phone_number
        FROM contacts WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
@@ -106,6 +110,15 @@ export async function recordManualContactConsent(
        VALUES ($1, $2, $3, 'manual', $4, 'user', $5)`,
       [tenantId, phoneNumber, status, trimmedNote, actorId],
     );
+    if (status === 'opted_out') {
+      await client.query(
+        `UPDATE messages SET status = 'blocked', error_message = 'recipient_opted_out'
+         WHERE tenant_id = $1 AND regexp_replace(to_number, '[^0-9]', '', 'g') = $2
+           AND direction = 'outbound' AND status IN ('queued', 'quota_hold')
+           AND COALESCE(quota_exempt, false) = false`,
+        [tenantId, phoneNumber],
+      );
+    }
     return preference.rows[0] ?? {};
-  });
+  }));
 }

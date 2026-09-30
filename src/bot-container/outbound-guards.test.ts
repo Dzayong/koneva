@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { UnrecoverableError, type Job } from 'bullmq';
 import Redis from 'ioredis';
-import type { WASocket } from '@whiskeysockets/baileys';
+import type { WASocket, WAMessage } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import pool from '../shared/database/connection';
 import { getOrCreatePersona } from '../shared/persona';
@@ -14,6 +14,7 @@ import { enqueueCommand } from '../api-gateway/services/command.service';
 import { queueMessage, releaseHeldMessages, retryMessage, sweepQuotaHolds } from '../api-gateway/services/message.service';
 import { ServiceError } from '../api-gateway/services/service-error';
 import { processAutoReply, type AutoReplyRule } from './auto-reply';
+import { handleIncomingMessage, sendStopConfirmation } from './incoming';
 import { CommandRunner } from './command-runner';
 import { closeQueueResources, deadLetterQueueName, enqueueMessage, processJob, queueName, urgentQueueName, type QueueProcessorDeps } from './queue';
 import { checkTransmission, isDefinitelyNotSent } from './send-guard';
@@ -50,6 +51,8 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
     await pool.query("INSERT INTO tenants(id,name,email,api_key,webhook_secret,status) VALUES ($1,'Uji',$2,$3,$4,$5)", [id, `${id}@example.test`, `k-${id}`, `w-${id}`, tenantStatus]);
     await pool.query(`INSERT INTO subscriptions(tenant_id,plan_id,status,cycle,period_start,period_end) VALUES ($1,'umkm',$2,'monthly',now()-interval '10 days', now() + $3::interval)
       ON CONFLICT (tenant_id) DO UPDATE SET status=$2, period_end=now()+$3::interval`, [id, plan.status ?? 'active', plan.end ?? '20 days']);
+    await pool.query(`INSERT INTO recipient_preferences(tenant_id,phone_number,status,source,evidence_ref)
+      VALUES ($1,'6281234567890','opted_in','inbound_keyword',$2)`, [id, `fixture:${id}`]);
     return id;
   }
   async function device(tenantId: string, status = 'online') {
@@ -121,15 +124,15 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
     assert.deepEqual(await checkTransmission('NO-SUCH-DEVICE', query), { allowed: false, reason: 'device_not_found' });
   });
 
-  await t.test('device paused before execution: normal is DEFERRED (one delayed job), urgent is CANCELLED; after resume it goes out exactly once', async () => {
+  await t.test('device paused before execution: caller urgent is not trusted, so both messages defer and send once after resume', async () => {
     const ws = await workspace(); const d = await device(ws, 'paused'); const tr = transport();
     const normal = await message(d), urgent = await message(d, 'urgent');
     await run(job(normal), d, tr); // the current job ends normally
     assert.equal(tr.calls.length, 0);
     assert.deepEqual(await row(normal), { status: 'queued', error_message: 'device_paused' });
     assert.deepEqual(await delayedFor(d.deviceKey), [normal], 'exactly one live delayed job carries it');
-    await rejectsUnrecoverable(run(job(urgent), d, tr));
-    assert.deepEqual(await row(urgent), { status: 'failed', error_message: 'device_paused' });
+    await run(job(urgent), d, tr);
+    assert.deepEqual(await row(urgent), { status: 'queued', error_message: 'device_paused' });
     // Auto-pause (paused_until) behaves the same as an administrative pause.
     await pool.query("UPDATE devices SET status='online', paused_until = now() + interval '1 hour' WHERE id=$1", [d.id]);
     assert.equal((await checkTransmission(d.deviceKey, query)).reason, 'device_paused');
@@ -137,10 +140,11 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
     await pool.query("UPDATE devices SET status='online', paused_until = NULL WHERE id=$1", [d.id]);
     await run(job(normal), d, tr);
     assert.equal(tr.calls.length, 1); assert.equal((await row(normal)).status, 'sent');
+    await run(job(urgent), d, tr);
+    assert.equal(tr.calls.length, 2); assert.equal((await row(urgent)).status, 'sent');
     await run(job(normal), d, tr);
-    assert.equal(tr.calls.length, 1, 'no duplicate: an already-sent message is skipped');
-    assert.equal((await row(urgent)).status, 'failed', 'the cancelled urgent message is not revived by the resume');
-    assert.equal(tr.calls.filter((c) => JSON.stringify(c.content).includes('halo uji')).length, 1);
+    assert.equal(tr.calls.length, 2, 'no duplicate: an already-sent message is skipped');
+    assert.equal(tr.calls.filter((c) => JSON.stringify(c.content).includes('halo uji')).length, 2);
   });
 
   await t.test('LAST CHECK: suspension or pause that lands during the pacing delay still stops the send', async () => {
@@ -225,6 +229,9 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
     await assert.rejects(call(ws, body), (e) => e instanceof ServiceError && e.code === 'PLAN_INACTIVE');
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM messages WHERE device_key=$1', [d.deviceKey])).rows[0].n, 0);
     await setPlan(ws, 'active');
+    await pool.query(`INSERT INTO recipient_preferences(tenant_id,phone_number,status,source,evidence_ref)
+      VALUES ($1,'6281111111111','opted_in','inbound_keyword','broadcast-fixture-1'),
+             ($1,'6281111111112','opted_in','inbound_keyword','broadcast-fixture-2')`, [ws]);
     const ok = await call(ws, body) as { status: number; body: { data: { queued: number } } };
     assert.equal(ok.status, 202); assert.equal(ok.body.data.queued, 2);
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM messages WHERE device_key=$1', [d.deviceKey])).rows[0].n, 2);
@@ -281,6 +288,8 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
       return { id, tenant_id: tenantId, device_key: deviceKey, trigger: { type: 'all', pattern: '' }, response: { type: 'text', content: 'balasan otomatis', delay_ms: 0 }, is_active: true };
     };
     const incoming = async (d: { id: string; deviceKey: string; tenantId: string }) => {
+      await pool.query(`INSERT INTO recipient_preferences(tenant_id,phone_number,status,source,evidence_ref)
+        VALUES ($1,'6281299999999','opted_in','inbound_keyword',$2) ON CONFLICT (tenant_id,phone_number) DO NOTHING`, [d.tenantId, `reply-fixture:${d.tenantId}`]);
       const id = (await pool.query<{ id: string }>("INSERT INTO messages(tenant_id,device_id,device_key,from_number,to_number,content,type,status,direction) VALUES ($1,$2,$3,'6281299999999','6281100000000','halo','text','received','inbound') RETURNING id", [d.tenantId, d.id, d.deviceKey])).rows[0]!.id;
       return { id, tenantId: d.tenantId, deviceId: d.id, deviceKey: d.deviceKey, from: '6281299999999', content: 'halo', isGroup: false, replyJid: '6281299999999@s.whatsapp.net' } as never;
     };
@@ -316,6 +325,57 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
     await pool.query("UPDATE devices SET status='online' WHERE id=$1", [da.id]);
     assert.equal(t2.calls.length + t3.calls.length + t4.calls.length, 0);
     assert.equal((await logs(da.deviceKey)).filter((l) => l.status === 'sent').length, 1, 'only the very first reply exists');
+  });
+
+  await t.test('STOP is stored before replies, blocks pending promo and is acknowledged at most once; START opts back in without reviving old jobs', async () => {
+    const ws = await workspace(); const d = await device(ws); const tr = transport();
+    const pending = await message(d);
+    const inbound = (id: string, content: string) => ({
+      key: { remoteJid: '6281234567890@s.whatsapp.net', participant: '', fromMe: false, id },
+      message: { conversation: content }, messageTimestamp: 1_790_000_000,
+    } as unknown as WAMessage);
+    const order: string[] = [];
+    const stop = await handleIncomingMessage(inbound('WA-STOP-1', 'STOP!!!'), d.deviceKey, query, log,
+      async () => { order.push('webhook'); },
+      async (saved) => { order.push('ack'); await sendStopConfirmation(saved, tr.sock, log); });
+    assert.equal(stop?.consentCommand, 'stop');
+    assert.deepEqual(order, ['ack', 'webhook'], 'the single STOP confirmation is attempted before webhook delivery');
+    assert.equal((await pool.query('SELECT status FROM recipient_preferences WHERE tenant_id=$1 AND phone_number=$2', [ws, '6281234567890'])).rows[0]?.status, 'opted_out');
+    assert.deepEqual(await row(pending), { status: 'blocked', error_message: 'recipient_opted_out' });
+    await run(job(pending), d, tr);
+    assert.equal(tr.calls.length, 1, 'the blocked pending promo adds no transport call beyond the STOP acknowledgement');
+    await sendStopConfirmation(stop!, tr.sock, log);
+    assert.equal(tr.calls.length, 1, 'only one acknowledgement attempt is recorded for this STOP inbound id');
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM messages WHERE tenant_id=$1 AND external_id=$2", [ws, `consent-stop:${stop!.whatsappMessageId}`])).rows[0]?.n, 1);
+
+    const start = await handleIncomingMessage(inbound('WA-START-1', '(MULAI)'), d.deviceKey, query, log, async () => undefined);
+    assert.equal(start?.consentCommand, 'start');
+    assert.equal((await pool.query('SELECT status FROM recipient_preferences WHERE tenant_id=$1 AND phone_number=$2', [ws, '6281234567890'])).rows[0]?.status, 'opted_in');
+    assert.equal((await row(pending)).status, 'blocked', 'START never resurrects a message suppressed by STOP');
+    await assert.rejects(retryMessage(ws, pending), (error) => error instanceof ServiceError && error.code === 'RECIPIENT_CONSENT_SUPPRESSED');
+    const fresh = await message(d);
+    await run(job(fresh), d, tr);
+    assert.equal(tr.calls.length, 2, 'a new promotional message after START can proceed');
+  });
+
+  await t.test('internal bot send endpoint helper rejects a recipient without recorded consent before insert', async () => {
+    const ws = await workspace(); const d = await device(ws);
+    await assert.rejects(
+      enqueueMessage(d.deviceKey, { to: '6281999999999', type: 'text', content: 'promo' }, redis, query),
+      (error: unknown) => error instanceof Error && 'statusCode' in error && error.statusCode === 409 && 'code' in error && error.code === 'recipient_consent_required',
+    );
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM messages WHERE tenant_id=$1 AND to_number=$2', [ws, '6281999999999'])).rows[0]?.n, 0);
+  });
+
+  await t.test('a STOP that lands while a queued worker is pacing wins before the final transport check', async () => {
+    const ws = await workspace(); const d = await device(ws); const tr = transport(); const pending = await message(d);
+    const slow = async (): Promise<AntiBanDecision> => ({ ...(await allow()), delayMs: 1 });
+    await rejectsUnrecoverable(run(job(pending), d, tr, {
+      canSend: slow,
+      delay: async () => { await pool.query("UPDATE recipient_preferences SET status='opted_out' WHERE tenant_id=$1 AND phone_number='6281234567890'", [ws]); },
+    }));
+    assert.equal(tr.calls.length, 0);
+    assert.deepEqual(await row(pending), { status: 'blocked', error_message: 'recipient_opted_out' });
   });
 
   await t.test('the queue names used by the gateway and the worker agree (urgent traffic has its own queue but the same guard)', () => {

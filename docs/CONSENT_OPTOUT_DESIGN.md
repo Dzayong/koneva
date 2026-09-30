@@ -1,6 +1,6 @@
 # Consent / opt-out: owner-review specification
 
-Separate from the outbound-controls fix (see [OUTBOUND_CONTROLS.md](OUTBOUND_CONTROLS.md)). **Owner approved staged implementation on 2026-09-30. Enforcement point 1 is implemented and awaiting review; points 2–4 remain gated on that review.** Estimates are engineering effort in person-days for one developer, before review, and should be rechecked after the first spike. A consent flow reduces complaints and misuse; it is **not** WhatsApp's permission and not an anti-ban measure.
+Separate from the outbound-controls fix (see [OUTBOUND_CONTROLS.md](OUTBOUND_CONTROLS.md)). **Owner approved staged implementation on 2026-09-30. Point 1 was accepted; points 2–4 were approved as one batch and are implemented locally, pending final commit/push.** Estimates are engineering effort in person-days for one developer, before review, and should be rechecked after the first spike. A consent flow reduces complaints and misuse; it is **not** WhatsApp's permission and not an anti-ban measure.
 
 ## 1. What already exists (inventory)
 
@@ -51,7 +51,7 @@ Create the schema and index idempotently. Backfill opted-out state from the exis
 | **All four enforcement points** | Point 1 plus queue claim/final pre-transport checks, STOP/START ingestion and queue suppression, auto-reply behavior, server-trusted transaction exception, concurrency/race handling, migration/tenant-isolation/regression tests and docs. No management UI/import included. | **5–7 days total** |
 | Optional management surface | Workspace API/audit controls plus dashboard list and manual changes, with evidence requirement and tests. | **+2–4 days** |
 
-Owner approved the spec decisions on 2026-09-30: standalone case-insensitive `STOP`/`BERHENTI` and `START`/`MULAI`; one non-promotional STOP confirmation; manual per-contact opt-in only with a source note and timestamp/number audit; management UI in a separate task; and no recorded consent means promotional sends are denied. Workspace-wide scope and transactional exception are approved. Work is explicitly staged: implement enforcement point 1 (API pre-enqueue) first, report evidence for review, then continue with points 2–4 only after that layer is reviewed. Keep server-trusted classification for the transactional exception; do not accept caller-provided `priority: urgent` as proof. The manual audit/read API is included in the first enforcement layer, without a dashboard UI.
+Owner approved the spec decisions on 2026-09-30: standalone case-insensitive `STOP`/`BERHENTI` and `START`/`MULAI`; one non-promotional STOP confirmation; manual per-contact opt-in only with a source note and timestamp/number audit; management UI in a separate task; and no recorded consent means promotional sends are denied. Workspace-wide scope and transactional exception are approved. Point 1 was accepted; owner then approved points 2–4 as one batch. Keep server-trusted classification for the transactional exception; do not accept caller-provided `priority: urgent` as proof. The manual audit/read API is included, without a dashboard UI.
 
 ## 4. Other patterns worth adopting from the research (selective)
 

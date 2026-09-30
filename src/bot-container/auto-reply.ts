@@ -6,6 +6,7 @@ import { renderMessageTemplate } from '../shared/utils/message-template';
 import { checkTransmission, type TransmitDecision } from './send-guard';
 import { canSendMessage, type AntiBanDecision } from './anti-ban';
 import type { QueryFn } from './health-score';
+import { getStoredRecipientConsent, withRecipientConsentLock } from '../shared/recipient-consent';
 
 export interface AutoReplyRule {
   id: string;
@@ -118,6 +119,7 @@ interface AutoReplyDependencies {
   wait?: (milliseconds: number) => Promise<void>;
   /** When set, going online and reading are owned by the presence routine. */
   presence?: Pick<PresenceRoutine, 'beforeReply' | 'afterSend'>;
+  consentLock?: <T>(tenantId: string, recipient: string, work: () => Promise<T>) => Promise<T>;
 }
 
 async function logActivity(
@@ -146,6 +148,16 @@ export async function processAutoReply(
 
   const rule = rules.find((candidate) => candidate.tenant_id === message.tenantId && matchesAutoReply(candidate, message.content));
   if (!rule) return false;
+
+  const storedConsent = await getStoredRecipientConsent(queryFn, message.tenantId, message.from);
+  if (storedConsent !== 'opted_in') {
+    const reason = storedConsent === 'opted_out' ? 'recipient_opted_out' : 'recipient_consent_required';
+    await logActivity(queryFn, rule, message, rule.response.content, 'blocked', reason, null);
+    log.warn('Auto-reply blocked by recipient consent', {
+      tenantId: message.tenantId, recipientLast4: message.from.replace(/\D/g, '').slice(-4), reason,
+    });
+    return false;
+  }
 
   const contactResult = await queryFn(
     'SELECT name FROM contacts WHERE tenant_id=$1 AND phone_number IN ($2, $3) LIMIT 1',
@@ -206,13 +218,23 @@ export async function processAutoReply(
       await sock.sendPresenceUpdate('paused', jid);
     }
     // LAST CHECK before the transport call: the waits, reading and typing above can last many seconds.
-    const last = await guard(message.deviceKey);
-    if (!last.allowed) {
-      await logActivity(queryFn, rule, message, content, 'blocked', last.reason ?? 'blocked', null);
-      log.warn('Auto-reply stopped before sending: administrative state changed', { ruleId: rule.id, reason: last.reason });
+    const lock = dependencies.consentLock ?? withRecipientConsentLock;
+    const result = await lock(message.tenantId, message.from, async () => {
+      const consent = await getStoredRecipientConsent(queryFn, message.tenantId, message.from);
+      if (consent !== 'opted_in') return { blocked: consent === 'opted_out' ? 'recipient_opted_out' : 'recipient_consent_required' };
+      const last = await guard(message.deviceKey);
+      if (!last.allowed) return { blocked: last.reason ?? 'blocked' };
+      return { sent: await sock.sendMessage(jid, { text: content }) };
+    });
+    if ('blocked' in result) {
+      const reason = result.blocked;
+      await logActivity(queryFn, rule, message, content, 'blocked', reason, null);
+      log.warn('Auto-reply stopped before sending by consent or administrative state', {
+        ruleId: rule.id, tenantId: message.tenantId, recipientLast4: message.from.replace(/\D/g, '').slice(-4), reason,
+      });
       return false;
     }
-    const sent = await sock.sendMessage(jid, { text: content });
+    const sent = result.sent;
     void dependencies.presence?.afterSend();
     const inserted = await queryFn(
       `INSERT INTO messages (tenant_id, device_id, device_key, from_number, to_number, content,

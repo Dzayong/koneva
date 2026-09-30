@@ -3,6 +3,7 @@ import type { Logger } from 'winston';
 import type { CommandType, ProfilePicturePayload, ProfileUpdate, StatusPayload } from '../shared/commands';
 import { getOrCreatePersona, isWithinPersonaWindow, msUntilWindowOpens } from '../shared/persona';
 import type { PresenceRoutine } from './presence';
+import { getStoredRecipientConsent, normalizeRecipientNumber, withRecipientConsentLocks } from '../shared/recipient-consent';
 
 type QueryFn = (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
 
@@ -22,6 +23,7 @@ export interface CommandContext {
    * suspended or the number is paused/banned. Reads (profile.get) do not call it.
    */
   assertMayTransmit?: () => Promise<void>;
+  consentLocks?: <T>(tenantId: string, recipients: string[], work: () => Promise<T>) => Promise<T>;
 }
 
 /** Failure with a stable code; the runner stores it as "CODE: message" for the API to translate. */
@@ -100,7 +102,26 @@ async function postStatus(ctx: CommandContext, p: StatusPayload) {
     // Wait for the number's day to start, plus a random 0-20 minutes so it does not post at the exact opening minute.
     throw new Reschedule(msUntilWindowOpens(persona, now) + Math.round((ctx.random ?? Math.random)() * 20 * 60_000), 'outside_active_hours');
   }
-  const recipients = await statusAudience(ctx, p);
+  const requestedRecipients = await statusAudience(ctx, p);
+  const tenantRow = (await ctx.queryFn('SELECT tenant_id FROM devices WHERE id = $1', [ctx.deviceId])).rows[0];
+  const tenantId = String(tenantRow?.['tenant_id'] ?? '');
+  if (!tenantId) throw new CommandFailure('DEVICE_NOT_FOUND', 'The number no longer exists');
+  const eligible: string[] = [];
+  const denied: string[] = [];
+  for (const jid of requestedRecipients) {
+    const phone = normalizeRecipientNumber(jid.split('@')[0] ?? '');
+    if (await getStoredRecipientConsent(ctx.queryFn, tenantId, phone) === 'opted_in') eligible.push(phone);
+    else denied.push(phone);
+  }
+  if (p.audience === 'list' && denied.length > 0) {
+    throw new CommandFailure('RECIPIENT_CONSENT_REQUIRED', `${denied.length} requested recipient(s) have not opted in`);
+  }
+  if (denied.length > 0) {
+    ctx.log.warn('Status recipients excluded by consent', {
+      tenantId, count: denied.length, sampleLast4: denied.slice(0, 5).map((phone) => phone.slice(-4)),
+    });
+  }
+  if (eligible.length === 0) throw new CommandFailure('RECIPIENT_CONSENT_REQUIRED', 'No opted-in recipients are available for this status');
   const me = ownJid(ctx.sock);
   const content = p.kind === 'text'
     ? { text: p.text ?? '', ...(p.background ? { backgroundColor: p.background } : {}) }
@@ -108,10 +129,18 @@ async function postStatus(ctx: CommandContext, p: StatusPayload) {
       ? { image: { url: p.media_url ?? '' }, ...(p.caption ? { caption: p.caption } : {}) }
       : { video: { url: p.media_url ?? '' }, ...(p.caption ? { caption: p.caption } : {}) };
   await ctx.presence?.ensureOnline();
-  await ctx.assertMayTransmit?.(); // last check: after the audience query and presence, right before the post
-  const sent = await ctx.sock.sendMessage('status@broadcast', content, { statusJidList: [...new Set([me, ...recipients])] });
+  const lockRecipients = ctx.consentLocks ?? withRecipientConsentLocks;
+  const sent = await lockRecipients(tenantId, eligible, async () => {
+    const revoked: string[] = [];
+    for (const phone of eligible) {
+      if (await getStoredRecipientConsent(ctx.queryFn, tenantId, phone) !== 'opted_in') revoked.push(phone);
+    }
+    if (revoked.length > 0) throw new CommandFailure('RECIPIENT_OPTED_OUT', `${revoked.length} recipient(s) opted out before the status was sent`);
+    await ctx.assertMayTransmit?.(); // last check: after audience and consent checks, immediately before transport
+    return ctx.sock.sendMessage('status@broadcast', content, { statusJidList: [...new Set([me, ...eligible.map((phone) => `${phone}@s.whatsapp.net`)])] });
+  });
   void ctx.presence?.afterSend();
-  return { message_id: sent?.key.id ?? null, recipients: recipients.length };
+  return { message_id: sent?.key.id ?? null, recipients: eligible.length };
 }
 
 async function readProfile(ctx: CommandContext) {

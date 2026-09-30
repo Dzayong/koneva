@@ -11,7 +11,7 @@ import { startQueueProcessor, registerReceiptListener, closeQueueResources } fro
 import { createApiRouter } from './api';
 import { activeConnections } from './metrics';
 import { shutdownTracing } from './tracing';
-import { registerIncomingMessageListener } from './incoming';
+import { sendStopConfirmation, registerIncomingMessageListener } from './incoming';
 import { AutoReplyEngine } from './auto-reply';
 import { PresenceRoutine } from './presence';
 import { CommandRunner } from './command-runner';
@@ -171,6 +171,10 @@ async function main(): Promise<void> {
       currentSocket = sock;
       registerReceiptListener(sock, log, queryFn, botConfig.botId);
       registerIncomingMessageListener(sock, botConfig.botId, log, queryFn, async (message) => {
+        if (message.consentCommand === 'stop') {
+          await sendStopConfirmation(message, sock, log);
+          return;
+        }
         // Direct chats only: groups are not "opened" by this routine.
         if (!message.isGroup) await presence.onInbound(message.key);
         await autoReplyEngine.process(message, sock, presence);

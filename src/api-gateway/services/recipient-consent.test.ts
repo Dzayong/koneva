@@ -41,6 +41,7 @@ test('only a server-verified transaction may skip the consent lookup', async () 
 
 test('manual contact consent requires a signed-in workspace member, evidence note, and an audit event', async () => {
   const statements: Array<{ text: string; values?: unknown[] }> = [];
+  database.query = async () => ({ rows: [{ phone_number: '6281234567890' }] });
   database.connect = async () => ({
     query: async (text: string, values?: unknown[]) => {
       statements.push({ text, ...(values === undefined ? {} : { values }) });
@@ -53,9 +54,9 @@ test('manual contact consent requires a signed-in workspace member, evidence not
 
   const recorded = await recordManualContactConsent('tenant-a', 'contact-a', 'opted_in', ' offline store form ', 'user-a');
   assert.equal(recorded.status, 'opted_in');
-  assert.equal(statements[2]?.values?.[3], 'offline store form');
-  assert.match(statements[3]?.text ?? '', /INSERT INTO recipient_consent_events/);
-  assert.deepEqual(statements.at(-1)?.text, 'COMMIT');
+  assert.equal(statements.find((s) => s.text.includes('INSERT INTO recipient_preferences'))?.values?.[3], 'offline store form');
+  assert.equal(statements.some((s) => s.text.includes('INSERT INTO recipient_consent_events')), true);
+  assert.equal(statements.some((s) => s.text === 'COMMIT'), true);
 
   await assert.rejects(() => recordManualContactConsent('tenant-a', 'contact-a', 'opted_in', '   ', 'user-a'), code('CONSENT_SOURCE_REQUIRED'));
 });
@@ -88,6 +89,7 @@ test('caller priority urgent cannot skip API admission or create a queue record 
 
 test('retry is a fresh API admission and refuses an opted-out number before re-queueing', async () => {
   const statements: string[] = [];
+  database.connect = async () => ({ query: async () => ({ rows: [] }), release() {} });
   database.query = async (text: string) => {
     statements.push(text);
     if (text.includes('AS device_status')) return { rows: [{ device_status: 'online', to_number: '6281234567890', quota_exempt: false }] };
@@ -95,5 +97,18 @@ test('retry is a fresh API admission and refuses an opted-out number before re-q
     return { rows: [] };
   };
   await assert.rejects(() => retryMessage('tenant-a', '00000000-0000-0000-0000-000000000001'), code('RECIPIENT_OPTED_OUT'));
+  assert.equal(statements.some((text) => text.startsWith('UPDATE messages')), false);
+});
+
+test('START never revives a message already suppressed by consent, even when a manual retry is requested', async () => {
+  const statements: string[] = [];
+  database.connect = async () => ({ query: async () => ({ rows: [] }), release() {} });
+  database.query = async (text: string) => {
+    statements.push(text);
+    if (text.includes('FROM subscriptions')) return { rows: [] };
+    if (text.includes('AS device_status')) return { rows: [{ device_status: 'online', to_number: '6281234567890', quota_exempt: false, error_message: 'recipient_opted_out' }] };
+    return { rows: [] };
+  };
+  await assert.rejects(() => retryMessage('tenant-a', 'message-stopped-after-STOP'), code('RECIPIENT_CONSENT_SUPPRESSED'));
   assert.equal(statements.some((text) => text.startsWith('UPDATE messages')), false);
 });

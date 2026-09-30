@@ -21,11 +21,13 @@ fields on send and QR responses remain temporarily for frontend compatibility.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/api/v1/message/send` | tenant | 202; `status: "queued"` or `"quota_hold"` (see [Plans and billing](#plans-and-billing)), never delivered yet |
+| POST | `/api/v1/message/send` | tenant | requires recipient opt-in for promotional sends; missing/opted-out consent returns 409 |
 | GET | `/api/v1/messages` | tenant | filters: `device_key`, `status`, `direction`, `search` |
 | GET | `/api/v1/messages/:id` | tenant | includes `status_history` |
 | POST | `/api/v1/messages/:id/retry` | tenant | retry failed/blocked messages |
 | POST | `/api/v1/broadcast` | tenant | queue up to 500 recipients |
+| GET | `/api/v1/contacts/:id/consent` | tenant | read consent and its audit events |
+| PUT | `/api/v1/contacts/:id/consent` | signed-in workspace user | manual changes require `source_note`; API keys cannot record consent |
 | GET | `/api/v1/devices` | tenant | |
 | POST | `/api/v1/devices` | tenant | create a device for the authenticated tenant; 429 at `max_devices` |
 | GET | `/api/v1/devices/:key` | tenant | includes `qr_code` |
@@ -217,26 +219,32 @@ one rhythm. Editing pacing by hand afterwards makes the number `custom`.
 | Preset | For | Behaviour |
 |---|---|---|
 | `customer_service` | Answering customers | 24 hours, random delay 5-60 s |
-| `notifications` | Reminders and notices | 24 hours, delay 1-5 s, long runs. Use `priority: "urgent"` for OTP |
+| `notifications` | Reminders and notices | 24 hours, delay 1-5 s, long runs. Use the server-verified `otp_code` flow for OTP |
 | `careful_marketing` | Messages to opted-in contacts | About 08:00-20:00, delay 20-90 s, frequent rests |
 
 ### New numbers and replies
 
-A number in its first two days cannot start conversations (warm-up). Answering someone who wrote to the
-number in the last 24 hours is a reply, not outreach, so it is allowed from day one, within the daily
-limit. A message that has to wait stays `queued` and `error_message` says why (for example
+A number in its first two days cannot start conversations (warm-up). Recent inbound messages do not
+create marketing consent; promotional sends and automated replies still require recorded opt-in. A
+message that has to wait stays `queued` and `error_message` says why (for example
 `proactive_not_allowed_in_warmup`); it is sent automatically once allowed.
 
-### Urgent messages (OTP)
+### Consent and transactional sends
 
-`POST /api/v1/message/send` accepts `"priority": "urgent"` for time-critical messages such as OTP.
-Urgent messages use their own queue, are sent without artificial delay, and skip active hours,
-rests and content rules. They still respect a paused or banned number and the daily cap, and they
-are never deferred: if refused, the message is marked `failed` right away and a `message.failed`
-webhook is sent, because a late OTP is useless.
+Promotional/proactive sends require a recorded recipient opt-in. The recipient can send a standalone
+`START`/`MULAI` message to opt in and `STOP`/`BERHENTI` to opt out. Missing consent returns HTTP 409
+`RECIPIENT_CONSENT_REQUIRED`; an opted-out recipient returns HTTP 409 `RECIPIENT_OPTED_OUT`.
+Broadcast still responds 202 overall and reports each refused recipient with `status: "failed"` and
+the corresponding `error_code`. A STOP blocks pending promotional messages and receives one
+non-promotional confirmation. Manual consent changes are available only to a signed-in workspace
+user and require a source note; an API key cannot claim consent.
 
-**`priority: "urgent"` is a pacing hint only — it does not exempt a send from the monthly plan
-quota.** For that, also pass `otp_code` (see below). A new number is capped by warm-up (about 4-5
+`priority: "urgent"` is not a trust signal and cannot bypass consent or select a privileged path.
+The server recognizes OTP only when the request includes `otp_code` that passes all checks below.
+Verified OTP sends use the urgent queue, skip artificial pacing and remain allowed after STOP as
+transactional messages. They still respect a paused or banned number and the daily cap.
+
+A new number is capped by warm-up (about 4-5
 messages on day 1), so a fresh number is not ready for OTP traffic. Templated, high-volume OTP
 sending to many strangers is the pattern WhatsApp is most likely to treat as automated; volume and
 risk on your own numbers are your responsibility.

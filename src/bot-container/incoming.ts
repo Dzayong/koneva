@@ -9,6 +9,8 @@ import type { Logger } from 'winston';
 import { query } from '../shared/database/connection';
 import type { QueryFn } from './health-score';
 import { dispatchWebhook, type WebhookPayload } from './webhook';
+import pool, { transaction } from '../shared/database/connection';
+import { normalizeRecipientNumber, parseConsentKeyword, withRecipientConsentLock } from '../shared/recipient-consent';
 
 const defaultQueryFn: QueryFn = (text, params) => query(text, params);
 
@@ -59,6 +61,7 @@ export async function handleIncomingMessage(
   queryFn: QueryFn,
   log: Logger,
   webhookDispatcher: typeof dispatchWebhook = dispatchWebhook,
+  beforeWebhook?: (message: IncomingMessageRecord) => Promise<void>,
 ): Promise<IncomingMessageRecord | undefined> {
   if (message.key.fromMe || !message.key.id) {
     log.debug('Ignoring own or id-less WhatsApp message', { deviceKey, fromMe: message.key.fromMe });
@@ -140,6 +143,24 @@ export async function handleIncomingMessage(
     [device.id, fromNumber],
   );
 
+  const inboundRecord: IncomingMessageRecord = {
+    id: row.id, whatsappMessageId: message.key.id, tenantId: device.tenant_id, deviceId: device.id,
+    deviceKey, from: fromNumber, content: parsed.content, type: parsed.type,
+    replyJid: remoteJid, isGroup: remoteJid.endsWith('@g.us'), key: message.key,
+  };
+  const consentCommand = await recordRecipientConsentCommand(inboundRecord, log);
+  if (consentCommand) inboundRecord.consentCommand = consentCommand;
+  if (consentCommand === 'stop' && beforeWebhook) {
+    try {
+      await beforeWebhook(inboundRecord);
+    } catch (error) {
+      log.error('STOP confirmation handler failed before webhook dispatch', {
+        tenantId: device.tenant_id, recipientLast4: fromNumber.slice(-4),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   const payload: WebhookPayload = {
     event: 'message.received',
     device_key: deviceKey,
@@ -159,19 +180,107 @@ export async function handleIncomingMessage(
     from: fromNumber,
     type: parsed.type,
   });
-  return {
-    id: row.id, tenantId: device.tenant_id, deviceId: device.id,
-    deviceKey, from: fromNumber, content: parsed.content,
-    replyJid: remoteJid, isGroup: remoteJid.endsWith('@g.us'), key: message.key,
-  };
+  return inboundRecord;
 }
 
 export interface IncomingMessageRecord {
-  id: string; tenantId: string; deviceId: string; deviceKey: string; from: string; content: string;
+  id: string; whatsappMessageId: string; tenantId: string; deviceId: string; deviceKey: string; from: string; content: string;
+  type: 'text' | 'image' | 'document' | 'video' | 'audio';
+  consentCommand?: 'stop' | 'start';
   /** Chat JID to answer on (may be @lid); never rebuild it from `from`. */
   replyJid: string;
   isGroup: boolean;
   key: WAMessageKey;
+}
+
+/** Persist START/STOP before webhook handling or any auto-reply decision. */
+async function recordRecipientConsentCommand(
+  message: IncomingMessageRecord,
+  log: Logger,
+): Promise<'stop' | 'start' | undefined> {
+  if (message.isGroup || message.type !== 'text') return undefined;
+  const command = parseConsentKeyword(message.content);
+  if (!command) return undefined;
+  const phoneNumber = normalizeRecipientNumber(message.from);
+
+  const persistedCommand = await withRecipientConsentLock(message.tenantId, phoneNumber, async () =>
+    transaction(async (client) => {
+      const event = await client.query<{ id: string }>(
+        `INSERT INTO recipient_consent_events
+           (tenant_id, phone_number, status, source, evidence_ref, actor_kind)
+         VALUES ($1, $2, $3, 'inbound_keyword', $4, 'system')
+         ON CONFLICT DO NOTHING RETURNING id`,
+        [message.tenantId, phoneNumber, command === 'stop' ? 'opted_out' : 'opted_in', message.whatsappMessageId],
+      );
+      if (!event.rows[0]) return { recorded: false, suppressed: 0 };
+      await client.query(
+        `INSERT INTO recipient_preferences
+           (tenant_id, phone_number, status, source, evidence_ref, decided_at, updated_at)
+         VALUES ($1, $2, $3, 'inbound_keyword', $4, now(), now())
+         ON CONFLICT (tenant_id, phone_number) DO UPDATE SET
+           status = EXCLUDED.status, source = EXCLUDED.source, source_note = NULL,
+           evidence_ref = EXCLUDED.evidence_ref, decided_by = NULL,
+           decided_at = now(), updated_at = now()`,
+        [message.tenantId, phoneNumber, command === 'stop' ? 'opted_out' : 'opted_in', message.whatsappMessageId],
+      );
+      let suppressed = 0;
+      if (command === 'stop') {
+        const result = await client.query(
+          `UPDATE messages SET status = 'blocked', error_message = 'recipient_opted_out'
+           WHERE tenant_id = $1 AND regexp_replace(to_number, '[^0-9]', '', 'g') = $2
+             AND direction = 'outbound' AND status IN ('queued', 'quota_hold')
+             AND COALESCE(quota_exempt, false) = false`,
+          [message.tenantId, phoneNumber],
+        );
+        suppressed = result.rowCount ?? 0;
+      }
+      return { recorded: true, suppressed };
+    }));
+  if (persistedCommand.recorded) log.info(`Recipient ${command.toUpperCase()} recorded`, {
+    tenantId: message.tenantId, recipientLast4: phoneNumber.slice(-4),
+    inboundMessageId: message.id, suppressedMessages: persistedCommand.suppressed,
+  });
+  return command;
+}
+
+/** At most one STOP acknowledgement attempt per persisted inbound message; it is non-promotional and logged. */
+export async function sendStopConfirmation(
+  message: IncomingMessageRecord,
+  sock: WASocket,
+  log: Logger,
+): Promise<void> {
+  const phoneNumber = normalizeRecipientNumber(message.from);
+  await withRecipientConsentLock(message.tenantId, phoneNumber, async () => {
+    const existing = await pool.query<{ id: string }>(
+      'SELECT id FROM messages WHERE tenant_id = $1 AND external_id = $2 LIMIT 1',
+    [message.tenantId, `consent-stop:${message.whatsappMessageId}`],
+    );
+    if (existing.rows[0]) return;
+    const acknowledgement = await pool.query<{ id: string }>(
+      `INSERT INTO messages
+         (tenant_id, device_id, device_key, from_number, to_number, content, type, status, direction, external_id)
+       VALUES ($1, $2, $3, $3, $4, $5, 'text', 'sending', 'outbound', $6) RETURNING id`,
+      [message.tenantId, message.deviceId, message.deviceKey, phoneNumber,
+        'Anda sudah berhenti menerima pesan promosi KONEVA.', `consent-stop:${message.whatsappMessageId}`],
+    );
+    const outboundId = acknowledgement.rows[0]?.id;
+    try {
+      const result = await sock.sendMessage(message.replyJid ?? `${phoneNumber}@s.whatsapp.net`, {
+        text: 'Anda sudah berhenti menerima pesan promosi KONEVA.',
+      });
+      if (outboundId) await pool.query(
+        `UPDATE messages SET status = 'sent', whatsapp_message_id = $2, sent_at = now() WHERE id = $1`,
+        [outboundId, result?.key.id ?? null]);
+      log.info('Recipient STOP confirmation sent', { tenantId: message.tenantId, recipientLast4: phoneNumber.slice(-4), inboundMessageId: message.id });
+    } catch (error) {
+      if (outboundId) await pool.query(
+        `UPDATE messages SET status = 'failed', error_message = 'consent_ack_failed' WHERE id = $1`, [outboundId]);
+      log.error('Recipient STOP confirmation failed', {
+        tenantId: message.tenantId, recipientLast4: phoneNumber.slice(-4), inboundMessageId: message.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
 }
 
 export function registerIncomingMessageListener(
@@ -191,8 +300,13 @@ export function registerIncomingMessageListener(
     if (upsert.type !== 'notify') return;
 
     for (const message of upsert.messages) {
-      void handleIncomingMessage(message, deviceKey, queryFn, log).then(async (saved) => {
-        if (saved && onIncoming) await onIncoming(saved);
+      let stopHandled = false;
+      void handleIncomingMessage(message, deviceKey, queryFn, log, dispatchWebhook, async (saved) => {
+        if (!onIncoming) return;
+        stopHandled = true;
+        await onIncoming(saved);
+      }).then(async (saved) => {
+        if (saved && onIncoming && !(stopHandled && saved.consentCommand === 'stop')) await onIncoming(saved);
       }).catch((error: unknown) => {
         log.error('Failed to save incoming WhatsApp message', {
           deviceKey,

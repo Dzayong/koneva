@@ -22,6 +22,7 @@ test('matched inbound message sends and records an auto-reply', async () => {
   const queries: string[] = [];
   const queryFn: QueryFn = async (sql) => {
     queries.push(sql);
+    if (sql.includes('FROM recipient_preferences')) return { rows: [{ status: 'opted_in' }] } as never;
     if (sql.startsWith('SELECT name')) return { rows: [{ name: 'Budi' }] } as never;
     if (sql.includes('INSERT INTO messages')) return { rows: [{ id: 'out-1' }] } as never;
     return { rows: [] } as never;
@@ -37,13 +38,30 @@ test('matched inbound message sends and records an auto-reply', async () => {
     { id: 'in-1', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?' },
     [baseRule], sock, queryFn, silent,
     { wait: async () => undefined, guard: async () => ({ allowed: true }), canSend: async () => ({ allowed: true, delayMs: 0,
-      typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }) },
+      typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }),
+      consentLock: async (_tenant, _recipient, work) => work() },
   );
 
   assert.equal(sent, true);
   assert.match(sentText, /^(Halo|Hi) Budi$/);
   assert.equal(queries.some((sql) => sql.includes('INSERT INTO auto_reply_logs')), true);
   assert.equal(queries.some((sql) => sql.includes('INSERT INTO messages')), true);
+});
+
+test('auto-reply refuses a non-opted-in recipient and writes a blocked activity row', async () => {
+  const queries: string[] = [];
+  const queryFn: QueryFn = async (sql) => { queries.push(sql); return { rows: [] } as never; };
+  let sends = 0;
+  const sock = { sendMessage: async () => { sends += 1; return { key: { id: 'unexpected' } }; } } as unknown as WASocket;
+  const silent = { info() {}, warn() {}, error() {} } as unknown as Logger;
+  const sent = await processAutoReply(
+    { id: 'in-no-consent', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?' },
+    [baseRule], sock, queryFn, silent,
+    { consentLock: async (_tenant, _recipient, work) => work() },
+  );
+  assert.equal(sent, false);
+  assert.equal(sends, 0);
+  assert.equal(queries.some((sql) => sql.includes('INSERT INTO auto_reply_logs')), true);
 });
 
 test('auto-reply engine hot-reloads rules after its Redis signal', async () => {
@@ -79,7 +97,9 @@ test('auto-reply engine hot-reloads rules after its Redis signal', async () => {
 
 test('auto-reply total delay includes reading and typing, so a flat 5 s is 5 s', async () => {
   const waits: number[] = [];
-  const queryFn: QueryFn = async () => ({ rows: [] } as never);
+  const queryFn: QueryFn = async (sql) => sql.includes('FROM recipient_preferences')
+    ? ({ rows: [{ status: 'opted_in' }] } as never)
+    : ({ rows: [] } as never);
   const sock = {
     sendMessage: async () => ({ key: { id: 'wa-2' } }),
     sendPresenceUpdate: async () => undefined,
@@ -93,6 +113,7 @@ test('auto-reply total delay includes reading and typing, so a flat 5 s is 5 s',
       key: { remoteJid: '62812@s.whatsapp.net', id: 'K1', fromMe: false } },
     [rule], sock, queryFn, silent,
     { wait: async (ms) => { waits.push(ms); }, guard: async () => ({ allowed: true }),
+      consentLock: async (_tenant, _recipient, work) => work(),
       canSend: async () => ({ allowed: true, delayMs: 5000, typing: { shouldSimulate: true, durationMs: 3200 },
         healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }) },
   );

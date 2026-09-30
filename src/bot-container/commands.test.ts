@@ -6,7 +6,7 @@ import { CommandFailure, executeCommand, Reschedule, statusAudience, type Comman
 
 const log = { info: () => undefined, debug: () => undefined, warn: () => undefined } as unknown as Logger;
 
-function ctx(over: { business?: boolean; rows?: Array<Record<string, unknown>>; persona?: Record<string, unknown> | null; now?: Date } = {}) {
+function ctx(over: { business?: boolean; rows?: Array<Record<string, unknown>>; persona?: Record<string, unknown> | null; now?: Date; consentStatus?: string } = {}) {
   const calls: Array<{ fn: string; args: unknown[] }> = [];
   const track = (fn: string, ret?: unknown) => async (...args: unknown[]) => { calls.push({ fn, args }); return ret; };
   const sock = {
@@ -20,10 +20,13 @@ function ctx(over: { business?: boolean; rows?: Array<Record<string, unknown>>; 
   const persona = over.persona === undefined ? { seed: 's', timezone: 'Asia/Jakarta', wake_hour: 6, sleep_hour: 23, delay_min_ms: 1000, delay_max_ms: 2000, burst_size: 8, rest_min_ms: 240000, rest_max_ms: 600000, typing_ms_per_char: 50, always_on: true } : over.persona;
   const queryFn = async (text: string) => {
     if (text.includes('device_personas')) return { rows: persona ? [persona] : [] };
+    if (text.includes('SELECT tenant_id FROM devices')) return { rows: [{ tenant_id: 'tenant-1' }] };
+    if (text.includes('FROM recipient_preferences')) return { rows: over.consentStatus === 'opted_out' ? [{ status: 'opted_out' }] : over.consentStatus === 'none' ? [] : [{ status: 'opted_in' }] };
     return { rows: over.rows ?? [] };
   };
   const presence = { ensureOnline: async () => { calls.push({ fn: 'online', args: [] }); }, afterSend: async () => { calls.push({ fn: 'afterSend', args: [] }); } };
-  const context: CommandContext = { sock, queryFn, deviceKey: 'WAPI-X', deviceId: 'dev-1', presence, log, random: () => 0, ...(over.now ? { now: () => over.now! } : {}) };
+  const context: CommandContext = { sock, queryFn, deviceKey: 'WAPI-X', deviceId: 'dev-1', presence, log, random: () => 0,
+    consentLocks: async (_tenant, _recipients, work) => work(), ...(over.now ? { now: () => over.now! } : {}) };
   return { context, calls };
 }
 
@@ -121,6 +124,15 @@ test('status.post outside the number\'s active hours is postponed, not posted', 
   const { context, calls } = ctx({ rows: [{ n: '6281234567890' }], persona, now: new Date('2026-09-26T02:00:00Z') });
   await assert.rejects(() => executeCommand('status.post', { kind: 'text', text: 'x', audience: 'chatted' }, context), (e: unknown) => e instanceof Reschedule && e.delayMs > 5 * 3_600_000);
   assert.equal(calls.some((c) => c.fn === 'sendMessage'), false);
+});
+
+test('status.post refuses the full publish when an explicit audience member lacks consent', async () => {
+  const { context, calls } = ctx({ rows: [], consentStatus: 'none' });
+  await assert.rejects(
+    () => executeCommand('status.post', { kind: 'text', text: 'Promo!', audience: 'list', numbers: ['6281234567890'] }, context),
+    (error: unknown) => error instanceof CommandFailure && error.code === 'RECIPIENT_CONSENT_REQUIRED',
+  );
+  assert.equal(calls.some((call) => call.fn === 'sendMessage'), false);
 });
 
 test('a profile query WhatsApp never answers fails as WA_TIMEOUT instead of looking empty', async () => {

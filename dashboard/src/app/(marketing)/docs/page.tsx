@@ -66,7 +66,7 @@ export default function DocsPage() {
           <p>Kirim kunci di header <code>Authorization: Bearer wgk_...</code>. Kunci punya izin (misalnya hanya kirim pesan), bisa diganti kuncinya, dan bisa dicabut. Jangan menaruh kunci di aplikasi yang dilihat pengguna (browser atau aplikasi HP); panggil API dari server Anda.</p>
 
           <H2 id="kirim">Kirim pesan</H2>
-          <p><code>POST /api/v1/message/send</code> menaruh pesan ke antrean dan langsung menjawab <code>202</code>. Itu berarti <em>diterima</em>, belum <em>terkirim</em>; pantau statusnya lewat webhook atau endpoint status.</p>
+          <p><code>POST /api/v1/message/send</code> menaruh pesan ke antrean dan langsung menjawab <code>202</code>. Itu berarti <em>diterima</em>, belum <em>terkirim</em>; pantau statusnya lewat webhook atau endpoint status. Pesan promosi hanya dapat dikirim kepada penerima yang sudah opt-in.</p>
           <table>
             <thead><tr><th>Isian</th><th>Keterangan</th></tr></thead>
             <tbody>
@@ -75,18 +75,19 @@ export default function DocsPage() {
               <tr><td><code>message</code></td><td>Isi pesan, sampai 4096 karakter. Bila ada <code>media_url</code>, ini menjadi keterangan gambar dan boleh kosong. Tautan (https://…) di dalamnya bisa diketuk penerima.</td></tr>
               <tr><td><code>media_url</code></td><td>Opsional. Alamat publik <code>https</code> untuk gambar, video, atau dokumen. Alamat lokal ditolak.</td></tr>
               <tr><td><code>media_type</code></td><td><code>image</code> (bawaan), <code>video</code>, atau <code>document</code>. Nomor yang masih masa pemanasan belum boleh mengirim media sampai hari ke-5.</td></tr>
-              <tr><td><code>priority</code></td><td><code>normal</code> (bawaan, diberi jeda seperti manusia) atau <code>urgent</code> untuk OTP: tanpa jeda dan lewat antrean sendiri.</td></tr>
+              <tr><td><code>priority</code></td><td>Nilai dari pemanggil tidak memberi pengecualian atau jalur khusus. OTP yang lolos pemeriksaan server memakai antrean cepat secara otomatis.</td></tr>
               <tr><td><code>external_id</code></td><td>Opsional, penanda dari sistem Anda (maks 64 karakter).</td></tr>
             </tbody>
           </table>
           <div className="mt-4"><CodeBlock tabs={SEND} /></div>
+          <p className="mt-4">Penerima dapat mengirim pesan mandiri <code>START</code> atau <code>MULAI</code> untuk opt-in, dan <code>STOP</code> atau <code>BERHENTI</code> untuk berhenti. Tanpa consent tersimpan, API mengembalikan <code>409 RECIPIENT_CONSENT_REQUIRED</code>; setelah opt-out, API mengembalikan <code>409 RECIPIENT_OPTED_OUT</code>. Broadcast melaporkan penolakan per penerima.</p>
 
           <H2 id="status">Status pesan</H2>
           <p><code>GET /api/v1/messages/&#123;id&#125;</code> mengembalikan status dan riwayatnya. Urutan normal: <code>queued</code> → <code>sending</code> → <code>sent</code> → <code>delivered</code> → <code>read</code>. Status akhir gagal: <code>failed</code> atau <code>blocked</code> (ditolak aturan keamanan nomor). <code>POST /api/v1/messages/&#123;id&#125;/retry</code> mencoba ulang pesan yang gagal.</p>
           <p>Centang biru (<code>read</code>) hanya muncul jika penerima mengaktifkan tanda baca di WhatsApp-nya.</p>
 
           <H2 id="pemanasan">Pemanasan dan batas</H2>
-          <p>Nomor baru dilatih bertahap. Membalas orang yang menulis lebih dulu selalu boleh sejak hari pertama.</p>
+          <p>Nomor baru dilatih bertahap. Pesan masuk tidak otomatis menjadi consent promosi; balasan otomatis dan pesan promosi tetap memerlukan opt-in tercatat.</p>
           <table>
             <thead><tr><th>Hari</th><th>Batas kirim per hari</th><th>Catatan</th></tr></thead>
             <tbody>
@@ -96,7 +97,7 @@ export default function DocsPage() {
               <tr><td>8+</td><td>50</td><td>Batas normal</td></tr>
             </tbody>
           </table>
-          <p>Ada juga batas per menit dan kuota pesan bulanan sesuai paket. Pesan <code>urgent</code> tidak ditunda jeda pengiriman.</p>
+          <p>Ada juga batas per menit dan kuota pesan bulanan sesuai paket. Hanya OTP dengan <code>otp_code</code> yang diverifikasi server yang memakai jalur transactional cepat; nilai <code>priority: "urgent"</code> dari pemanggil tidak mengaktifkannya.</p>
 
           <H2 id="webhook">Webhook</H2>
           <p>Webhook adalah panggilan dari kami ke server Anda saat ada kejadian, sehingga Anda tidak perlu menanyakan status terus-menerus. Simpan alamat di dashboard menu <strong>Webhook</strong>, buat kunci tanda tangan, lalu tekan <em>Kirim tes</em>.</p>

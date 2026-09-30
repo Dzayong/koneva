@@ -9,6 +9,7 @@ import { assertSubscriptionActive, currentUsage } from './billing.service';
 import { looksLikeTransactional, reserveTransactionalExemption } from './message-exempt-limits';
 import { assertRecipientConsent } from './recipient-consent.service';
 import logger from '../../shared/utils/logger';
+import { withRecipientConsentLock } from '../../shared/recipient-consent';
 
 const messageQueues = new Map<string, Queue>();
 
@@ -59,6 +60,7 @@ export async function queueMessage(
   tenantId: string,
   input: SendMessageRequest,
 ): Promise<MessageRow> {
+  return withRecipientConsentLock(tenantId, input.to, async () => {
   // Classification happens BEFORE the send transaction and is never the client's `priority` field: it requires the
   // request's own otp_code to genuinely appear in the message content (short, no media) AND a per-recipient/tenant
   // rate limit not already spent. See message-exempt-limits.ts. A failed/skipped claim never blocks the send --
@@ -114,7 +116,8 @@ export async function queueMessage(
     throw new ServiceError(503, 'QUEUE_UNAVAILABLE', 'Unable to enqueue message');
   }
 
-  return message;
+    return message;
+  });
 }
 
 /**
@@ -230,9 +233,17 @@ export async function listMessages(
 export async function retryMessage(tenantId: string, messageId: string): Promise<MessageRow> {
   // A retry is a new send: it needs a live plan and an online number, exactly like the first attempt (it does not use quota again).
   await assertSubscriptionActive(pool, tenantId);
-  const target = (await pool.query<{ device_status: string | null; to_number: string; quota_exempt: boolean }>(
-    `SELECT d.status AS device_status, m.to_number, COALESCE(m.quota_exempt, false) AS quota_exempt
+  const target = (await pool.query<{ device_status: string | null; to_number: string; quota_exempt: boolean; error_message: string | null }>(
+    `SELECT d.status AS device_status, m.to_number, COALESCE(m.quota_exempt, false) AS quota_exempt, m.error_message
      FROM messages m LEFT JOIN devices d ON d.id = m.device_id WHERE m.id = $1 AND m.tenant_id = $2`, [messageId, tenantId])).rows[0];
+  const retry = async (): Promise<MessageRow> => {
+  if (target?.error_message === 'recipient_opted_out' || target?.error_message === 'recipient_consent_required') {
+    logger.warn('Consent-suppressed message retry refused', {
+      tenant_id: tenantId, message_id: messageId,
+      error_code: 'RECIPIENT_CONSENT_SUPPRESSED',
+    });
+    throw new ServiceError(409, 'RECIPIENT_CONSENT_SUPPRESSED', 'This message was suppressed by recipient consent; create a new message after re-opt-in');
+  }
   if (target) await assertRecipientConsent(pool, tenantId, target.to_number, target.quota_exempt);
   if (target && target.device_status !== 'online') throw new ServiceError(503, 'DEVICE_OFFLINE', 'Device is not online');
   const result = await pool.query<MessageRow>(
@@ -257,4 +268,6 @@ export async function retryMessage(tenantId: string, messageId: string): Promise
     throw new ServiceError(503, 'QUEUE_UNAVAILABLE', 'Unable to enqueue message retry');
   }
   return message;
+  };
+  return target ? withRecipientConsentLock(tenantId, target.to_number, retry) : retry();
 }
