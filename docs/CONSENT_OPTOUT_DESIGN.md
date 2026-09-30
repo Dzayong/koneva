@@ -1,6 +1,6 @@
-# Consent / opt-out: what exists, gaps, design and estimate
+# Consent / opt-out: owner-review specification
 
-Separate from the outbound-controls fix (see [OUTBOUND_CONTROLS.md](OUTBOUND_CONTROLS.md)). **Design and estimates only; nothing in this file is implemented.** Estimates are engineering effort in person-days for one developer, before review, and are guesses to be re-checked after the first spike. Related research: `docs/research/2026-09-27-koneva/product-references.md` (P0 Produk + Trust; P0 Backend + QA). A consent flow reduces complaints and misuse; it is **not** WhatsApp's permission and not an anti-ban measure.
+Separate from the outbound-controls fix (see [OUTBOUND_CONTROLS.md](OUTBOUND_CONTROLS.md)). **For owner review: design and estimates only; no T1.4 implementation is authorized yet.** Estimates are engineering effort in person-days for one developer, before review, and should be rechecked after the first spike. A consent flow reduces complaints and misuse; it is **not** WhatsApp's permission and not an anti-ban measure.
 
 ## 1. What already exists (inventory)
 
@@ -23,35 +23,35 @@ Separate from the outbound-controls fix (see [OUTBOUND_CONTROLS.md](OUTBOUND_CON
 
 ## 3. Proposed design
 
-### 3.1 Consent model (`recipient_preferences`)
-`(tenant_id, phone_number normalised, status: opted_in | opted_out, source: inbound_keyword | manual | api | import, evidence_ref (message id or free label, no message body), decided_at, decided_by user id or null, note ≤ 200 chars)`, unique `(tenant_id, phone_number)`, workspace-wide. Hash-at-rest is optional; the number is already stored in `contacts`/`messages`.
+### 3.1 Consent record and definition
+Consent is explicit permission for promotional/proactive messages to one normalized recipient number in one workspace. A phone number in Contacts, an import, an existing customer relationship, an API-supplied declaration, or an inbound message that is not an opt-in command is **not** proof of consent. No consent row means promotional/proactive sends are denied. Consent is workspace-wide across devices and tied to a canonical phone number; use the project's existing normalization and reject values that cannot be normalized rather than creating ambiguous duplicates.
 
-### 3.2 Writers
-- Inbound keyword detection writes `opted_out` (source `inbound_keyword`, evidence = inbound message id) at reception, instead of re-deriving from history. A short "mulai/start" sets `opted_in`. The pattern gets a stricter mode (message consisting mainly of the keyword) to cut false positives.
-- Owner/Developer API + dashboard: list, add, remove, import CSV; every change audited in the workspace audit log.
-- `POST /message/send` and `/broadcast` accept an optional `consent: { basis: "opted_in"|"existing_customer"|"replied", ref? }` that is recorded (not verified).
+Proposed storage: current-state `recipient_preferences` keyed uniquely by `(tenant_id, normalized_phone_number)` with `status=opted_in|opted_out`, `source=inbound_keyword|manual`, `evidence_ref` (inbound message ID or operator evidence reference, never message body), `terms_version`, `decided_at`, and `decided_by`. Also append an immutable `recipient_consent_events` audit row for each grant/revoke, with tenant, normalized number, event, source, evidence reference, terms version, actor, timestamp. Cascading tenant deletion and account-close retention follow the existing workspace deletion/retention policy. Do not store message text in either table. Manual/import tools may set opt-out; manual opt-in must include an evidence reference and actor. Bulk import is not itself evidence of opt-in.
 
-### 3.3 Enforcement points (all four, so nothing bypasses)
-1. API: `queueMessage` and each broadcast recipient answer `409 RECIPIENT_OPTED_OUT` immediately (broadcast reports per-recipient `status: "opted_out"`), for proactive traffic.
-2. Worker: existing guard becomes a lookup in `recipient_preferences` (with the old history rule kept as a fallback during migration).
-3. Auto-reply: never answers a message that is itself an opt-out; otherwise replies remain allowed (a reply to someone who wrote first).
-4. Urgent/OTP: **policy decision needed**: an opt-out from marketing should not silence a user's own OTP. Proposal: urgent is exempt only when the caller marks it `purpose: "transactional"`, and this is logged.
+### 3.2 Inbound commands and state changes (owner-approved)
+Recognize a standalone `STOP` or `BERHENTI` as opt-out and a standalone `START` or `MULAI` as explicit inbound opt-in. Matching is case-insensitive; ignore terminal punctuation and surrounding whitespace. Do not trigger on a keyword embedded in ordinary prose. Process the inbound event idempotently. Opt-out takes effect immediately and remains until a later explicit opt-in; `START`/`MULAI` records timestamp, normalized number and inbound-message evidence. A contact import, API claim, prior reply, or purchase never clears opt-out.
 
-### 3.4 Migration / privacy
-Backfill from history with the current rule, marking `source = inbound_keyword`, so behaviour does not loosen. Retention: preferences kept while the workspace exists; export/delete with the workspace. Message text is never copied into the preference row.
+Workspace operators may manually record per-contact opt-in only with a required source note (for example, “offline store form”); store the actor, timestamp, normalized number, and note as evidence. Without the note, reject the operation. This is audit-only backend/database capability in T1.4; a management UI is a separate task. Contact import alone does not grant consent.
 
-### 3.5 Estimate
-| Piece | Days |
-|---|---|
-| Migration + model + backfill | 1.0 |
-| Inbound detection (stricter pattern, opt-in words) + tests | 1.5 |
-| API enforcement in send/broadcast + worker + auto-reply + tests | 2.0 |
-| Management API + audit + import | 1.5 |
-| Dashboard page (list, add/remove, import, explanations) | 2.0 |
-| Docs, review, edge cases (groups, `@lid` numbers, number formats) | 1.0 |
-| **Total** | **about 9 days** (7 without the dashboard page) |
+At STOP: persist the opt-out, suppress all queued promotional/proactive jobs for that workspace+recipient before transport, and send exactly one immediate non-promotional confirmation (for example, “Anda sudah berhenti menerima pesan promosi KONEVA.”). Deduplicate acknowledgement by inbound message/event ID so webhook retries do not send it more than once. Then send no further promotions until explicit re-opt-in. On re-opt-in, only future sends may resume; do not resurrect old queued jobs.
 
-Decisions for the owner: workspace-wide vs per-number scope; urgent/OTP policy; whether the API should *require* a consent declaration for broadcasts (fits the "consented recipient" positioning, adds friction).
+### 3.3 Four enforcement points
+1. **API admission (estimate separately):** `queueMessage` checks current consent before enqueuing `POST /message/send`; broadcast checks every recipient independently before enqueue and returns explicit per-recipient results. Denials are synchronous (`RECIPIENT_CONSENT_REQUIRED` for no recorded opt-in, `RECIPIENT_OPTED_OUT` for revoked consent). A caller-supplied consent declaration is not evidence and cannot bypass this check.
+2. **Queue worker / final send guard:** worker checks the workspace-wide consent state when claiming a job and again immediately before transport, covering already queued jobs, retries, and internal send paths. A STOP that arrives after enqueue must still prevent delivery. The existing 365-day per-device history rule is used only to seed migration/backfill and as a bounded compatibility fallback, not as the long-term source of truth.
+3. **Inbound / auto-reply path:** inbound handler recognizes and persists STOP before any auto-reply decision. STOP receives no promotional auto-reply; other inbound messages do not create marketing consent. The transaction should prevent races between STOP processing and queued promotional sends; implementation must define locking/order and test it.
+4. **Transactional exception (owner decision already locked):** necessary transactional messages, including OTP and payment confirmation, remain allowed after STOP; promotional messages stop fully. Only trusted server-side classification may use the exception. Client `priority: urgent`, a caller-supplied `purpose`, or a consent field is not proof. Preserve existing server-verified OTP rules (`otp_code` must be in message and pass current limits). Payment confirmations must use an internal server-owned send path; if no such path exists yet, do not invent a public bypass—record it as unavailable until added. Label “urgent” is restricted to service-necessary transactional messages; misuse is reviewed and may result in workspace suspension.
+
+### 3.4 Migration, privacy and rollout
+Create the schema and index idempotently. Backfill opted-out state from the existing 365-day rule, preserving conservative behavior without copying message text. Treat backfilled records as opted out, not as evidence of opted-in consent. Existing customers with no explicit consent remain blocked for promotional/proactive traffic until opt-in is collected. Roll out fail-closed for promo sends; transaction exception is narrowly server-controlled. Tenant isolation must be tested for state reads, writes, backfill, and worker checks. Keep preference/event records while the workspace exists, export/delete with the workspace, and align account-close deletion with the retention commitments. Do not touch production data during the task.
+
+### 3.5 Estimate (one developer, rough person-days)
+| Scope | Includes | Estimate |
+|---|---|---:|
+| **Enforcement point 1 only** | Schema/current-state model and safe legacy backfill; API send + per-recipient broadcast admission; outcomes, tenant isolation and targeted migration/API tests. Worker, STOP ingestion, transaction exception wiring, and UI are explicitly not covered, so queued/internal paths remain a known bypass until the rest is complete. | **2–3 days** |
+| **All four enforcement points** | Point 1 plus queue claim/final pre-transport checks, STOP/START ingestion and queue suppression, auto-reply behavior, server-trusted transaction exception, concurrency/race handling, migration/tenant-isolation/regression tests and docs. No management UI/import included. | **5–7 days total** |
+| Optional management surface | Workspace API/audit controls plus dashboard list and manual changes, with evidence requirement and tests. | **+2–4 days** |
+
+Owner approved the spec decisions on 2026-09-30: standalone case-insensitive `STOP`/`BERHENTI` and `START`/`MULAI`; one non-promotional STOP confirmation; manual per-contact opt-in only with a source note and timestamp/number audit; management UI in a separate task; and no recorded consent means promotional sends are denied. Workspace-wide scope and transactional exception are approved. Work is explicitly staged: implement enforcement point 1 (API pre-enqueue) first, report evidence for review, then continue with points 2–4 only after that layer is reviewed. Keep server-trusted classification for the transactional exception; do not accept caller-provided `priority: urgent` as proof.
 
 ## 4. Other patterns worth adopting from the research (selective)
 
