@@ -44,8 +44,8 @@ export interface SendMessageRequest {
   media_url?: string | undefined;
   media_type?: 'image' | 'video' | 'document' | undefined;
   external_id?: string | undefined;
-  /** 'urgent' is for OTP and other time-critical transactional messages. This is a routing/pacing hint only --
-   * it does NOT exempt a send from the monthly quota. See `otp_code` for the quota exemption. */
+  /** Accepted for backward compatibility but ignored as a trust signal. Server-verified transactional messages
+   * receive urgent routing; caller-supplied `urgent` never bypasses consent, quota, or pacing controls. */
   priority?: 'normal' | 'urgent' | undefined;
   /**
    * A short numeric code (4-10 digits) that must also appear inside `message`. When present and verified

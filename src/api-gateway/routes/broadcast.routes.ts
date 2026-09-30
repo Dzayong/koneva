@@ -7,6 +7,7 @@ import { validate } from '../middleware/validate';
 import pool from '../../shared/database/connection';
 import { assertSubscriptionActive } from '../services/billing.service';
 import { queueMessage } from '../services/message.service';
+import { ServiceError } from '../services/service-error';
 
 const router = Router();
 export const broadcastSchema = z.object({
@@ -25,7 +26,7 @@ export async function createBroadcast(request: Request, response: Response): Pro
   // A suspended workspace queues nothing at all: one clear refusal instead of hundreds of per-recipient failures.
   await assertSubscriptionActive(pool, request.tenant!.id);
   const broadcastId = randomUUID();
-  const results: Array<{ phone_number: string; message_id?: string; status: 'queued' | 'failed'; error?: string }> = [];
+  const results: Array<{ phone_number: string; message_id?: string; status: 'queued' | 'failed'; error_code?: string; error?: string }> = [];
   for (const [index, recipient] of input.recipients.entries()) {
     try {
       const message = await queueMessage(request.tenant!.id, {
@@ -40,6 +41,7 @@ export async function createBroadcast(request: Request, response: Response): Pro
       results.push({
         phone_number: recipient,
         status: 'failed',
+        ...(error instanceof ServiceError ? { error_code: error.code } : {}),
         error: error instanceof Error ? error.message : 'Unable to queue message',
       });
     }

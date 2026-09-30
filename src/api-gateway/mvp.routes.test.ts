@@ -107,7 +107,8 @@ test('broadcast contract accepts snake_case device key and recipient list', () =
 test('retry rejects a tenant-owned message that is not failed or blocked', async () => {
   database.query = async (text: string) => {
     if (text.includes('FROM subscriptions')) return { rows: [] }; // older workspace: no plan row, allowed
-    if (text.includes('AS device_status')) return { rows: [{ device_status: 'online' }] };
+    if (text.includes('AS device_status')) return { rows: [{ device_status: 'online', to_number: '6281234567890', quota_exempt: false }] };
+    if (text.includes('FROM recipient_preferences')) return { rows: [{ status: 'opted_in' }] };
     if (text.startsWith('UPDATE messages')) return { rows: [] }; // not failed/blocked: nothing updated
     return { rows: [{ status: 'sent' }] };
   };

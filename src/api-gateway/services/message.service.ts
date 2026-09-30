@@ -7,6 +7,7 @@ import type { PaginatedResponse, SendMessageRequest } from '../../shared/types/a
 import { ServiceError } from './service-error';
 import { assertSubscriptionActive, currentUsage } from './billing.service';
 import { looksLikeTransactional, reserveTransactionalExemption } from './message-exempt-limits';
+import { assertRecipientConsent } from './recipient-consent.service';
 import logger from '../../shared/utils/logger';
 
 const messageQueues = new Map<string, Queue>();
@@ -67,6 +68,7 @@ export async function queueMessage(
 
   const message = await transaction(async (client: PoolClient) => {
     await assertSubscriptionActive(client, tenantId);
+    await assertRecipientConsent(client, tenantId, input.to, exempt);
 
     const deviceResult = await client.query<{ id: string; status: string }>(
       'SELECT id, status FROM devices WHERE tenant_id = $1 AND device_key = $2',
@@ -86,7 +88,8 @@ export async function queueMessage(
       return usage.used >= usage.quota;
     })();
     const status = overQuota ? 'quota_hold' : 'queued';
-    const priority = exempt ? 'urgent' : (input.priority ?? 'normal');
+    // `priority` from a caller is never proof that a send is transactional or urgent.
+    const priority = exempt ? 'urgent' : 'normal';
 
     const result = await client.query<MessageRow>(
       `INSERT INTO messages
@@ -227,8 +230,10 @@ export async function listMessages(
 export async function retryMessage(tenantId: string, messageId: string): Promise<MessageRow> {
   // A retry is a new send: it needs a live plan and an online number, exactly like the first attempt (it does not use quota again).
   await assertSubscriptionActive(pool, tenantId);
-  const target = (await pool.query<{ device_status: string | null }>(
-    `SELECT d.status AS device_status FROM messages m LEFT JOIN devices d ON d.id = m.device_id WHERE m.id = $1 AND m.tenant_id = $2`, [messageId, tenantId])).rows[0];
+  const target = (await pool.query<{ device_status: string | null; to_number: string; quota_exempt: boolean }>(
+    `SELECT d.status AS device_status, m.to_number, COALESCE(m.quota_exempt, false) AS quota_exempt
+     FROM messages m LEFT JOIN devices d ON d.id = m.device_id WHERE m.id = $1 AND m.tenant_id = $2`, [messageId, tenantId])).rows[0];
+  if (target) await assertRecipientConsent(pool, tenantId, target.to_number, target.quota_exempt);
   if (target && target.device_status !== 'online') throw new ServiceError(503, 'DEVICE_OFFLINE', 'Device is not online');
   const result = await pool.query<MessageRow>(
     `UPDATE messages SET status='queued', error_message=NULL
@@ -244,7 +249,7 @@ export async function retryMessage(tenantId: string, messageId: string): Promise
   try {
     await enqueueStoredMessage(
       message.device_key, message.id, `${message.id}:retry:${Date.now()}`,
-      message.priority === 'urgent' ? 'urgent' : 'normal',
+      message.quota_exempt ? 'urgent' : 'normal',
     );
   } catch (error) {
     await pool.query(`UPDATE messages SET status='failed', error_message=$2 WHERE id=$1`,

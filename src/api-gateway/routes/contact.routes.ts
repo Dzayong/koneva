@@ -4,6 +4,7 @@ import pool, { transaction } from '../../shared/database/connection';
 import type { TenantContext } from '../../shared/types/api';
 import { validate } from '../middleware/validate';
 import { ServiceError } from '../services/service-error';
+import { getContactConsent, recordManualContactConsent } from '../services/recipient-consent.service';
 
 const router = Router();
 const phone = z.string().regex(/^\+?[1-9]\d{6,19}$/);
@@ -15,6 +16,10 @@ const contactBody = z.object({
 }).strict();
 const updateBody = contactBody.partial().refine((value) => Object.keys(value).length > 0);
 const idParams = z.object({ id: z.string().uuid() });
+const consentBody = z.object({
+  status: z.enum(['opted_in', 'opted_out']),
+  source_note: z.string().trim().min(1).max(500),
+}).strict();
 const listQuery = z.object({
   search: z.string().max(100).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -125,6 +130,22 @@ export async function deleteContact(request: Request, response: Response): Promi
   response.json({ success: true, data: null });
 }
 
+export async function readContactConsent(request: Request, response: Response): Promise<void> {
+  const { id } = request.validated!.params as { id: string };
+  response.json({ success: true, data: await getContactConsent(request.tenant!.id, id) });
+}
+
+export async function setContactConsent(request: Request, response: Response): Promise<void> {
+  const { id } = request.validated!.params as { id: string };
+  const input = request.validated!.body as z.infer<typeof consentBody>;
+  const actor = request.actor;
+  if (!actor || actor.kind !== 'user') {
+    throw new ServiceError(403, 'CONSENT_ACTOR_REQUIRED', 'A signed-in workspace member must record manual consent');
+  }
+  const data = await recordManualContactConsent(request.tenant!.id, id, input.status, input.source_note, actor.userId);
+  response.status(200).json({ success: true, data });
+}
+
 export async function importContacts(request: Request, response: Response): Promise<void> {
   const contacts = parseContactsCsv((request.validated!.body as z.infer<typeof importContactsSchema>).csv);
   const imported = await transaction(async (client) => {
@@ -146,6 +167,8 @@ export async function importContacts(request: Request, response: Response): Prom
 router.post('/contacts/import', validate({ body: importContactsSchema }), importContacts);
 router.post('/contacts', validate({ body: contactBody }), createContact);
 router.get('/contacts', validate({ query: listQuery }), listContacts);
+router.get('/contacts/:id/consent', validate({ params: idParams }), readContactConsent);
+router.put('/contacts/:id/consent', validate({ params: idParams, body: consentBody }), setContactConsent);
 router.get('/contacts/:id', validate({ params: idParams }), getContact);
 router.patch('/contacts/:id', validate({ params: idParams, body: updateBody }), updateContact);
 router.delete('/contacts/:id', validate({ params: idParams }), deleteContact);
