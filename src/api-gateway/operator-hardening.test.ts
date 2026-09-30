@@ -293,9 +293,9 @@ test('operator hardening: security events, offline administration, key managemen
     await pool.query('UPDATE tenants SET student_request_at=now(), student_note=$2 WHERE id=$1', [legacy, 'catatan lama']);
     await pool.query('UPDATE tenants SET student_request_at=now(), student_verified_at=now() WHERE id=$1', [approved]);
     await requestStudentVerification(fresh, 'mahasiswa@kampus.ac.id', 'baru');
-    assert.deepEqual((await getBillingState(legacy)).student, { verified: false, requested: false, needs_resubmission: true });
-    assert.deepEqual((await getBillingState(approved)).student, { verified: true, requested: true, needs_resubmission: false });
-    assert.deepEqual((await getBillingState(fresh)).student, { verified: false, requested: true, needs_resubmission: false });
+    assert.deepEqual((await getBillingState(legacy)).student, { verified: false, requested: false, needs_resubmission: true, status: 'legacy_pending', correction_due_at: null });
+    assert.deepEqual((await getBillingState(approved)).student, { verified: true, requested: true, needs_resubmission: false, status: null, correction_due_at: null });
+    assert.deepEqual((await getBillingState(fresh)).student, { verified: false, requested: true, needs_resubmission: false, status: 'pending', correction_due_at: null });
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM student_requests WHERE tenant_id=$1', [legacy])).rows[0].n, 0, 'no requester identity is invented');
     await requestStudentVerification(legacy, 'mahasiswa@kampus.ac.id', 'ajukan ulang');
     assert.equal((await getBillingState(legacy)).student.needs_resubmission, false);

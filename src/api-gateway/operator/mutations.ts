@@ -20,7 +20,7 @@ export async function confirmPayment(db: Pool, actor: Actor, id: string, key: st
       }
       const plan = (await client.query<PlanRow>(`SELECT id,name,audience,price_month_idr,price_year_idr,max_devices,monthly_messages,max_members,
         trial_days,requires_student_verification,price_is_final,published,sort_order,features FROM plans WHERE id=$1 FOR SHARE`, [invoice.plan_id])).rows[0]!;
-      if (plan.requires_student_verification && !tenant?.student_verified_at) throw new OperatorError(409, 'STUDENT_NOT_VERIFIED', 'Status pelajar belum disetujui.');
+      // Pelajar verification is post-payment; access begins with the confirmed paid period.
       const paid = (await client.query(`UPDATE invoices SET status='paid',paid_at=now(),method=$2,reference=$3,note=$4,confirmed_by=$5 WHERE id=$1
         RETURNING id,number,status,version,paid_at,method,reference`, [id, input.method, input.reference?.trim() || null, input.note ?? null, actor.id])).rows[0];
       const period = await activatePaid(client, target.tenant_id, plan, invoice.cycle);
@@ -45,7 +45,7 @@ export async function decideStudent(db: Pool, actor: Actor, id: string, key: str
     const target = (await client.query<{ tenant_id: string }>('SELECT tenant_id FROM student_requests WHERE id=$1', [id])).rows[0];
     if (!target) throw new OperatorError(404, 'REQUEST_NOT_FOUND', 'Pengajuan tidak ditemukan.');
     await client.query('SELECT id FROM tenants WHERE id=$1 FOR UPDATE', [target.tenant_id]);
-    const row = (await client.query(`SELECT r.id,r.status,r.version,r.decided_at,
+    const row = (await client.query(`SELECT r.id,r.status,r.version,r.decided_at,r.requester_email,
       CASE WHEN o.id IS NULL THEN NULL ELSE json_build_object('name',o.name) END AS decided_by
       FROM student_requests r LEFT JOIN operators o ON o.id=r.decided_by WHERE r.id=$1 FOR UPDATE OF r`, [id])).rows[0];
     if (!row) throw new OperatorError(404, 'REQUEST_NOT_FOUND', 'Pengajuan tidak ditemukan.');
@@ -55,10 +55,31 @@ export async function decideStudent(db: Pool, actor: Actor, id: string, key: str
     }
     if (row.status !== 'pending') throw new OperatorError(409, 'REQUEST_NOT_PENDING', 'Pengajuan sudah diputuskan.', { current_status: row.status, decided_at: row.decided_at, decided_by: row.decided_by });
     if (input.expected.request_id.toLowerCase() !== id || row.version !== input.expected.version) throw new OperatorError(409, 'REQUEST_CHANGED', 'Pengajuan berubah.', { version: row.version });
-    const status = input.decision === 'approve' ? 'approved' : 'rejected';
-    const result = (await client.query(`UPDATE student_requests SET status=$2,version=version+1,decided_at=now(),decided_by=$3,reason=$4 WHERE id=$1
-      RETURNING id,status,version,decided_at,reason`, [id, status, actor.id, input.reason?.trim() || null])).rows[0];
-    if (status === 'approved') await client.query('UPDATE tenants SET student_verified_at=now() WHERE id=$1', [target.tenant_id]);
+    const tenant = (await client.query<{ student_invalid_decisions: number }>(
+      'SELECT student_invalid_decisions FROM tenants WHERE id=$1', [target.tenant_id])).rows[0];
+    let status: string;
+    let dueAt: Date | null = null;
+    if (input.decision === 'approve') {
+      status = 'approved';
+      await client.query('UPDATE tenants SET student_verified_at=now(),student_invalid_decisions=0 WHERE id=$1', [target.tenant_id]);
+    } else {
+      const invalidCount = (tenant?.student_invalid_decisions ?? 0) + 1;
+      if (invalidCount >= 2) {
+        status = 'rejected';
+        await client.query('UPDATE tenants SET student_invalid_decisions=$2 WHERE id=$1', [target.tenant_id, invalidCount]);
+        await client.query("UPDATE subscriptions SET status='suspended',updated_at=now() WHERE tenant_id=$1 AND plan_id='pelajar'", [target.tenant_id]);
+        if (row.requester_email) await client.query(`INSERT INTO student_email_outbox(student_request_id,tenant_id,recipient,kind)
+          VALUES($1,$2,$3,'second_invalid_suspend') ON CONFLICT(student_request_id,kind) DO NOTHING`, [id,target.tenant_id,row.requester_email]);
+      } else {
+        status = 'correction_required';
+        dueAt = new Date(Date.now() + 7 * 86_400_000);
+        await client.query('UPDATE tenants SET student_invalid_decisions=$2 WHERE id=$1', [target.tenant_id, invalidCount]);
+        if (row.requester_email) await client.query(`INSERT INTO student_email_outbox(student_request_id,tenant_id,recipient,kind,due_at)
+          VALUES($1,$2,$3,'correction_deadline',$4) ON CONFLICT(student_request_id,kind) DO NOTHING`, [id,target.tenant_id,row.requester_email,dueAt]);
+      }
+    }
+    const result = (await client.query(`UPDATE student_requests SET status=$2,correction_due_at=$3,version=version+1,decided_at=now(),decided_by=$4,reason=$5 WHERE id=$1
+      RETURNING id,status,version,decided_at,correction_due_at,reason`, [id, status, dueAt, actor.id, input.reason?.trim() || null])).rows[0];
     // Rejecting an application never revokes a previously approved entitlement (revoke is outside MVP).
     await writeAudit(client, actor, 'student_request.decision', 'student_request', id, null,
       { status: { from: 'pending', to: status }, version: { from: row.version, to: result.version } }, requestId);

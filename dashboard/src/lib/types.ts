@@ -446,7 +446,7 @@ export interface BillingState {
     quota_note: string | null;
     devices_used: number; devices_limit: number; members_used: number; members_limit: number | null;
   };
-  student: { verified: boolean; requested: boolean; needs_resubmission?: boolean };
+  student: { verified: boolean; requested: boolean; needs_resubmission?: boolean; status?: string | null; correction_due_at?: string | null };
   plans: PublicPlan[];
   invoices: Invoice[];
   payment: { instructions: string; contact: string | null };

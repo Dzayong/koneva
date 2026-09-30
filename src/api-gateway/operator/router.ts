@@ -23,7 +23,7 @@ const enrollConfirmSchema = z.object({ challenge_id: challengeId, code: z.string
 const loginSchema = z.object({ email: z.string().trim().toLowerCase().email().max(255), password }).strict();
 const pageSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25), offset: z.coerce.number().int().min(0).max(1_000_000).default(0), q: z.string().max(100).optional() }).strict();
 const invoiceFilters = pageSchema.extend({ status: z.enum(['unpaid','paid','void']).optional() });
-const studentFilters = pageSchema.extend({ status: z.enum(['pending','approved','rejected','superseded']).optional() });
+const studentFilters = pageSchema.extend({ status: z.enum(['pending','approved','rejected','correction_required','expired','superseded']).optional() });
 const paymentSchema = z.object({ method: z.enum(['transfer','ewallet','qris','tunai','lainnya']), reference: z.string().max(80).optional(), note: z.string().max(500).optional(),
   expected: z.object({ amount_idr: z.number().int().nonnegative(), version: z.number().int().positive() }).strict() }).strict();
 const decisionSchema = z.object({ decision: z.enum(['approve','reject']), reason: z.string().max(500).optional(),

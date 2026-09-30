@@ -12,7 +12,7 @@ import { csrfFor } from './operator/auth';
 import { hash } from './operator/core';
 import { base32Decode, codeHash, encryptSecret, newEnrollmentCode, stepAt, totp } from './operator/mfa';
 import { execFile } from 'node:child_process';
-import { requestStudentVerification } from './services/billing.service';
+import { requestStudentVerification, sweepStudentVerificationDeadlines } from './services/billing.service';
 import adminRoutes from './routes/admin.routes';
 import { adminAuth } from './middleware/auth';
 
@@ -155,7 +155,7 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     const i=await invoice();
     await pool.query('UPDATE invoices SET amount_idr=100000 WHERE id=$1',[i.id]);
     const changed=await pay(i.id); assertCode(changed,409,'INVOICE_CHANGED'); assert.equal(changed.body.error.details.current.version,2);
-    const student=await invoice('','pelajar'); assertCode(await pay(student.id),409,'STUDENT_NOT_VERIFIED');
+    const student=await invoice('','pelajar'); assert.equal((await pay(student.id)).status,200,'paid Pelajar access starts while evidence verification is pending');
   });
   await t.test('normalized reference uniqueness is atomic and scoped by method', async () => {
     const a=await invoice(),b=await invoice(),reference=`REF-${randomUUID()}`;
@@ -235,6 +235,40 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     assert.deepEqual(results.map((r)=>r.status).sort(),[200,409]);
     assert.equal((await pool.query('SELECT id FROM operator_audit WHERE target_id=$1',[id])).rowCount,1);
   });
+  await t.test('first invalid student proof gets seven-day correction; expiry restores catalog price; second invalid suspends', async () => {
+    const tenant = await workspace();
+    await pool.query(`INSERT INTO subscriptions(tenant_id,plan_id,status,cycle,period_start,period_end,price_override_idr)
+      VALUES($1,'pelajar','active','monthly',now(),now()+interval '20 days',19000)`, [tenant]);
+    const renewal = await invoice(tenant, 'pelajar');
+    await pool.query('UPDATE invoices SET amount_idr=19000 WHERE id=$1', [renewal.id]);
+    const email = 'student@campus.example.ac.id';
+    const decide = (id: string) => call(`/student-requests/${id}/decision`, { session: op, method: 'POST', key: randomUUID(),
+      body: { decision: 'reject', reason: 'Bukti tidak valid', expected: { request_id: id, version: 1 } } });
+    await requestStudentVerification(tenant, email, 'Keterangan bukti pertama');
+    let id = (await pool.query("SELECT id FROM student_requests WHERE tenant_id=$1 AND status='pending'", [tenant])).rows[0].id as string;
+    const first = await decide(id);
+    assert.equal(first.status, 200, first.text); assert.equal(first.body.data.status, 'correction_required');
+    const dueAt = (await pool.query('SELECT correction_due_at FROM student_requests WHERE id=$1', [id])).rows[0].correction_due_at as Date;
+    assert.ok(dueAt.getTime() > Date.now() + 6 * 86_400_000 && dueAt.getTime() < Date.now() + 8 * 86_400_000);
+    let sub = (await pool.query('SELECT status,price_override_idr FROM subscriptions WHERE tenant_id=$1', [tenant])).rows[0];
+    assert.equal(sub.status, 'active'); assert.equal(sub.price_override_idr, 19000);
+    assert.equal((await pool.query('SELECT kind FROM student_email_outbox WHERE student_request_id=$1', [id])).rows[0].kind, 'correction_deadline');
+    await pool.query("UPDATE student_requests SET correction_due_at=now()-interval '1 second' WHERE id=$1", [id]);
+    assert.equal(await sweepStudentVerificationDeadlines(), 1);
+    sub = (await pool.query('SELECT status,price_override_idr FROM subscriptions WHERE tenant_id=$1', [tenant])).rows[0];
+    assert.equal(sub.status, 'active'); assert.equal(sub.price_override_idr, null);
+    assert.equal((await pool.query('SELECT amount_idr FROM invoices WHERE id=$1', [renewal.id])).rows[0].amount_idr, 29000,
+      'an already-created unpaid renewal is repriced at the catalog rate at the deadline');
+    assert.equal((await pool.query('SELECT status FROM student_requests WHERE id=$1', [id])).rows[0].status, 'expired');
+    await requestStudentVerification(tenant, email, 'Keterangan bukti kedua');
+    id = (await pool.query("SELECT id FROM student_requests WHERE tenant_id=$1 AND status='pending'", [tenant])).rows[0].id as string;
+    const second = await decide(id);
+    assert.equal(second.status, 200, second.text); assert.equal(second.body.data.status, 'rejected');
+    sub = (await pool.query('SELECT status,price_override_idr FROM subscriptions WHERE tenant_id=$1', [tenant])).rows[0];
+    assert.equal(sub.status, 'suspended'); assert.equal(sub.price_override_idr, null);
+    assert.equal((await pool.query('SELECT kind FROM student_email_outbox WHERE student_request_id=$1', [id])).rows[0].kind, 'second_invalid_suspend');
+  });
+
   await t.test('workspace and invoice DTOs omit all seeded secrets; pagination remains stable beyond end', async () => {
     const i=await invoice();
     await pool.query('INSERT INTO devices(tenant_id,device_key,qr_code) VALUES ($1,$2,$3)',[i.tenantId,`SYNTH-${randomUUID().slice(0,10)}`,'PRIVATE_QR']);

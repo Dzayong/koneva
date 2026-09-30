@@ -54,7 +54,7 @@ export async function invoiceDetail(db: Pool | PoolClient, id: string) {
 
 const STUDENT_COLUMNS = `r.id,json_build_object('id',t.id,'name',t.name) AS workspace,
   left(r.requester_email,1) || '***@' || split_part(r.requester_email,'@',2) AS requester_email_masked,
-  split_part(r.requester_email,'@',2) AS email_domain,r.status,r.requested_at,r.version`;
+  split_part(r.requester_email,'@',2) AS email_domain,r.status,r.requested_at,r.version,r.correction_due_at`;
 export async function listStudents(db: Pool, filter: PageFilter) {
   const result = await page(db, STUDENT_COLUMNS, 'FROM student_requests r JOIN tenants t ON t.id=r.tenant_id',
     "($1::text IS NULL OR r.status=$1) AND ($2::text IS NULL OR t.name ILIKE '%' || $2 || '%' OR split_part(r.requester_email,'@',2) ILIKE '%' || $2 || '%')",

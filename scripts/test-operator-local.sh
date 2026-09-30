@@ -26,7 +26,7 @@ export EMAIL_TRANSPORT=none GMAIL_OAUTH_CLIENT_ID= GMAIL_OAUTH_CLIENT_SECRET= GM
 OPERATOR_MFA_ENC_KEY=$(head -c 32 /dev/urandom | base64); export OPERATOR_MFA_ENC_KEY
 ./node_modules/.bin/tsc --noEmit
 if [[ "${1:-}" == '--all' ]]; then
-  node --require ts-node/register --test --test-concurrency=1 src/**/*.test.ts
+  node --require ts-node/register --test --test-concurrency=1 src/**/*.test.ts src/api-gateway/services/mailer.test.ts
 else
   node --require ts-node/register --test --test-concurrency=1 src/api-gateway/operator.test.ts src/api-gateway/operator-core.test.ts src/api-gateway/operator-mfa.test.ts src/api-gateway/operator-hardening.test.ts src/api-gateway/roles-access.test.ts src/api-gateway/otp-limits.test.ts src/api-gateway/operator-alerts.test.ts src/api-gateway/team.test.ts src/api-gateway/billing.test.ts src/shared/permissions.test.ts
 fi

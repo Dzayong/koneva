@@ -6,7 +6,8 @@ const INVOICE: Record<InvoiceStatus, { label: string; variant: "default" | "seco
 };
 const STUDENT: Record<StudentStatus, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
   pending: { label: "Menunggu", variant: "secondary" }, approved: { label: "Disetujui", variant: "default" },
-  rejected: { label: "Ditolak", variant: "destructive" }, superseded: { label: "Digantikan", variant: "outline" },
+  rejected: { label: "Ditolak / ditangguhkan", variant: "destructive" }, correction_required: { label: "Perlu perbaikan", variant: "secondary" },
+  expired: { label: "Tenggat lewat", variant: "outline" }, superseded: { label: "Digantikan", variant: "outline" },
 };
 
 export const InvoiceStatusBadge = ({ status }: { status: InvoiceStatus }) => <Badge variant={INVOICE[status].variant}>{INVOICE[status].label}</Badge>;

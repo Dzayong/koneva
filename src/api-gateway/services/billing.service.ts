@@ -5,6 +5,7 @@ import {
   type BillingCycle, type SubscriptionStatus,
 } from '../../shared/billing';
 import { ServiceError } from './service-error';
+import { sendNoticeEmail } from './mailer';
 
 type Queryable = Pick<PoolClient, 'query'> | typeof pool;
 
@@ -152,7 +153,7 @@ export async function requestStudentVerification(tenantId: string, requesterEmai
   await transaction(async (client) => {
     const tenant = await client.query('SELECT id FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
     if (!tenant.rows.length) throw new ServiceError(404, 'TENANT_NOT_FOUND', 'Workspace not found');
-    await client.query("UPDATE student_requests SET status = 'superseded', version = version + 1 WHERE tenant_id = $1 AND status = 'pending'", [tenantId]);
+    await client.query("UPDATE student_requests SET status = 'superseded', version = version + 1 WHERE tenant_id = $1 AND status IN ('pending','correction_required')", [tenantId]);
     await client.query('INSERT INTO student_requests (tenant_id, requester_email, note) VALUES ($1, $2, $3)', [tenantId, requesterEmail.toLowerCase(), note.slice(0, 500)]);
     await client.query('UPDATE tenants SET student_request_at = now(), student_note = $2 WHERE id = $1', [tenantId, note.slice(0, 500)]);
   });
@@ -179,6 +180,7 @@ export async function createOrder(tenantId: string, planId: string, cycle: Billi
   if (cycle === 'yearly') throw new ServiceError(400, 'ANNUAL_CHECKOUT_CLOSED', 'Checkout tahunan sudah ditutup untuk pesanan baru. Pilih siklus bulanan.');
   return transaction(async (client) => {
     await client.query('SELECT id FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
+    await expireStudentVerificationForTenant(client, tenantId);
     const plan = (await client.query<PlanRow>(`SELECT ${PLAN_COLUMNS} FROM plans WHERE id = $1 AND published = true`, [planId])).rows[0];
     if (!plan || plan.audience === 'trial' || plan.audience === 'internal') throw new ServiceError(400, 'INVALID_PLAN', 'Paket tidak tersedia.');
     if (!plan.price_is_final) throw new ServiceError(409, 'PRICE_NOT_FINAL', 'Harga paket ini belum diumumkan. Hubungi penyedia layanan untuk mengaktifkan.');
@@ -191,10 +193,7 @@ export async function createOrder(tenantId: string, planId: string, cycle: Billi
     )).rows[0];
     const amount = (current?.plan_id === plan.id && current.price_override_idr != null) ? current.price_override_idr : priceFor(plan, cycle);
     if (amount <= 0) throw new ServiceError(409, 'PRICE_NOT_SET', 'Harga paket belum diatur.');
-    if (plan.requires_student_verification) {
-      const tenant = (await client.query<{ student_verified_at: Date | null }>('SELECT student_verified_at FROM tenants WHERE id = $1', [tenantId])).rows[0];
-      if (!tenant?.student_verified_at) throw new ServiceError(409, 'STUDENT_NOT_VERIFIED', 'Paket Pelajar butuh verifikasi status pelajar terlebih dulu.');
-    }
+    // Student evidence is reviewed after payment; the paid workspace is active while review is pending.
     // Only one open invoice at a time, so a customer is never unsure which one to pay.
     await client.query(`UPDATE invoices SET status = 'void' WHERE tenant_id = $1 AND status = 'unpaid'`, [tenantId]);
     return (await client.query<InvoiceRow>(
@@ -216,10 +215,6 @@ export async function markInvoicePaid(invoiceId: string, input: { method: string
     if (!invoice) throw new ServiceError(404, 'INVOICE_NOT_FOUND', 'Invoice not found');
     if (invoice.status !== 'unpaid') throw new ServiceError(409, 'INVOICE_NOT_PAYABLE', `Invoice is already ${invoice.status}`);
     const plan = (await client.query<PlanRow>(`SELECT ${PLAN_COLUMNS} FROM plans WHERE id = $1`, [invoice.plan_id])).rows[0]!;
-    if (plan.requires_student_verification) {
-      const tenant = (await client.query<{ student_verified_at: Date | null }>('SELECT student_verified_at FROM tenants WHERE id = $1', [invoice.tenant_id])).rows[0];
-      if (!tenant?.student_verified_at) throw new ServiceError(409, 'STUDENT_NOT_VERIFIED', 'Verify the student status before activating this plan');
-    }
     await client.query(
       `UPDATE invoices SET status = 'paid', paid_at = now(), method = $2, reference = $3, note = $4 WHERE id = $1`,
       [invoiceId, input.method, input.reference ?? null, input.note ?? null],
@@ -265,6 +260,9 @@ export async function getBillingState(tenantId: string) {
   // (A rejected or superseded request DOES have a row and is not "legacy".) Existing approvals stay valid.
   const legacyPending = Boolean(tenant?.student_request_at) && !tenant?.student_verified_at && !(await pool.query(
     'SELECT 1 FROM student_requests WHERE tenant_id = $1 LIMIT 1', [tenantId])).rows.length;
+  const studentRequest = (await pool.query<{ status: string; correction_due_at: Date | null }>(
+    'SELECT status,correction_due_at FROM student_requests WHERE tenant_id=$1 ORDER BY requested_at DESC,id DESC LIMIT 1', [tenantId],
+  )).rows[0];
   const now = new Date();
   const status = sub ? effectiveStatus({ status: sub.status, period_end: sub.period_end }, now) : 'active';
   const window = sub ? usageWindow(new Date(sub.period_start), now) : null;
@@ -301,7 +299,13 @@ export async function getBillingState(tenantId: string) {
       devices_used: counts?.devices ?? 0, devices_limit: tenant?.max_devices ?? 0,
       members_used: counts?.members ?? 0, members_limit: plan?.max_members ?? null,
     },
-    student: { verified: Boolean(tenant?.student_verified_at), requested: Boolean(tenant?.student_request_at) && !legacyPending, needs_resubmission: legacyPending },
+    student: {
+      verified: Boolean(tenant?.student_verified_at),
+      requested: Boolean(tenant?.student_request_at) && !legacyPending,
+      needs_resubmission: legacyPending,
+      status: studentRequest?.status ?? (legacyPending ? 'legacy_pending' : null),
+      correction_due_at: studentRequest?.correction_due_at ?? null,
+    },
     plans: orderable.filter((p) => p.audience !== 'trial' && p.audience !== 'internal'),
     invoices,
   };
@@ -365,4 +369,69 @@ export async function sweepSubscriptions(): Promise<{ expired: number; past_due:
     `UPDATE subscriptions SET status = 'suspended', updated_at = now()
      WHERE status IN ('active', 'past_due') AND period_end + make_interval(days => $1::int) < now() RETURNING tenant_id`, [GRACE_DAYS]);
   return { expired: expired.rows.length, past_due: pastDue.rows.length, suspended: suspended.rows.length };
+}
+
+/** The first invalid decision gives seven days to correct; expiry restores catalog pricing, never suspends. */
+export async function sweepStudentVerificationDeadlines(): Promise<number> {
+  return transaction(async (client) => {
+    const due = await client.query<{ tenant_id: string; request_id: string }>(
+      `SELECT t.id AS tenant_id,r.id AS request_id FROM tenants t JOIN student_requests r ON r.tenant_id=t.id
+       WHERE r.status='correction_required' AND r.correction_due_at<=now()
+       ORDER BY t.id,r.id FOR UPDATE OF t SKIP LOCKED LIMIT 100`,
+    );
+    let expired = 0;
+    for (const item of due.rows) {
+      expired += await expireStudentVerificationForTenant(client, item.tenant_id, item.request_id);
+    }
+    return expired;
+  });
+}
+
+async function expireStudentVerificationForTenant(client: Queryable, tenantId: string, requestId?: string): Promise<number> {
+  const expired = await client.query(`UPDATE student_requests SET status='expired',version=version+1
+    WHERE tenant_id=$1 AND ($2::uuid IS NULL OR id=$2) AND status='correction_required' AND correction_due_at<=now() RETURNING id`, [tenantId, requestId ?? null]);
+  if (!expired.rowCount) return 0;
+  await client.query("UPDATE subscriptions SET price_override_idr=NULL,updated_at=now() WHERE tenant_id=$1 AND plan_id='pelajar'", [tenantId]);
+  await client.query(`UPDATE invoices SET amount_idr=(SELECT price_month_idr FROM plans WHERE id='pelajar')
+    WHERE tenant_id=$1 AND plan_id='pelajar' AND cycle='monthly' AND status='unpaid'`, [tenantId]);
+  return expired.rowCount;
+}
+
+/** Sends durable student-decision notices. A configured dev-outbox remains entirely local. */
+export async function drainStudentEmailOutbox(): Promise<{ sent: number; failed: number }> {
+  let sent = 0;
+  let failed = 0;
+  for (let i = 0; i < 10; i += 1) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const notice = (await client.query<{ id: number; recipient: string; kind: string; due_at: Date | null }>(
+        `SELECT id,recipient,kind,due_at FROM student_email_outbox WHERE sent_at IS NULL
+         ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1`,
+      )).rows[0];
+      if (!notice) { await client.query('COMMIT'); break; }
+      await client.query('UPDATE student_email_outbox SET attempts=attempts+1 WHERE id=$1', [notice.id]);
+      const correction = notice.kind === 'correction_deadline';
+      const due = notice.due_at ? new Date(notice.due_at).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }) : '';
+      try {
+        await sendNoticeEmail({
+          to: notice.recipient,
+          subject: correction ? 'Perbaiki bukti verifikasi Pelajar KONEVA' : 'Status verifikasi Pelajar KONEVA',
+          body: correction
+            ? `Bukti verifikasi Pelajar Anda belum valid atau belum lengkap. Layanan berbayar tetap aktif. Silakan perbaiki dan ajukan kembali paling lambat ${due}. Jika tidak diperbaiki sampai tenggat, harga perpanjangan mengikuti harga normal Pelajar. Kebijakan refund mengikuti Syarat Layanan KONEVA.`
+            : 'Bukti verifikasi Pelajar Anda tidak valid untuk kedua kalinya. Workspace ditangguhkan sementara. Silakan hubungi KONEVA melalui koneva.id26@gmail.com untuk tindak lanjut.',
+        });
+        await client.query('UPDATE student_email_outbox SET sent_at=now() WHERE id=$1', [notice.id]);
+        sent += 1;
+      } catch {
+        // Retry later; do not log the recipient, message body, or provider credentials.
+        failed += 1;
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally { client.release(); }
+  }
+  return { sent, failed };
 }

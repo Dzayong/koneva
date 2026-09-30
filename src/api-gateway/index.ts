@@ -28,7 +28,7 @@ import { purgeOldCommands } from './services/command.service';
 import deviceContentRoutes from './routes/device-content.routes';
 import billingRoutes from './routes/billing.routes';
 import publicRoutes from './routes/public.routes';
-import { sweepSubscriptions } from './services/billing.service';
+import { drainStudentEmailOutbox, sweepStudentVerificationDeadlines, sweepSubscriptions } from './services/billing.service';
 import { sweepQuotaHolds } from './services/message.service';
 import { auditTrail } from './middleware/audit';
 import { ServiceError } from './services/service-error';
@@ -124,6 +124,14 @@ const runSweep = (): void => {
     })
     .catch((error: unknown) => logger.error('Subscription sweep failed', { error: error instanceof Error ? error.message : String(error) }));
 };
+const runStudentVerificationMaintenance = (): void => {
+  Promise.all([sweepStudentVerificationDeadlines(), drainStudentEmailOutbox()])
+    .then(([expired, email]) => {
+      if (expired > 0) logger.info('Student verification deadlines applied', { expired });
+      if (email.sent > 0 || email.failed > 0) logger.info('Student verification email outbox processed', email);
+    })
+    .catch((error: unknown) => logger.error('Student verification maintenance failed', { error: error instanceof Error ? error.message : String(error) }));
+};
 const runPurge = (): void => { void purgeOldCommands().catch((error: unknown) => logger.error('Command purge failed', { error: error instanceof Error ? error.message : String(error) })); };
 // Messages held because the monthly quota was full: released, in order, as soon as any tenant has headroom again
 // (a new billing window, an upgrade, or another send finishing this period). Never dropped while held.
@@ -147,6 +155,8 @@ setTimeout(runPurge, 45_000).unref();
 setInterval(runPurge, 60 * 60_000).unref();
 setTimeout(runSweep, 30_000).unref();
 setInterval(runSweep, 60 * 60_000).unref();
+setTimeout(runStudentVerificationMaintenance, 35_000).unref();
+setInterval(runStudentVerificationMaintenance, 60_000).unref();
 setTimeout(runQuotaRelease, 40_000).unref();
 setInterval(runQuotaRelease, 2 * 60_000).unref();
 

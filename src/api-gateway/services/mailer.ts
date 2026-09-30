@@ -5,7 +5,7 @@ import { ServiceError } from './service-error';
 import { isSandbox, isSandboxEmailAllowed } from '../../shared/sandbox';
 
 /**
- * Outgoing email, used only for invitation OTPs today.
+ * Outgoing email for invitation/email-verification OTPs and queued account notices.
  *
  * EMAIL_TRANSPORT:
  *   (unset) / none : no sender configured. Anything that needs email FAILS SAFE (503 EMAIL_NOT_CONFIGURED).
@@ -15,6 +15,7 @@ import { isSandbox, isSandboxEmailAllowed } from '../../shared/sandbox';
  * The Gmail OAuth refresh credential must be stored as a secret and never logged or checked in.
  */
 export interface OtpMessage { to: string; code: string; workspace: string; validMinutes: number; purpose?: 'invitation' | 'email-verification' }
+export interface NoticeMessage { to: string; subject: string; body: string }
 
 export type EmailTransport = 'none' | 'dev-outbox' | 'gmail-api';
 export function emailTransport(env: NodeJS.ProcessEnv = process.env): EmailTransport {
@@ -65,6 +66,22 @@ export async function sendInvitationOtp(message: OtpMessage, env: NodeJS.Process
     return;
   }
   await sendGmailApi(message, env);
+}
+
+/** Plain-text account notice for post-payment student verification. */
+export async function sendNoticeEmail(message: NoticeMessage, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  requireEmail(env);
+  const transport = emailTransport(env);
+  if (isSandbox(env) && transport === 'gmail-api' && !isSandboxEmailAllowed(message.to, env)) {
+    throw new ServiceError(403, 'SANDBOX_RECIPIENT_NOT_ALLOWED', 'Sandbox hanya mengizinkan pengiriman ke alamat yang ada di allowlist.');
+  }
+  const safeSubject = message.subject.replace(/[\r\n\x00-\x1f\x7f]/g, ' ').slice(0, 120);
+  const safeBody = message.body.replace(/\x00/g, '').slice(0, 8000);
+  if (transport === 'dev-outbox') {
+    fs.appendFileSync(env['DEV_EMAIL_OUTBOX_FILE']!, `${JSON.stringify({ at: new Date().toISOString(), to: message.to, subject: safeSubject, body: safeBody })}\n`, { mode: 0o600 });
+    return;
+  }
+  await sendGmailRaw(message.to, safeSubject, safeBody, env);
 }
 
 interface OAuthTokenResponse { access_token?: string; expires_in?: number }
@@ -124,6 +141,19 @@ export function encodeMessage(message: OtpMessage, sender: string): string {
 
 async function sendGmailApi(message: OtpMessage, env: NodeJS.ProcessEnv): Promise<void> {
   const raw = encodeMessage(message, env['GMAIL_SENDER_EMAIL']!);
+  await sendGmailRawEncoded(raw, env);
+}
+
+async function sendGmailRaw(to: string, subject: string, body: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const raw = Buffer.from([
+    `From: KONEVA <${env['GMAIL_SENDER_EMAIL']!}>`, `To: ${to}`, `Subject: ${subject}`,
+    'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '',
+    Buffer.from(body, 'utf8').toString('base64').replace(/.{1,76}/g, '$&\r\n').trimEnd(),
+  ].join('\r\n'), 'utf8').toString('base64url');
+  await sendGmailRawEncoded(raw, env);
+}
+
+async function sendGmailRawEncoded(raw: string, env: NodeJS.ProcessEnv): Promise<void> {
   // One credential refresh and retry handles an access token revoked/expired before its cached TTL.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const token = await gmailAccessToken(env);

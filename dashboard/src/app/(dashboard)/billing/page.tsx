@@ -81,23 +81,35 @@ function StudentBox({ state }: { state: BillingState }) {
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   if (state.student.verified) return null;
+  const eligible = state.subscription?.plan_id === "pelajar" && state.subscription.status === "active";
+  const studentStatus = state.student.status;
   return (
     <div className="rounded-xl border bg-card p-5">
       <div className="flex items-center gap-2 font-semibold"><GraduationCap className="h-5 w-5" />Paket Pelajar</div>
-      {state.student.requested ? (
-        <p className="mt-2 text-sm text-muted-foreground">Permintaan verifikasi sudah dikirim dan sedang diperiksa. Anda bisa memesan paket Pelajar setelah disetujui.</p>
+      {!eligible ? (
+        <p className="mt-2 text-sm text-muted-foreground">Bayar dan tunggu konfirmasi paket Pelajar terlebih dahulu. Layanan berbayar langsung aktif; bukti status pelajar diajukan setelahnya.</p>
+      ) : studentStatus === "pending" ? (
+        <p className="mt-2 text-sm text-muted-foreground">Bukti sedang diperiksa. Layanan berbayar tetap aktif selama menunggu.</p>
+      ) : studentStatus === "rejected" ? (
+        <p className="mt-2 text-sm text-destructive">Workspace ditangguhkan setelah bukti dinyatakan tidak valid dua kali. Hubungi koneva.id26@gmail.com.</p>
       ) : (
         <form className="mt-2 space-y-3" onSubmit={(e) => {
           e.preventDefault(); setError(null);
           request.mutate(note, { onError: (err) => { const f = apiFailure(err); setError(f.code === "NOT_A_STUDENT_EMAIL" ? "Gunakan email kampus atau sekolah (misalnya .ac.id) untuk akun Anda." : f.message); } });
         }}>
+          {studentStatus === "correction_required" && (
+            <p role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">Bukti perlu diperbaiki paling lambat {state.student.correction_due_at ? formatDate(state.student.correction_due_at) : "dalam 7 hari"}. Layanan tetap aktif dan tidak ada refund. Jika tenggat lewat, harga perpanjangan kembali ke harga normal Pelajar.</p>
+          )}
+          {studentStatus === "expired" && (
+            <p role="note" className="rounded-lg border bg-muted p-3 text-sm">Tenggat perbaikan sebelumnya lewat. Perpanjangan memakai harga normal Pelajar; Anda masih dapat mengajukan bukti.</p>
+          )}
           {state.student.needs_resubmission && (
             <p role="note" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">Pengajuan verifikasi Anda sebelumnya belum sempat diperiksa karena sistem verifikasi diperbarui. Mohon ajukan ulang; pengajuan baru langsung masuk antrean pemeriksaan.</p>
           )}
-          <p className="text-sm text-muted-foreground">Paket Pelajar butuh verifikasi. Akun Anda harus memakai email kampus atau sekolah; tambahkan keterangan singkat (nama kampus, NIM) bila perlu.</p>
-          <Textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Nama kampus / sekolah, NIM" />
+          <p className="text-sm text-muted-foreground">Gunakan email kampus atau sekolah. Jelaskan bukti secara singkat (nama kampus/sekolah dan status aktif); jangan masukkan nomor identitas sensitif.</p>
+          <Textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Keterangan bukti status pelajar" />
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" disabled={request.isPending}>{request.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Ajukan verifikasi</Button>
+          <Button type="submit" disabled={request.isPending}>{request.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{studentStatus === "correction_required" || studentStatus === "expired" ? "Kirim bukti perbaikan" : "Ajukan verifikasi"}</Button>
         </form>
       )}
     </div>

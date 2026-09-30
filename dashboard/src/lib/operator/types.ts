@@ -38,10 +38,10 @@ export interface ConfirmPaymentResult {
   subscription: { plan: string; status: string; cycle: string; period_end: string | null } | null;
 }
 
-export type StudentStatus = "pending" | "approved" | "rejected" | "superseded";
+export type StudentStatus = "pending" | "approved" | "rejected" | "correction_required" | "expired" | "superseded";
 export interface StudentRequestSummary {
   id: string; workspace: WorkspaceRef; requester_email_masked: string; email_domain: string; academic_domain_hint: boolean;
-  status: StudentStatus; requested_at: string; version: number;
+  status: StudentStatus; requested_at: string; version: number; correction_due_at: string | null;
 }
 export interface StudentRequestDetail extends StudentRequestSummary {
   requester_email: string; note: string | null; decided_at: string | null; decided_by: { name: string } | null; reason: string | null;
@@ -132,13 +132,13 @@ export function parseConfirmResult(v: unknown): ConfirmPaymentResult {
   };
 }
 
-const studentStatus = (v: unknown): StudentStatus => (v === "approved" || v === "rejected" || v === "superseded" ? v : "pending");
+const studentStatus = (v: unknown): StudentStatus => v === "approved" || v === "rejected" || v === "correction_required" || v === "expired" || v === "superseded" ? v : "pending";
 
 export function parseStudentSummary(v: unknown): StudentRequestSummary {
   const d = obj(v);
   return {
     id: str(d["id"]), workspace: wsRef(d["workspace"]), requester_email_masked: str(d["requester_email_masked"]), email_domain: str(d["email_domain"]),
-    academic_domain_hint: d["academic_domain_hint"] === true, status: studentStatus(d["status"]), requested_at: str(d["requested_at"]), version: num(d["version"]),
+    academic_domain_hint: d["academic_domain_hint"] === true, status: studentStatus(d["status"]), requested_at: str(d["requested_at"]), version: num(d["version"]), correction_due_at: strOrNull(d["correction_due_at"]),
   };
 }
 

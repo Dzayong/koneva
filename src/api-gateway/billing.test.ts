@@ -107,10 +107,15 @@ test('an order needs a real plan and a final price', async () => {
   await assert.rejects(() => createOrder('t1', 'umkm', 'monthly'), code('PRICE_NOT_SET'));
 });
 
-test('the student plan cannot be ordered before verification', async () => {
-  withTransaction((text) => text.includes('FROM plans') ? { rows: [plan({ id: 'pelajar', requires_student_verification: true })] }
-    : text.includes('student_verified_at') ? { rows: [{ student_verified_at: null }] } : { rows: [] });
-  await assert.rejects(() => createOrder('t1', 'pelajar', 'monthly'), code('STUDENT_NOT_VERIFIED'));
+test('the paid Pelajar order can be created before evidence verification', async () => {
+  let inserted = false;
+  withTransaction((text) => {
+    if (text.includes('FROM plans')) return { rows: [plan({ id: 'pelajar', requires_student_verification: true, price_month_idr: 29000 })] };
+    if (text.startsWith('INSERT INTO invoices')) { inserted = true; return { rows: [{ id: 'i1', number: 'INV-1' }] }; }
+    return { rows: [] };
+  });
+  await createOrder('t1', 'pelajar', 'monthly');
+  assert.equal(inserted, true);
 });
 
 test('annual checkout is closed for new orders (T1.1): yearly is refused before any query runs', async () => {
@@ -239,7 +244,7 @@ test('signing up creates a trial from the trial plan and applies its limits', as
   assert.deepEqual(calls.find((c) => c.text.startsWith('UPDATE tenants'))!.values.slice(0, 3), ['t1', 1, 200]);
 });
 
-test('marking an invoice paid activates the plan; an unverified student plan and a repeat payment are refused', async () => {
+test('marking an invoice paid activates the plan even while student proof is pending; repeat payment is refused', async () => {
   const seen: string[] = [];
   const build = (over: { invoiceStatus?: string; plan?: Partial<PlanRow>; verified?: boolean }) => withTransaction((text) => {
     seen.push(text);
@@ -258,7 +263,7 @@ test('marking an invoice paid activates the plan; an unverified student plan and
   build({ invoiceStatus: 'paid' });
   await assert.rejects(() => markInvoicePaid('i1', { method: 'transfer' }), code('INVOICE_NOT_PAYABLE'));
   build({ plan: { requires_student_verification: true }, verified: false });
-  await assert.rejects(() => markInvoicePaid('i1', { method: 'transfer' }), code('STUDENT_NOT_VERIFIED'));
+  await assert.doesNotReject(() => markInvoicePaid('i1', { method: 'transfer' }));
   build({ plan: { requires_student_verification: true }, verified: true });
   await assert.doesNotReject(() => markInvoicePaid('i1', { method: 'transfer' }));
 });

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { emailTransport, sendInvitationOtp, type OtpMessage } from './mailer';
+import { emailTransport, sendInvitationOtp, sendNoticeEmail, type OtpMessage } from './mailer';
 import { ServiceError } from './service-error';
 
 const MESSAGE: OtpMessage = { to: 'someone@example.com', code: '123456', workspace: 'Toko Uji', validMinutes: 10, purpose: 'invitation' };
@@ -82,6 +82,18 @@ test('sandbox does not affect dev-outbox: it already never leaves the machine, s
     const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
     assert.equal(lines.length, 1);
     assert.equal((JSON.parse(lines[0]!) as { to: string }).to, MESSAGE.to);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('student decision notices use only the local outbox in test mode', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'koneva-student-notice-'));
+  const file = path.join(dir, 'outbox.jsonl');
+  try {
+    const env: NodeJS.ProcessEnv = { NODE_ENV: 'test', EMAIL_TRANSPORT: 'dev-outbox', DEV_EMAIL_OUTBOX_FILE: file, KONEVA_SANDBOX: '1' };
+    await sendNoticeEmail({ to: 'student@campus.example.ac.id', subject: 'Perbaiki bukti', body: 'Layanan tetap aktif selama tujuh hari.' }, env);
+    const notice = JSON.parse(fs.readFileSync(file, 'utf8').trim()) as { to: string; subject: string; body: string; at: string };
+    assert.deepEqual({ to: notice.to, subject: notice.subject, body: notice.body }, { to: 'student@campus.example.ac.id', subject: 'Perbaiki bukti', body: 'Layanan tetap aktif selama tujuh hari.' });
+    assert.ok(Number.isFinite(Date.parse(notice.at)));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
