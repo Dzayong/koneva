@@ -4,7 +4,7 @@ import { ASSIGNABLE_ROLES } from '../../shared/permissions';
 import { validate } from '../middleware/validate';
 import { requireVerifiedEmail } from '../middleware/verified-email';
 import {
-  changeMemberRole, createInvitation, listTeam, removeMember, revokeInvitation,
+  changeMemberRole, createInvitation, issueLegacyRoleNotice, listTeam, removeMember, revokeInvitation,
 } from '../services/team.service';
 import { ServiceError } from '../services/service-error';
 
@@ -16,6 +16,7 @@ export const inviteSchema = z.object({
   role: z.enum(ASSIGNABLE_ROLES),
 }).strict();
 export const roleSchema = z.object({ role: z.enum(ASSIGNABLE_ROLES) }).strict();
+export const legacyRoleNoticeSchema = z.object({ confirm: z.literal(true) }).strict();
 
 function person(request: Request) {
   const actor = request.actor;
@@ -25,6 +26,11 @@ function person(request: Request) {
 
 router.get('/team', async (request: Request, response: Response) => {
   response.json({ success: true, data: await listTeam(request.tenant!.id) });
+});
+
+router.post('/team/legacy-role-notice', validate({ body: legacyRoleNoticeSchema }), async (request: Request, response: Response) => {
+  const notice = await issueLegacyRoleNotice(request.tenant!.id, person(request));
+  response.status(notice.created ? 201 : 200).json({ success: true, data: notice });
 });
 
 router.post('/team/invitations', requireVerifiedEmail, validate({ body: inviteSchema }), async (request: Request, response: Response) => {

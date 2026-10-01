@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmailVerificationDialog } from "@/components/account/email-verification-dialog";
 import { SecretReveal } from "@/components/developers/secret-reveal";
-import { useChangeRole, useInviteMember, useRemoveMember, useRevokeInvitation, useTeam } from "@/hooks/use-developer";
+import { useChangeRole, useInviteMember, useIssueLegacyRoleNotice, useRemoveMember, useRevokeInvitation, useTeam } from "@/hooks/use-developer";
 import { usePermissions } from "@/hooks/use-me";
 import { apiFailure } from "@/lib/errors";
 import { ROLE_HELP, ROLE_LABEL, canManageTeam, isLegacyRole } from "@/lib/roles";
@@ -28,12 +28,14 @@ export default function TeamPage() {
   const changeRole = useChangeRole();
   const remove = useRemoveMember();
   const revokeInvite = useRevokeInvitation();
+  const issueLegacyNotice = useIssueLegacyRoleNotice();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [link, setLink] = useState<CreatedInvitation | null>(null);
   const [toRemove, setToRemove] = useState<TeamMember | null>(null);
   const [verifyOpen, setVerifyOpen] = useState(false);
+  const [noticeOpen, setNoticeOpen] = useState(false);
 
   if (!permsLoading && !can("team:manage")) {
     return <p className="text-muted-foreground">Peran Anda tidak bisa mengelola tim.</p>;
@@ -41,6 +43,7 @@ export default function TeamPage() {
 
   const isOwner = canManageTeam(role);
   const hasLegacy = (data?.members ?? []).some((m) => isLegacyRole(m.role));
+  const legacyTransition = data?.legacy_role_transition;
 
   const submitInvite = (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,6 +68,25 @@ export default function TeamPage() {
         </div>
         {isOwner && <Button onClick={() => setInviteOpen(true)}><UserPlus className="mr-2 h-4 w-4" />Undang Developer</Button>}
       </div>
+
+      {isOwner && (legacyTransition?.legacy_member_count ?? 0) > 0 && (
+        <section aria-labelledby="legacy-role-transition" className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-5">
+          <h3 id="legacy-role-transition" className="text-heading text-lg">Transisi peran Admin/Viewer lama</h3>
+          {legacyTransition!.phase === "notice_required" ? (
+            <>
+              <p className="text-sm text-muted-foreground">Workspace ini masih memiliki {legacyTransition!.legacy_member_count} anggota dengan peran lama. Hak akses mereka tetap sama sampai Anda menerbitkan pemberitahuan resmi. Setelah diterbitkan, masa transisi 60 hari dimulai; peran tidak akan dinaikkan otomatis.</p>
+              <Button variant="outline" onClick={() => setNoticeOpen(true)}>Tinjau dan terbitkan pemberitahuan 60 hari</Button>
+            </>
+          ) : legacyTransition!.phase === "suspended" ? (
+            <p role="status" className="text-sm">Tenggat {formatDate(legacyTransition!.deadline_at!)} telah lewat. Akses workspace untuk anggota yang masih berperan Admin/Viewer lama ditangguhkan. Anda tetap dapat mengubahnya menjadi Developer bila sesuai, atau mengeluarkan anggota; tidak ada promosi atau penghapusan otomatis.</p>
+          ) : (
+            <p role="status" className="text-sm text-muted-foreground">
+              {legacyTransition!.phase === "reminder_due" ? `Pengingat: ` : ""}
+              Masa transisi berjalan. Hak akses saat ini tetap berlaku sampai {formatDate(legacyTransition!.deadline_at!)} ({legacyTransition!.days_remaining} hari tersisa). Setelah tenggat, peran lama yang belum ditangani akan ditangguhkan tanpa promosi otomatis.
+            </p>
+          )}
+        </section>
+      )}
 
       <section aria-labelledby="anggota">
         <h3 id="anggota" className="text-heading mb-3 text-lg">Anggota</h3>
@@ -148,6 +170,23 @@ export default function TeamPage() {
       </Dialog>
 
       <EmailVerificationDialog open={verifyOpen} onOpenChange={setVerifyOpen} onVerified={() => setInviteError(null)} />
+
+      <Dialog open={noticeOpen} onOpenChange={setNoticeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pemberitahuan transisi peran 60 hari</DialogTitle>
+            <DialogDescription>
+              Penerbitan ini memulai tenggat tepat 60 hari sejak sekarang. Selama masa itu akses Admin/Viewer lama tidak berubah. Sebelum tenggat, pilih satu tindakan untuk setiap anggota: ubah menjadi Developer bila akses teknisnya sesuai, atau keluarkan dari workspace. Setelah tenggat, anggota yang belum ditangani ditangguhkan dan tetap tercatat selama 90 hari tambahan. Sistem tidak pernah menaikkan peran secara otomatis.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNoticeOpen(false)}>Kembali</Button>
+            <Button disabled={issueLegacyNotice.isPending} onClick={() => issueLegacyNotice.mutate(undefined, { onSuccess: () => setNoticeOpen(false) })}>
+              {issueLegacyNotice.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Menerbitkan…</> : "Terbitkan pemberitahuan resmi"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {link && (
         <SecretReveal

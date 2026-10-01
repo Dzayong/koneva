@@ -28,6 +28,7 @@ import type {
   AuthResult,
   CreatedApiKey,
   CreatedInvitation,
+  LegacyRoleTransition,
   DeviceActivity,
   DeviceEvent,
   InvitationPreview,
@@ -471,9 +472,16 @@ class ApiClient {
     await this.client.delete(`/api/v1/keys/${id}`, { skipErrorToast: true });
   }
 
-  async getTeam(): Promise<{ members: TeamMember[]; invitations: PendingInvitation[] }> {
-    const response = await this.client.get<ApiSuccess<{ members: TeamMember[]; invitations: PendingInvitation[] }>>(
+  async getTeam(): Promise<{ members: TeamMember[]; invitations: PendingInvitation[]; legacy_role_transition: LegacyRoleTransition }> {
+    const response = await this.client.get<ApiSuccess<{ members: TeamMember[]; invitations: PendingInvitation[]; legacy_role_transition: LegacyRoleTransition }>>(
       "/api/v1/team", { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
+  async issueLegacyRoleNotice(): Promise<{ created: boolean; notice_sent_at: string; deadline_at: string }> {
+    const response = await this.client.post<ApiSuccess<{ created: boolean; notice_sent_at: string; deadline_at: string }>>(
+      "/api/v1/team/legacy-role-notice", { confirm: true }, { skipErrorToast: true },
     );
     return response.data.data;
   }

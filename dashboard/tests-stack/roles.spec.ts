@@ -167,6 +167,16 @@ test.describe("Owner and Developer (STACK-local)", () => {
     await asCustomer(ownerPage, owner);
     await ownerPage.goto("/team");
     await expect(ownerPage.getByRole("table").getByText("Viewer (lama)")).toBeVisible();
+    await expect(ownerPage.getByRole("button", { name: "Tinjau dan terbitkan pemberitahuan 60 hari" })).toBeVisible();
+    await ownerPage.getByRole("button", { name: "Tinjau dan terbitkan pemberitahuan 60 hari" }).click();
+    await expect(ownerPage.getByRole("dialog").getByText(/tenggat tepat 60 hari sejak sekarang/)).toBeVisible();
+    await ownerPage.getByRole("dialog").getByRole("button", { name: "Kembali" }).click();
+    expect((await db.query("SELECT count(*)::int AS n FROM legacy_role_notices WHERE tenant_id=$1", [owner.tenant])).rows[0].n).toBe(0);
+    await ownerPage.getByRole("button", { name: "Tinjau dan terbitkan pemberitahuan 60 hari" }).click();
+    await ownerPage.getByRole("dialog").getByRole("button", { name: "Terbitkan pemberitahuan resmi" }).click();
+    await expect(ownerPage.getByRole("status").getByText(/Hak akses saat ini tetap berlaku/)).toBeVisible();
+    const notice = (await db.query("SELECT notice_sent_at,deadline_at FROM legacy_role_notices WHERE tenant_id=$1", [owner.tenant])).rows[0];
+    expect(new Date(notice.deadline_at).getTime() - new Date(notice.notice_sent_at).getTime()).toBe(60 * 24 * 60 * 60 * 1000);
     expect((await db.query("SELECT role FROM memberships WHERE user_id=$1 AND tenant_id=$2", [viewer.userId, owner.tenant])).rows[0].role).toBe("viewer");
     await ownerPage.getByRole("button", { name: "Jadikan Developer" }).click();
     await expect.poll(async () => (await db.query("SELECT role FROM memberships WHERE user_id=$1 AND tenant_id=$2", [viewer.userId, owner.tenant])).rows[0].role).toBe("developer");

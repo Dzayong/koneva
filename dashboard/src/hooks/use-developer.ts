@@ -40,6 +40,15 @@ export function useTeam() {
   return useQuery({ queryKey: ["team"], queryFn: () => api.getTeam(), retry: false });
 }
 
+export function useIssueLegacyRoleNotice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.issueLegacyRoleNotice(),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["team"] }); toast.success("Pemberitahuan transisi peran diterbitkan"); },
+    onError: fail("Gagal menerbitkan pemberitahuan"),
+  });
+}
+
 export function useInviteMember() {
   const queryClient = useQueryClient();
   return useMutation({

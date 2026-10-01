@@ -309,6 +309,14 @@ export interface TeamMember {
   last_login_at: string | null;
 }
 
+export interface LegacyRoleTransition {
+  phase: "none" | "notice_required" | "transition" | "reminder_due" | "suspended";
+  legacy_member_count: number;
+  notice_sent_at: string | null;
+  deadline_at: string | null;
+  days_remaining: number | null;
+}
+
 export interface PendingInvitation { id: string; email: string; role: Role; expires_at: string; created_at: string }
 
 export interface CreatedInvitation {

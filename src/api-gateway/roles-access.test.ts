@@ -414,4 +414,37 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
     assert.equal((await pool.query('SELECT role FROM memberships WHERE user_id=$1 AND tenant_id=$2', [viewer.userId, o.tenant])).rows[0].role, 'developer');
     assert.equal((await login(viewer.email, password, meta)).workspaces.length >= 1, true);
   });
+
+  await t.test('owner-issued 60-day notice preserves access, then suspends only unresolved legacy memberships without deleting or promoting them', async () => {
+    newClient();
+    const o = await owner();
+    const admin = await owner(), viewer = await owner();
+    await pool.query('ALTER TABLE memberships DISABLE TRIGGER memberships_no_new_legacy_role');
+    try {
+      await pool.query("INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'admin'),($3,$2,'viewer')", [admin.userId, o.tenant, viewer.userId]);
+    } finally { await pool.query('ALTER TABLE memberships ENABLE TRIGGER memberships_no_new_legacy_role'); }
+
+    assert.equal((await call('/api/v1/devices', { token: admin.token, workspace: o.tenant })).status, 200, 'no notice means no clock');
+    assert.equal((await call('/api/v1/team/legacy-role-notice', { method: 'POST', token: admin.token, workspace: o.tenant, body: { confirm: true } })).status, 403, 'only Owner can issue notice');
+    const ownerPage = await call('/api/v1/team/legacy-role-notice', { method: 'POST', token: o.token, workspace: o.tenant, body: { confirm: true } });
+    assert.equal(ownerPage.status, 201, ownerPage.text);
+    const sent = new Date(ownerPage.body.data.notice_sent_at as string), deadline = new Date(ownerPage.body.data.deadline_at as string);
+    assert.equal(deadline.getTime() - sent.getTime(), 60 * 24 * 60 * 60 * 1000, 'deadline is exactly 60 UTC days after formal notice');
+    assert.deepEqual((await pool.query('SELECT role FROM memberships WHERE tenant_id=$1 AND user_id IN ($2,$3) ORDER BY role', [o.tenant, admin.userId, viewer.userId])).rows.map((r) => r.role), ['admin', 'viewer'], 'issuing notice does not change roles');
+    assert.equal((await call('/api/v1/devices', { token: admin.token, workspace: o.tenant })).status, 200, 'legacy access remains through the deadline');
+    const repeated = await call('/api/v1/team/legacy-role-notice', { method: 'POST', token: o.token, workspace: o.tenant, body: { confirm: true } });
+    assert.equal(repeated.status, 200, 'repeated request cannot restart the clock');
+    assert.equal(repeated.body.data.deadline_at, ownerPage.body.data.deadline_at);
+
+    await pool.query(`UPDATE legacy_role_notices SET notice_sent_at=now()-interval '61 days', deadline_at=now()-interval '1 day' WHERE tenant_id=$1`, [o.tenant]);
+    const suspended = await call('/api/v1/devices', { token: admin.token, workspace: o.tenant });
+    assert.equal(suspended.status, 403);
+    assert.equal(suspended.body.error.code, 'LEGACY_ROLE_TRANSITION_EXPIRED');
+    assert.match(suspended.body.error.message, /Owner menentukan peran/);
+    assert.equal((await call('/api/v1/team', { token: o.token, workspace: o.tenant })).body.data.legacy_role_transition.phase, 'suspended', 'owner can still access the member-management page');
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM memberships WHERE tenant_id=$1 AND role IN ('admin','viewer')", [o.tenant])).rows[0].n, 2, 'no auto-promotion or deletion at day 60');
+    assert.equal((await call(`/api/v1/team/members/${admin.userId}`, { method: 'PATCH', token: o.token, workspace: o.tenant, body: { role: 'developer' } })).status, 200, 'Owner can make an explicit decision after expiry');
+    assert.equal((await call('/api/v1/devices', { token: admin.token, workspace: o.tenant })).status, 200, 'only an explicitly converted member regains access');
+    assert.equal((await call('/api/v1/devices', { token: viewer.token, workspace: o.tenant })).status, 403, 'unresolved Viewer remains suspended');
+  });
 });

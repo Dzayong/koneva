@@ -4,7 +4,7 @@ import pool from '../../shared/database/connection';
 import { getRedisClient } from '../../shared/redis';
 import type { TenantContext } from '../../shared/types/api';
 import { safeEqual } from '../../shared/utils/secure-compare';
-import { can, permissionFor } from '../../shared/permissions';
+import { can, isLegacyRole, permissionFor } from '../../shared/permissions';
 import { resolveSession } from '../services/account.service';
 import { resolveApiKey } from '../services/apikey.service';
 
@@ -31,6 +31,19 @@ export async function tenantAuth(
     if (!session) {
       unauthorized(response, 'Invalid or expired session');
       return;
+    }
+    if (isLegacyRole(session.role)) {
+      const transition = await pool.query<{ suspended: boolean }>(
+        `SELECT deadline_at <= clock_timestamp() AS suspended FROM legacy_role_notices WHERE tenant_id = $1`,
+        [session.tenant.id],
+      );
+      if (transition.rows[0]?.suspended) {
+        response.status(403).json({
+          success: false,
+          error: { code: 'LEGACY_ROLE_TRANSITION_EXPIRED', message: 'Akses workspace ini ditangguhkan sampai Owner menentukan peran Anda. Hubungi Owner workspace untuk dijadikan Developer bila sesuai atau dikeluarkan dari workspace.' },
+        });
+        return;
+      }
     }
     request.tenant = session.tenant;
     request.actor = { kind: 'user', userId: session.user.id, email: session.user.email, role: session.role };

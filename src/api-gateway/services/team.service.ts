@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import config from '../../shared/config';
 import pool, { transaction } from '../../shared/database/connection';
 import { ASSIGNABLE_ROLES, type Role } from '../../shared/permissions';
+import { legacyRoleDaysRemaining, legacyRoleTransitionPhase } from '../../shared/legacy-role-transition';
 import { TERMS_VERSION, hashPassword, newSessionToken, sha256, type SessionResult } from './account.service';
 import { ServiceError } from './service-error';
 import { assertCanAddMember } from './billing.service';
@@ -103,7 +104,51 @@ export async function listTeam(tenantId: string) {
      WHERE tenant_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now() ORDER BY created_at DESC`,
     [tenantId],
   )).rows;
-  return { members, invitations };
+  const legacyMemberCount = members.filter((m) => m.role === 'admin' || m.role === 'viewer').length;
+  const notice = (await pool.query<{ notice_sent_at: Date; deadline_at: Date }>(
+    `SELECT notice_sent_at, deadline_at FROM legacy_role_notices WHERE tenant_id = $1`, [tenantId],
+  )).rows[0];
+  const phase = legacyRoleTransitionPhase({
+    legacyMemberCount,
+    noticeSentAt: notice?.notice_sent_at ?? null,
+    deadlineAt: notice?.deadline_at ?? null,
+  }, new Date());
+  return {
+    members,
+    invitations,
+    legacy_role_transition: {
+      phase,
+      legacy_member_count: legacyMemberCount,
+      notice_sent_at: notice?.notice_sent_at ?? null,
+      deadline_at: notice?.deadline_at ?? null,
+      days_remaining: notice ? legacyRoleDaysRemaining(notice.deadline_at, new Date()) : null,
+    },
+  };
+}
+
+export async function issueLegacyRoleNotice(
+  tenantId: string,
+  actor: { userId: string; role: Role },
+): Promise<{ created: boolean; notice_sent_at: Date; deadline_at: Date }> {
+  if (actor.role !== 'owner') throw new ServiceError(403, 'ROLE_NOT_GRANTABLE', 'Hanya Owner yang dapat menerbitkan pemberitahuan transisi peran.');
+  return transaction(async (client) => {
+    const workspace = await client.query('SELECT id FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
+    if (!workspace.rowCount) throw new ServiceError(404, 'WORKSPACE_NOT_FOUND', 'Workspace tidak ditemukan.');
+    const existing = (await client.query<{ notice_sent_at: Date; deadline_at: Date }>(
+      `SELECT notice_sent_at, deadline_at FROM legacy_role_notices WHERE tenant_id = $1`, [tenantId],
+    )).rows[0];
+    if (existing) return { created: false, ...existing };
+    const legacy = await client.query("SELECT 1 FROM memberships WHERE tenant_id = $1 AND role IN ('admin','viewer') LIMIT 1", [tenantId]);
+    if (!legacy.rowCount) throw new ServiceError(409, 'NO_LEGACY_MEMBERS', 'Workspace ini tidak memiliki anggota Admin/Viewer lama.');
+    const notice = (await client.query<{ notice_sent_at: Date; deadline_at: Date }>(
+      `WITH issued AS (SELECT clock_timestamp() AS sent_at)
+       INSERT INTO legacy_role_notices(tenant_id, notice_sent_at, deadline_at, issued_by)
+       SELECT $1, sent_at, sent_at + INTERVAL '1440 hours', $2 FROM issued
+       RETURNING notice_sent_at, deadline_at`, [tenantId, actor.userId],
+    )).rows[0];
+    if (!notice) throw new ServiceError(500, 'NOTICE_ISSUE_FAILED', 'Pemberitahuan tidak dapat diterbitkan.');
+    return { created: true, ...notice };
+  });
 }
 
 export async function revokeInvitation(tenantId: string, id: string): Promise<void> {

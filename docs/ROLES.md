@@ -55,20 +55,20 @@ Migration impact and follow-up decisions for the owner are at the end of this fi
 
 | Topic | Decision | Status |
 |---|---|---|
-| Legacy `admin`/`viewer` | **Option C**: 60-day transition that starts only after the Owner has been given a **formal notice**. Until the deadline nothing is upgraded or revoked automatically, and `team:manage` is **not** removed from legacy admins now. | Design below; not implemented |
+| Legacy `admin`/`viewer` | **Option C**: 60-day transition that starts only after the Owner deliberately issues the formal notice. Until the deadline nothing is upgraded or revoked automatically, and `team:manage` is **not** removed from legacy admins now. | Implemented locally in T1.6, tested with disposable DB + STACK; real notices are not sent |
 | Trial and Pelajar | Stay at **one member (the Owner)**. No Developer invitations there. | Already the behaviour; unchanged |
 | Owner transfer | **Manual, recorded procedure first**; self-service later. | Procedure design below; not built |
 | Owner email verification | Required **before inviting or before important actions such as payment**. Sign-up keeps accepting non-Gmail addresses. | **Implemented locally** (below) |
 | OTP limits across invitations | Numbers approved (recipient 3/h + 6/24 h, invitation 3/h + 60 s pause, workspace 10/24 h, sender 200/24 h, IP 20/15 min) with Gmail alias folding for the limiter key only. | **Implemented locally** (below) |
 | Production data | No production query is run in the local stage. The counts of legacy members and duplicate owners must be obtained later by the owner under separate authorisation. | Open |
 
-### Legacy members: 60-day transition (design)
+### Legacy members: 60-day transition (T1.6 local implementation)
 
-1. **Notice.** A workspace-level record `legacy_role_notice(tenant_id, notice_sent_at, deadline_at = notice_sent_at + 60 days)` is created only when the notice is formally issued (dashboard banner for the Owner, and email once Owner email verification and an approved template exist). No notice, no clock. Sending to real users needs the owner's explicit go-ahead.
+1. **Notice.** Migration 027 adds workspace-level `legacy_role_notices(tenant_id, notice_sent_at, deadline_at, issued_by)`. An explicit Owner action on `/team` creates one record only when legacy memberships exist. The API requires `{confirm:true}`; repeated requests return the original notice and cannot restart the clock. The deadline is exactly 1440 hours after issue. No notice, no clock. The Owner reviews the notice copy before issuing it. This local implementation shows the notice in the dashboard only; it does not send email. Sending to real users needs explicit owner approval.
 2. **Until the deadline:** nothing changes automatically. Owners see who is legacy (already labelled "(lama)") and can, at any time, make a legacy member a Developer or remove them. Legacy admins keep their current access, including `team:manage`.
-3. **Day 30:** reminder to the Owner. **Day 60:** legacy roles that were not converted are **suspended** (fail closed: sign-in to that workspace answers "menunggu keputusan Owner"), never converted automatically. Memberships are kept for 90 more days so the Owner can still convert or remove; afterwards cleanup is an Owner action.
+3. **Day 30:** the Owner's team page shows a reminder when opened. **Day 60:** unresolved legacy memberships are suspended at request time with `LEGACY_ROLE_TRANSITION_EXPIRED` and a message to contact the Owner. They are never converted automatically. Membership rows are kept for 90 more days and remain actionable by the Owner; after that, cleanup stays an explicit Owner action.
 4. **Never:** automatic promotion of a Viewer or Admin to Developer (it raises rights without the Owner's decision).
-5. Open sub-decisions: what the notice says exactly, whether the legacy tenant-API-key login gets the same clock.
+5. **Still open for owner:** whether the legacy tenant-API-key login gets the same clock; whether real formal notice also sends an email. Until decided, legacy tenant API-key behavior is unchanged and the local notice is dashboard-only.
 
 ### Owner email verification (implemented locally, migration 022)
 
@@ -115,4 +115,4 @@ Until self-service exists, a transfer is done only by the project owner (or the 
 ## Evidence
 
 - **STACK-local** (real PostgreSQL, real routers, fake device manager, temp-file outbox): `roles-access.test.ts` (roles, invitations, aliases end to end, Owner verification), `otp-limits.test.ts` (rolling windows, per-recipient/invitation/workspace/IP/sender limits, alias folding, concurrency, opaque keys, cleanup, threshold records), `dashboard/tests-stack/roles.spec.ts` (browser, including the verification dialog). **Real entrypoint**: `operator-entry.test.ts` runs two `index.ts` processes against one database and shows the OTP limit is shared across processes and answers 429 with `Retry-After` through the real error handler. **UI mock**: operator suite only. **LIVE: none.** No real WhatsApp number, device or message and **no email** was sent: the scripts pin `EMAIL_TRANSPORT=none` (stack: `dev-outbox`) and blank every `GMAIL_*` variable, and a test refuses to run if a Gmail token is present.
-- **Not proven:** the `gmail-api` transport (real send, token refresh, quota, send-as, 401 retry); the 200/day cap against Google's actual limits for the chosen account type; operational alerting (none exists); legacy transition, owner transfer (designs only); behaviour with real production data.
+- **Not proven:** the `gmail-api` transport (real send, token refresh, quota, send-as, 401 retry); the 200/day cap against Google's actual limits for the chosen account type; operational alerting (none exists); real delivery/operation of the legacy transition; owner transfer (design only); behaviour with real production data.
