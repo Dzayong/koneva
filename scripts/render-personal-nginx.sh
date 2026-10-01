@@ -4,6 +4,8 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/personal-common.sh"
 personal_load
 domain="${DOMAIN:-localhost}"
 [[ $domain =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] || die 'DOMAIN must be a DNS hostname.'
+https_port="${HTTPS_PORT:-443}"
+[[ $https_port =~ ^[0-9]{1,5}$ ]] && ((https_port > 0 && https_port < 65536)) || die 'HTTPS_PORT must be between 1 and 65535.'
 config_dir="$PERSONAL_ROOT/docker/nginx/generated"
 mkdir -p "$config_dir"
 tls=false
@@ -17,8 +19,10 @@ server {
     location ^~ /.well-known/acme-challenge/ { root /var/www/certbot; }
 EOF
   if $tls; then
+    redirect_target="https://$domain\$request_uri"
+    if [[ $https_port != 443 ]]; then redirect_target="https://$domain:$https_port\$request_uri"; fi
     cat <<EOF
-    location / { return 301 https://$domain\$request_uri; }
+    location / { return 301 $redirect_target; }
 }
 server {
     listen 443 ssl;

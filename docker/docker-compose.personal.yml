@@ -58,7 +58,21 @@ services:
   api-gateway:
     image: ${PERSONAL_PROJECT:-wa-personal}-api:local
     build: { context: .., dockerfile: docker/app.Dockerfile, target: api-gateway }
-    environment: { <<: *env, PORT: 8000 }
+    environment:
+      <<: *env
+      PORT: 8000
+      EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-none}
+      GMAIL_SENDER_EMAIL: ${GMAIL_SENDER_EMAIL:-}
+      GMAIL_OAUTH_CLIENT_ID: ${GMAIL_OAUTH_CLIENT_ID:-}
+      GMAIL_OAUTH_CLIENT_SECRET: ${GMAIL_OAUTH_CLIENT_SECRET:-}
+      GMAIL_OAUTH_REFRESH_TOKEN: ${GMAIL_OAUTH_REFRESH_TOKEN:-}
+      OPERATOR_ENABLED: ${OPERATOR_ENABLED:-false}
+      OPERATOR_ALLOW_PRODUCTION: ${OPERATOR_ALLOW_PRODUCTION:-false}
+      OPERATOR_ALLOWED_ORIGIN: ${OPERATOR_ALLOWED_ORIGIN:-}
+      OPERATOR_COOKIE_NAME: ${OPERATOR_COOKIE_NAME:-__Host-koneva_op}
+      OPERATOR_COOKIE_SECURE: ${OPERATOR_COOKIE_SECURE:-true}
+      OPERATOR_MFA_ENC_KEY: ${OPERATOR_MFA_ENC_KEY:-}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
     ports: ["${APP_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-18000}:8000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -117,7 +131,9 @@ services:
   nginx:
     image: nginx:stable-alpine
     profiles: [with-nginx]
-    ports: ["${HTTP_PORT:-80}:80", "${HTTPS_PORT:-443}:443"]
+    ports:
+      - "${HTTP_BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-80}:80"
+      - "${HTTPS_BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-443}:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/generated:/etc/nginx/personal:ro
