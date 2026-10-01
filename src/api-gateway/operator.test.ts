@@ -44,10 +44,11 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
   t.after(async () => { await new Promise<void>((resolve) => server.close(() => resolve())); await pool.end(); });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/operator`;
   const allPermissions = ['payments:read','payments:confirm','students:read','students:decide','workspaces:read','audit:read'];
+  const ownerPermissions = [...allPermissions, 'owner:insights'];
   const testPassword = 'synthetic-test-password-26';
   const passwordHash = await bcrypt.hash(testPassword, 12);
-  async function operator(permissions = allPermissions, options: { mfa?: boolean } = {}) {
-    const id = randomUUID(), token = randomBytes(32).toString('hex'), email = `${id}@example.test`;
+  async function operator(permissions = allPermissions, options: { mfa?: boolean } = {}, emailOverride?: string) {
+    const id = randomUUID(), token = randomBytes(32).toString('hex'), email = emailOverride ?? `${id}@example.test`;
     const secret = randomBytes(20);
     // The secret must exist before the session: changing it revokes sessions by design.
     await pool.query('INSERT INTO operators(id,email,name,password_hash,permissions,mfa_secret_enc,mfa_enrolled_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
@@ -278,6 +279,38 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     }
     const page=await call('/invoices?limit=1&offset=999',{session:op}); assert.deepEqual(page.body.data,[]);
     assert.ok(page.body.pagination.total>0); assert.equal(page.body.pagination.has_more,false);
+  });
+
+  await t.test('owner insights require owner:insights, return aggregate/read-only data, and audit every successful view', async () => {
+    const denied = await operator(['payments:read']);
+    const before = Number((await pool.query("SELECT count(*)::int AS n FROM operator_audit WHERE action='owner.insights.view'")).rows[0]!.n);
+    assert.equal((await call('/insights', { session: denied })).status, 403, 'staff without the owner permission cannot load insights');
+    assert.equal(Number((await pool.query("SELECT count(*)::int AS n FROM operator_audit WHERE action='owner.insights.view'")).rows[0]!.n), before, 'denied access does not create a successful-view audit row');
+
+    const owner = await operator(ownerPermissions, {}, 'koneva.id26@gmail.com');
+    const ownerRow = await pool.query<{ permissions: string[] }>('SELECT permissions FROM operators WHERE id=$1', [owner.id]);
+    assert.deepEqual(new Set(ownerRow.rows[0]?.permissions), new Set(ownerPermissions), 'owner receives the full operational set plus insights');
+    await assert.rejects(
+      pool.query(
+        'INSERT INTO operators(email,name,password_hash,permissions) VALUES ($1,$2,$3,$4)',
+        [`staff-${randomUUID()}@example.test`, 'Staf Uji', passwordHash, ownerPermissions],
+      ),
+      (error: unknown) => (error as { code?: string }).code === '23514',
+      'database policy prevents granting owner insights to staff identities',
+    );
+    const response = await call('/insights', { session: owner });
+    assert.equal(response.status, 200);
+    assert.ok(response.body.data.kpis.registered_accounts >= 1);
+    assert.ok(response.body.data.kpis.active_workspaces >= 1);
+    assert.ok(response.body.data.health.queue.queued >= 0);
+    assert.ok(Array.isArray(response.body.data.activity));
+    assert.ok(Array.isArray(response.body.data.data_limits));
+    const encoded = JSON.stringify(response.body.data);
+    for (const forbidden of ['password_hash', 'api_key', 'webhook_secret', 'to_number', 'content', 'phone_number']) assert.equal(encoded.includes(forbidden), false, `response omits ${forbidden}`);
+    const audited = await pool.query("SELECT operator_id, target_type, target_label FROM operator_audit WHERE action='owner.insights.view' ORDER BY at DESC LIMIT 1");
+    assert.equal(audited.rows[0]?.operator_id, owner.id);
+    assert.equal(audited.rows[0]?.target_type, 'system_insights');
+    assert.equal(audited.rows[0]?.target_label, 'Ringkasan Pemilik');
   });
   await t.test('legacy admin lists omit credentials and never accept operator cookies as admin credentials', async () => {
     const root=base.replace(/\/operator$/,'');

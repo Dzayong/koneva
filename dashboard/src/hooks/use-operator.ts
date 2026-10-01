@@ -67,3 +67,8 @@ export function useAudit(params: { action?: string | undefined; targetType?: str
 export function useOtpAlerts(enabled = true) {
   return useQuery({ queryKey: [OP, "otp-alerts"], queryFn: () => operatorApi.getOtpAlerts(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always" });
 }
+
+/** Owner data is fetched only for an owner with the explicit insights permission. The server enforces it again. */
+export function useOwnerInsights(enabled = true) {
+  return useQuery({ queryKey: [OP, "owner-insights"], queryFn: () => operatorApi.getOwnerInsights(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always" });
+}

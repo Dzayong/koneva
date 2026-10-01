@@ -10,6 +10,7 @@ async function main(): Promise<void> {
   const schema = z.object({
     email: z.string().trim().toLowerCase().email().max(255), name: z.string().trim().min(1).max(120),
     password: z.string().min(12).refine((v) => Buffer.byteLength(v,'utf8') <= 72),
+    // Owner insights can only be granted by the dedicated owner-only provisioning path.
     permissions: z.array(z.enum(['payments:read','payments:confirm','students:read','students:decide','workspaces:read','audit:read'])).min(1),
   }).strict();
   let input = '';

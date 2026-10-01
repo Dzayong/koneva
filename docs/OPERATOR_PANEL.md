@@ -54,6 +54,7 @@ The request and response DTOs in the frontend proposal apply, with the decisions
 | `GET /operator/workspaces`, `GET /operator/workspaces/:id` | `workspaces:read` |
 | `GET /operator/audit` | `audit:read` |
 | `GET /operator/alerts/otp` | `audit:read` (OTP sender-budget alerts, read only, see "OTP sender-budget alerts") |
+| `GET /operator/insights` | `owner:insights` (owner-only aggregate snapshot; every successful view is recorded in `operator_audit`; read-only, see [OWNER_INSIGHTS.md](OWNER_INSIGHTS.md)) |
 
 Audit actions: `invoice.confirm_payment`, `student_request.decision`. Audit target types: `invoice`, `student_request`.
 Student/workspace missing errors: `REQUEST_NOT_FOUND`, `WORKSPACE_NOT_FOUND`. Disabled module: `404 OPERATOR_DISABLED`.
@@ -95,7 +96,7 @@ running it, e.g. `pemilik-proyek`) and writes it into `operator_security_events`
 
 | Step | Command (stdin is JSON, never shell arguments) |
 |---|---|
-| Provision | `create-local-operator.ts` with `{email,name,password(>=12),permissions[]}`; prints a one-time enrollment code (24 h). Give the code out-of-band, separately from the password. |
+| Provision staff | `create-local-operator.ts` with `{email,name,password(>=12),permissions[]}`; accepts operational scopes only and prints a one-time enrollment code (24 h). Give the code out-of-band, separately from the password. |
 | Reset one operator | `reset-operator-mfa.ts` with `{"email":...}`: deletes recovery codes, clears the factor, **revokes sessions and open challenges**, forces re-enrollment with a new code. |
 | Reset everyone (lost key) | `reset-operator-mfa.ts` with `{"all":true}`. |
 | List legacy student requests | `report-legacy-student-requests.ts` (read-only; ids and dates only). |
@@ -105,6 +106,9 @@ development/test, **or** `OPERATOR_PROVISION_OFFLINE=true` together with `OPERAT
 typed by the person, which must equal the target of `DATABASE_URL`. A mistyped confirmation refuses. Take a database backup before
 running against a real database. Invoke with `node --require ts-node/register scripts/<name>.ts`. These procedures were only
 exercised with synthetic identities on a disposable database.
+
+`owner:insights` is reserved to `koneva.id26@gmail.com` by the database constraint and cannot be granted through the staff
+provisioner. The owner-run provisioning path must grant the complete operational permission set plus `owner:insights`.
 
 ## OPERATOR_MFA_ENC_KEY management
 

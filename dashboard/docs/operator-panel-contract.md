@@ -81,7 +81,7 @@ Alur (semua tanpa CSRF sesi, dengan cek Origin + JSON + `X-Requested-With`):
 | `GET /operator/me` | Sesi saat ini | `200 {operator, permissions, csrf_token, session}`; `401 UNAUTHENTICATED|SESSION_EXPIRED`; `403 NOT_OPERATOR` |
 | `POST /operator/auth/logout` | Cabut sesi ini | `204` tanpa body |
 
-Izin: `payments:read`, `payments:confirm`, `students:read`, `students:decide`, `workspaces:read`, `audit:read`.
+Izin operasional: `payments:read`, `payments:confirm`, `students:read`, `students:decide`, `workspaces:read`, `audit:read`. Pemilik sistem juga dapat diberi izin khusus `owner:insights`; izin ini tidak diberikan ke Operator staf.
 
 ```jsonc
 // POST /operator/auth/login  (sintetis)
@@ -225,6 +225,9 @@ QR, atau data pribadi berlebih (mis. isi catatan pelajar tidak disalin).
 ### 5.1 Peringatan OTP (baca saja)
 `GET /operator/alerts/otp` (`audit:read`) -> `{ events: [{ id, at, kind: "sender_70_percent"|"sender_cap_reached", scope: "sender_daily", window_hours, threshold_percent, severity: "warning"|"critical", usage_at_event, cap_at_event, percent_at_event, active, snapshot: true }], has_active, history_days, current: { usage, cap, percent, window_hours, measured_at, scope } }`.
 `usage_at_event`/`cap_at_event` adalah **snapshot saat kejadian**; `current` diukur saat permintaan. Tanpa email, IP, kode, atau kunci pembatas. Halaman `/operator/alerts` dan banner di ringkasan; peringatan hanya terlihat saat operator membuka panel (tidak ada kanal lain).
+
+### 5.2 Panel Pemilik (read-only)
+`GET /operator/insights` (`owner:insights`) memuat KPI agregat, ringkasan antrean dan status device, aktivitas dari tabel yang tersedia, serta peringatan. Setiap tampilan berhasil dicatat sebagai `owner.insights.view` di `operator_audit`. Section ini tidak memiliki aksi suspend atau mutasi lain. Feed login gagal pelanggan, histori suspend, error proses API, penolakan consent sebelum antre, dan kuota Gmail Google sebenarnya belum tersedia dari tabel saat ini; response dan UI menandai batas tersebut. Sumber dan perinciannya ada di [`docs/OWNER_INSIGHTS.md`](../../docs/OWNER_INSIGHTS.md).
 
 ## 6. Daftar dependensi backend untuk Astra
 1. Identitas operator terpisah dari sesi tenant (tabel/peran platform, sesi sendiri), izin granular (1.6).

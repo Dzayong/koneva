@@ -7,7 +7,7 @@ import type { Page, Route } from "@playwright/test";
  * A passing test here is UI evidence; it proves nothing about the real backend.
  */
 export const CSRF = "csrf_EXAMPLE";
-export const ALL_PERMISSIONS = ["payments:read", "payments:confirm", "students:read", "students:decide", "workspaces:read", "audit:read"];
+export const ALL_PERMISSIONS = ["payments:read", "payments:confirm", "students:read", "students:decide", "workspaces:read", "audit:read", "owner:insights"];
 
 type Json = Record<string, unknown>;
 export interface Invoice { id: string; number: string; workspace: { id: string; name: string }; plan: { id: string; name: string }; cycle: "monthly" | "yearly"; amount_idr: number; status: "unpaid" | "paid" | "void"; created_at: string; due_at: string; version: number; paid_at: string | null; method: string | null; reference: string | null; confirmed_by: { name: string } | null }
@@ -35,6 +35,7 @@ export interface MockState {
   audit: Json[];
   /** Data of GET /alerts/otp. The default is the empty state. */
   otpAlerts: Json;
+  ownerInsights: Json;
   effects: { confirm: number; decide: number };
   mfaVerified: number;
   seenKeys: string[];
@@ -64,6 +65,7 @@ export function freshState(over: Partial<MockState> = {}): MockState {
     },
     audit: [{ id: "a-1", at: now, operator: { id: "op-1", name: "Operator Uji" }, action: "invoice.confirm_payment", target: { type: "invoice", id: "inv-3", label: "INV-202609-0003" }, reason: null, changes: { status: { from: "unpaid", to: "paid" } }, request_id: "req-EXAMPLE" }],
     otpAlerts: { events: [], has_active: false, history_days: 30, current: { scope: "sender_daily", window_hours: 24, usage: 12, cap: 200, percent: 6, measured_at: "2026-09-26T03:00:00Z" } },
+    ownerInsights: { measured_at: now, kpis: { registered_accounts: 42, active_workspaces: 17, suspended_workspaces: 2, messages_sent_24h: 800, messages_sent_30d: 12000, otp_sender_today: 12, otp_sender_daily_cap: 200, otp_sender_remaining_internal: 188 }, health: { api: "healthy", database: "healthy", queue: { queued: 4, sending: 2 }, message_delivery_24h: { attempted: 100, failed: 3, error_rate_percent: 3 }, devices: [{ id: "device-1", label: "Toko utama", status: "online", updated_at: now, workspace_name: "Warung Contoh" }] }, activity: [{ id: "signup-1", kind: "signup", at: now, title: "Akun baru terdaftar", detail: null }, { id: "stop-1", kind: "opt_out", at: now, title: "Permintaan STOP diterima", detail: "Warung Contoh" }], alerts: { otp_thresholds: [], stop_events_last_hour: 1, consent_blocked_messages_last_hour: 0 }, data_limits: ["Sisa batas OTP merupakan hitungan internal, bukan kuota Google Gmail."] },
     effects: { confirm: 0, decide: 0 }, mfaVerified: 0, seenKeys: [], requests: [], idempotency: new Map(), ...over,
   };
 }
@@ -159,6 +161,7 @@ export async function installOperatorMock(page_: Page, state: MockState): Promis
     if (/^\/workspaces\/[^/]+$/.test(path) && method === "GET") return route.fulfill(ok(state.workspace));
     if (path === "/audit" && method === "GET") return route.fulfill(page(state.audit, offset, limit));
     if (path === "/alerts/otp" && method === "GET") return route.fulfill(state.permissions.includes("audit:read") ? ok(state.otpAlerts) : fail(403, "FORBIDDEN", "x"));
+    if (path === "/insights" && method === "GET") return route.fulfill(state.permissions.includes("owner:insights") ? ok(state.ownerInsights) : fail(403, "FORBIDDEN", "x"));
     return route.fulfill(fail(404, "NOT_FOUND", "x"));
   });
   return state;

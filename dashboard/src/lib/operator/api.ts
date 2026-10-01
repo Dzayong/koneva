@@ -1,10 +1,10 @@
 import { operatorClient } from "./client";
 import { OperatorApiError } from "./errors";
 import {
-  parseAudit, parseOtpAlerts, parseConfirmResult, parseDecisionResult, parseEnrollmentSecret, parseInvoiceDetail, parseInvoiceSummary, parseMe, parsePagination, parseSignedIn,
+  parseAudit, parseOtpAlerts, parseOwnerInsights, parseConfirmResult, parseDecisionResult, parseEnrollmentSecret, parseInvoiceDetail, parseInvoiceSummary, parseMe, parsePagination, parseSignedIn,
   parseStudentDetail, parseStudentSummary, parseWorkspace,
   type AuditEntry, type OtpAlerts, type EnrollmentSecret, type SignedIn, type ConfirmPaymentInput, type ConfirmPaymentResult, type DecisionInput, type DecisionResult, type InvoiceDetail,
-  type InvoiceSummary, type InvoiceStatus, type OperatorMe, type Page, type StudentRequestDetail, type StudentRequestSummary,
+  type InvoiceSummary, type InvoiceStatus, type OperatorMe, type OwnerInsights, type Page, type StudentRequestDetail, type StudentRequestSummary,
   type StudentStatus, type WorkspaceDetail,
 } from "./types";
 
@@ -83,6 +83,9 @@ export const operatorApi = {
 
   async getOtpAlerts(): Promise<OtpAlerts> {
     return parseOtpAlerts((await operatorClient.request("/alerts/otp"))?.data);
+  },
+  async getOwnerInsights(): Promise<OwnerInsights> {
+    return parseOwnerInsights((await operatorClient.request("/insights"))?.data);
   },
   async listAudit(params: { action?: string | undefined; targetType?: string | undefined; targetId?: string | undefined; from?: string | undefined; to?: string | undefined; offset?: number | undefined }): Promise<Page<AuditEntry>> {
     return page(await operatorClient.request("/audit", {

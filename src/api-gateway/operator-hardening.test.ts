@@ -121,6 +121,9 @@ test('operator hardening: security events, offline administration, key managemen
     const email = `owner-${randomUUID()}@example.test`;
     const input = JSON.stringify({ email, name: 'Pemilik Uji', password, permissions: ['payments:read'] });
     const local = { OPERATOR_PROVISION_LOCAL: 'true', DATABASE_URL: process.env['DATABASE_URL'] };
+    const staffOwnerScope = JSON.stringify({ email, name: 'Staf Uji', password, permissions: ['payments:read','owner:insights'] });
+    assert.notEqual((await runScript('scripts/create-local-operator.ts', staffOwnerScope, { ...local, OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji' })).code, 0, 'staff provisioning cannot assign owner insights');
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM operators WHERE email=$1', [email])).rows[0].n, 0);
     assert.notEqual((await runScript('scripts/create-local-operator.ts', input, { ...local, OPERATOR_ADMIN_LABEL: '' })).code, 0, 'no label, no provisioning');
     assert.notEqual((await runScript('scripts/create-local-operator.ts', input, { ...local, OPERATOR_PROVISION_LOCAL: '', OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji' })).code, 0, 'no explicit opt-in');
     const target = `${url.hostname}/operator_test`;

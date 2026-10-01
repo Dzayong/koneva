@@ -4,7 +4,7 @@
  * (an api_key, a secret, a QR string) is dropped before it can reach React state, the query cache or the DOM.
  */
 
-export type OperatorPermission = "payments:read" | "payments:confirm" | "students:read" | "students:decide" | "workspaces:read" | "audit:read";
+export type OperatorPermission = "payments:read" | "payments:confirm" | "students:read" | "students:decide" | "workspaces:read" | "audit:read" | "owner:insights";
 
 export interface Operator { id: string; name: string; email: string }
 export interface OperatorSession { idle_expires_at: string; absolute_expires_at: string }
@@ -190,6 +190,15 @@ export interface OtpAlerts {
   events: OtpAlertEvent[]; has_active: boolean; history_days: number;
   current: { usage: number; cap: number; percent: number; window_hours: number; measured_at: string };
 }
+
+export interface OwnerInsights {
+  measured_at: string;
+  kpis: { registered_accounts: number; active_workspaces: number; suspended_workspaces: number; messages_sent_24h: number; messages_sent_30d: number; otp_sender_today: number; otp_sender_daily_cap: number; otp_sender_remaining_internal: number };
+  health: { api: string; database: string; queue: { queued: number; sending: number }; message_delivery_24h: { attempted: number; failed: number; error_rate_percent: number }; devices: Array<{ id: string; label: string; status: string; updated_at: string | null; workspace_name: string | null }> };
+  activity: Array<{ id: string; kind: string; at: string; title: string; detail: string | null }>;
+  alerts: { otp_thresholds: Array<{ id: string; at: string; kind: string; window_count: number; cap: number }>; stop_events_last_hour: number; consent_blocked_messages_last_hour: number };
+  data_limits: string[];
+}
 export function parseOtpAlerts(v: unknown): OtpAlerts {
   const d = obj(v); const c = obj(d["current"]);
   return {
@@ -203,5 +212,17 @@ export function parseOtpAlerts(v: unknown): OtpAlerts {
     }),
     has_active: d["has_active"] === true, history_days: num(d["history_days"]) || 30,
     current: { usage: num(c["usage"]), cap: num(c["cap"]), percent: num(c["percent"]), window_hours: num(c["window_hours"]) || 24, measured_at: str(c["measured_at"]) },
+  };
+}
+
+export function parseOwnerInsights(v: unknown): OwnerInsights {
+  const d = obj(v); const k = obj(d["kpis"]); const h = obj(d["health"]); const q = obj(h["queue"]); const m = obj(h["message_delivery_24h"]); const a = obj(d["alerts"]);
+  return {
+    measured_at: str(d["measured_at"]),
+    kpis: { registered_accounts: num(k["registered_accounts"]), active_workspaces: num(k["active_workspaces"]), suspended_workspaces: num(k["suspended_workspaces"]), messages_sent_24h: num(k["messages_sent_24h"]), messages_sent_30d: num(k["messages_sent_30d"]), otp_sender_today: num(k["otp_sender_today"]), otp_sender_daily_cap: num(k["otp_sender_daily_cap"]), otp_sender_remaining_internal: num(k["otp_sender_remaining_internal"]) },
+    health: { api: str(h["api"]), database: str(h["database"]), queue: { queued: num(q["queued"]), sending: num(q["sending"]) }, message_delivery_24h: { attempted: num(m["attempted"]), failed: num(m["failed"]), error_rate_percent: num(m["error_rate_percent"]) }, devices: arr(h["devices"]).map((v) => { const x = obj(v); return { id: str(x["id"]), label: str(x["label"]), status: str(x["status"]), updated_at: strOrNull(x["updated_at"]), workspace_name: strOrNull(x["workspace_name"]) }; }) },
+    activity: arr(d["activity"]).map((v) => { const x = obj(v); return { id: str(x["id"]), kind: str(x["kind"]), at: str(x["at"]), title: str(x["title"]), detail: strOrNull(x["detail"]) }; }),
+    alerts: { otp_thresholds: arr(a["otp_thresholds"]).map((v) => { const x = obj(v); return { id: str(x["id"]), at: str(x["at"]), kind: str(x["kind"]), window_count: num(x["window_count"]), cap: num(x["cap"]) }; }), stop_events_last_hour: num(a["stop_events_last_hour"]), consent_blocked_messages_last_hour: num(a["consent_blocked_messages_last_hour"]) },
+    data_limits: arr(d["data_limits"]).map(str),
   };
 }

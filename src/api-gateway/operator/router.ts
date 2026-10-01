@@ -9,6 +9,7 @@ import { authenticate, checkCsrf, checkOrigin, clearSessionCookie, confirmEnroll
 import { operatorTransaction, OperatorError, type Actor } from './core';
 import { confirmPayment, decideStudent } from './mutations';
 import { otpAlerts } from './alerts';
+import { ownerInsights } from './insights';
 import { createKeyGuard } from './key-health';
 import { invoiceDetail, listAudit, listInvoices, listStudents, listWorkspaces, studentDetail, workspaceDetail } from './reads';
 
@@ -143,6 +144,10 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
   // Operational alert: OTP sender budget. Same permission as the audit trail (operators trusted with system history); counts and times only.
   router.get('/alerts/otp', permit('audit:read'), async (_request, response) => {
     response.json({ success: true, data: await otpAlerts(db) });
+  });
+  // The entire owner-only section is a single read endpoint; every successful view writes one immutable audit record.
+  router.get('/insights', permit('owner:insights'), async (_request, response) => {
+    response.json({ success: true, data: await ownerInsights(db, actorOf(response), response.locals['requestId'] as string) });
   });
   router.get('/audit', permit('audit:read'), async (request, response) => {
     const filter = auditSchema.parse(request.query);

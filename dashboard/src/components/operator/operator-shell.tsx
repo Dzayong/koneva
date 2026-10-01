@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BellRing, CreditCard, GraduationCap, LayoutDashboard, LogOut, ScrollText, ShieldCheck } from "lucide-react";
+import { BarChart3, BellRing, CreditCard, GraduationCap, LayoutDashboard, LogOut, ScrollText, ShieldCheck } from "lucide-react";
 import { KonevaLogo } from "@/components/brand/koneva-logo";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ const NAV: Array<{ href: string; label: string; icon: typeof LayoutDashboard; pe
   { href: "/operator/students", label: "Pelajar", icon: GraduationCap, permission: "students:read" },
   { href: "/operator/audit", label: "Audit", icon: ScrollText, permission: "audit:read" },
   { href: "/operator/alerts", label: "Peringatan", icon: BellRing, permission: "audit:read" },
+  { href: "/operator/insights", label: "Panel Pemilik", icon: BarChart3, permission: "owner:insights" },
 ];
 
 /** Only same-origin operator paths are accepted as a return address. */
