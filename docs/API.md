@@ -137,12 +137,16 @@ are also tenant scoped.
 People sign in to the console with an account; systems call the API with a key. The two are separate
 credentials. Both reach the same `/api/v1` routes, and every route checks a permission.
 
-**Sign up** creates a personal account and a workspace with you as `owner`. A new workspace is a trial
+**Sign up** first reserves a pending account and emails a one-time code. Until that code is confirmed,
+the account cannot log in and has no workspace, trial, membership, or session. Confirmation activates
+the account and creates a personal workspace with you as `owner`. A new workspace is a trial
 (1 number, 200 messages) until an operator raises the limits.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/auth/signup` | `{ email, password (10+ chars), name, workspace_name?, accept_terms: true }`. Terms include that this service connects through an unofficial channel. 10 per hour per IP. |
+| POST | `/auth/signup` | `{ email, password (10+ chars), name, workspace_name?, accept_terms: true }`; returns `202 { verification_required, email, resend_after }`, sends the email OTP. Terms include that this service connects through an unofficial channel. 10 per hour per IP. |
+| POST | `/auth/signup/verification/request` | `{ email }`; resends a pending signup OTP subject to cooldown/rate limits. |
+| POST | `/auth/signup/verification/confirm` | `{ email, code }`; consumes the OTP, activates the account and returns the first session/workspace. |
 | POST | `/auth/login` | `{ email, password }`. Five wrong attempts lock that email and IP for 15 minutes. |
 | POST | `/auth/logout` | Revokes the session in the `Authorization` header. |
 | GET | `/auth/me` | Current user, workspace, role and permission list. |

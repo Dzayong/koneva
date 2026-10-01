@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { ORIGIN, CUSTOMER_PASSWORD, asCustomer, customer, db, emailMode, latestOtp, managerCalls } from "./support/stack";
+import { ORIGIN, CUSTOMER_PASSWORD, asCustomer, customer, db, directCustomer, emailMode, latestOtp, managerCalls } from "./support/stack";
 
 // Roles and invitations in a real browser against the real API, real PostgreSQL and the real Next proxy (STACK-local).
 // Emails go to a local file outbox only. No WhatsApp, no real device, no external mail.
@@ -12,6 +12,30 @@ const openTeam = async (page: Page) => { await page.goto("/team"); };
 
 test.describe("Owner and Developer (STACK-local)", () => {
   test.beforeEach(async () => { await emailMode("dev-outbox"); });
+
+  test("signup stays pending until the email OTP is confirmed", async ({ page }) => {
+    const email = `signup-${randomUUID()}@gmail.com`;
+    await page.goto("/signup");
+    await page.getByLabel("Nama", { exact: true }).fill("Pemilik Signup Uji");
+    await page.getByLabel("Email", { exact: true }).fill(email);
+    await page.getByLabel("Kata sandi", { exact: true }).fill(CUSTOMER_PASSWORD);
+    await page.getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Buat akun" }).click();
+    await expect(page.getByText("Verifikasi email", { exact: true })).toBeVisible();
+    const pending = (await db.query("SELECT status,email_verified_at FROM users WHERE lower(email)=lower($1)", [email])).rows[0] as { status: string; email_verified_at: Date | null };
+    expect(pending.status).toBe("pending_email");
+    expect(pending.email_verified_at).toBeNull();
+    expect((await db.query("SELECT count(*)::int AS n FROM memberships m JOIN users u ON u.id=m.user_id WHERE lower(u.email)=lower($1)", [email])).rows[0].n).toBe(0);
+
+    const code = latestOtp(email);
+    expect(code).toMatch(/^\d{6}$/);
+    await page.getByLabel("Kode verifikasi email").fill(code!);
+    await page.getByRole("button", { name: "Verifikasi dan aktifkan akun" }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+    const active = (await db.query("SELECT status,email_verified_at IS NOT NULL AS verified FROM users WHERE lower(email)=lower($1)", [email])).rows[0] as { status: string; verified: boolean };
+    expect(active).toEqual({ status: "active", verified: true });
+    expect((await db.query("SELECT count(*)::int AS n FROM memberships m JOIN users u ON u.id=m.user_id WHERE lower(u.email)=lower($1)", [email])).rows[0].n).toBe(1);
+  });
 
   test("Owner invites a Developer with a Gmail address; the team page offers only Owner and Developer", async ({ page }) => {
     const owner = await customer();
@@ -37,7 +61,8 @@ test.describe("Owner and Developer (STACK-local)", () => {
 
   test("an unverified Owner (non-Gmail sign-up) is asked to verify before inviting; devices stay usable; after the code the invitation goes through", async ({ page }) => {
     const email = `mhs${randomUUID().slice(0, 6)}@kampus.ac.id`;
-    const owner = await customer(email, false);
+    const owner = await directCustomer(email, false);
+    await db.query("UPDATE subscriptions SET plan_id='umkm', status='active', period_end=now()+interval '30 days' WHERE tenant_id=$1", [owner.tenant]);
     await asCustomer(page, owner);
     await page.goto("/devices");
     await expect(page.getByRole("heading", { name: "Device", level: 2 })).toBeVisible(); // not blocked

@@ -2,6 +2,8 @@ import { createCipheriv, createHmac, randomBytes, randomUUID } from "node:crypto
 import bcrypt from "bcryptjs";
 import { Pool } from "pg";
 import { expect, type Page } from "@playwright/test";
+import { login } from "../../../src/api-gateway/services/account.service";
+import { createTrial } from "../../../src/api-gateway/services/billing.service";
 
 /** Everything here talks to the disposable database and the local harness only; it refuses anything else. */
 const databaseUrl = process.env["DATABASE_URL"] ?? "";
@@ -129,18 +131,45 @@ export const auditCount = async (targetId: string) => Number((await db.query("SE
 import fs from "node:fs";
 export const CUSTOMER_PASSWORD = "synthetic-customer-pass-26";
 export interface Customer { email: string; token: string; userId: string; tenant: string }
-/** A real sign-up through the API. The workspace gets a paid plan so it can hold more than the trial's single member. */
+let signupIpCounter = 1;
+/** A real sign-up and mailbox OTP through the API. The workspace gets a paid plan for role tests. */
 export async function customer(email = `${randomUUID()}@gmail.com`, verified = true): Promise<Customer> {
+  await emailMode("dev-outbox");
   const r = await fetch(`${ORIGIN}/auth/signup`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { "Content-Type": "application/json", "X-Forwarded-For": `198.51.100.${++signupIpCounter}` },
     body: JSON.stringify({ email, password: CUSTOMER_PASSWORD, name: "Pemilik Uji", accept_terms: true }),
   });
-  const body = (await r.json()) as { data: { token: string; user: { id: string }; workspaces: Array<{ id: string }> } };
-  if (r.status !== 201) throw new Error(`signup failed: ${r.status}`);
+  const pending = (await r.json()) as { data: { verification_required: true; email: string } };
+  if (r.status !== 202) throw new Error(`signup failed: ${r.status}`);
+  const code = latestOtp(email);
+  if (!code) throw new Error("signup verification OTP was not written to the test outbox");
+  const confirmation = await fetch(`${ORIGIN}/auth/signup/verification/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Forwarded-For": `198.51.100.${++signupIpCounter}` },
+    body: JSON.stringify({ email: pending.data.email, code }),
+  });
+  const body = (await confirmation.json()) as { data: { token: string; user: { id: string }; workspaces: Array<{ id: string }> } };
+  if (confirmation.status !== 200) throw new Error(`signup verification failed: ${confirmation.status}`);
   const tenant = body.data.workspaces[0]!.id;
-  if (verified) await db.query("UPDATE users SET email_verified_at = now() WHERE id=$1", [body.data.user.id]); // Owner email verification is covered separately
+  if (!verified) await db.query("UPDATE users SET email_verified_at = NULL WHERE id=$1", [body.data.user.id]);
   await db.query("UPDATE subscriptions SET plan_id='umkm', status='active', period_end=now()+interval '30 days' WHERE tenant_id=$1", [tenant]);
   return { email, token: body.data.token, userId: body.data.user.id, tenant };
+}
+/** Direct, already-verified fixture for billing browser tests that do not exercise public signup. */
+export async function directCustomer(email = `${randomUUID()}@gmail.com`, verified = true): Promise<Customer> {
+  const userId = randomUUID(), tenant = randomUUID();
+  await db.query(
+    `INSERT INTO users(id,email,name,password_hash,status,email_verified_at)
+     VALUES ($1,$2,'Pemilik Uji',$3,'active',$4)`,
+    [userId, email, await bcrypt.hash(CUSTOMER_PASSWORD, 12), verified ? new Date() : null],
+  );
+  await db.query(
+    "INSERT INTO tenants(id,name,email,api_key,webhook_secret) VALUES ($1,'Workspace Uji',$2,$3,$4)",
+    [tenant, email, `wg_${randomBytes(24).toString("hex")}`, `whsec_${randomBytes(24).toString("hex")}`],
+  );
+  await createTrial(db, tenant);
+  await db.query("INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'owner')", [userId, tenant]);
+  const session = await login(email, CUSTOMER_PASSWORD, {});
+  return { email, token: session.token, userId, tenant };
 }
 export async function asCustomer(page: Page, who: Customer, workspace: string = who.tenant): Promise<void> {
   await page.addInitScript(([token, ws]) => { window.localStorage.setItem("wa_gateway_session", token!); window.localStorage.setItem("wa_gateway_workspace", ws!); }, [who.token, workspace]);

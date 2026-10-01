@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { AuthShell, TermsLabel } from "@/components/auth/auth-shell";
 import { PasswordInput } from "@/components/auth/password-input";
@@ -20,10 +20,19 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [terms, setTerms] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [resendWait, setResendWait] = useState(0);
   const [error, setError] = useState<{ message: string; taken?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const passwordOk = password.length >= 10;
+
+  useEffect(() => {
+    if (resendWait <= 0) return;
+    const timer = setTimeout(() => setResendWait((wait) => wait - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendWait]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,7 +45,11 @@ export default function SignupPage() {
         ...(workspace.trim() ? { workspace_name: workspace.trim() } : {}),
         accept_terms: true,
       });
-      loginWithSession(result, "/dashboard?welcome=1");
+      setPendingEmail(result.email);
+      setCode("");
+      setResendWait(result.resend_after);
+      setPassword("");
+      setError(null);
     } catch (err) {
       const failure = apiFailure(err);
       setError(
@@ -45,18 +58,62 @@ export default function SignupPage() {
         : failure.code === "SIGNUP_DISABLED" ? { message: "Pendaftaran sedang ditutup." }
         : { message: failure.message },
       );
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
+  };
+
+  const confirm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingEmail) return;
+    setError(null); setBusy(true);
+    try {
+      loginWithSession(await api.confirmSignupEmailVerification(pendingEmail, code), "/dashboard?welcome=1");
+    } catch (err) {
+      const failure = apiFailure(err);
+      setError({ message: failure.code === "OTP_INVALID" ? "Kode salah, kedaluwarsa, atau sudah dipakai. Minta kode baru." : failure.message });
+    } finally { setBusy(false); }
+  };
+
+  const resend = async () => {
+    if (!pendingEmail) return;
+    setError(null); setBusy(true);
+    try {
+      const result = await api.requestSignupEmailVerification(pendingEmail);
+      setResendWait(result.resend_after);
+    } catch (err) {
+      const failure = apiFailure(err);
+      setError({ message: failure.code === "OTP_COOLDOWN" ? "Tunggu sebentar sebelum meminta kode lagi." : failure.message });
+    } finally { setBusy(false); }
   };
 
   return (
     <AuthShell>
       <Card>
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl">Buat akun</CardTitle>
-          <CardDescription>Anda langsung mendapat workspace uji coba: 1 nomor dan 200 pesan.</CardDescription>
+          <CardTitle className="text-2xl">{pendingEmail ? "Verifikasi email" : "Buat akun"}</CardTitle>
+          <CardDescription>{pendingEmail
+            ? `Masukkan kode 6 digit yang kami kirim ke ${pendingEmail}. Akun dan workspace baru aktif setelah email terverifikasi.`
+            : "Verifikasi email diperlukan sebelum akun dan workspace aktif."}</CardDescription>
         </CardHeader>
-        <form onSubmit={submit}>
+        {pendingEmail ? <form onSubmit={confirm}>
+          <CardContent className="space-y-4 pb-4">
+            <div className="space-y-2">
+              <Label htmlFor="signup-verify-code">Kode verifikasi email</Label>
+              <Input id="signup-verify-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} className="font-mono tracking-widest" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} />
+            </div>
+            {error && <p role="alert" className="text-sm text-destructive">{error.message}</p>}
+          </CardContent>
+          <CardFooter className="flex-col gap-3">
+            <Button type="submit" className="w-full" disabled={busy || code.length !== 6}>
+              {busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Memverifikasi…</> : "Verifikasi dan aktifkan akun"}
+            </Button>
+            <Button type="button" variant="outline" className="w-full" onClick={resend} disabled={busy || resendWait > 0}>
+              {resendWait > 0 ? `Kirim ulang kode (${resendWait} dtk)` : "Kirim ulang kode"}
+            </Button>
+            <button type="button" className="text-sm underline" onClick={() => { setPendingEmail(null); setCode(""); setError(null); }}>
+              Kembali ke formulir pendaftaran
+            </button>
+          </CardFooter>
+        </form> : <form onSubmit={submit}>
           <CardContent className="space-y-4 pb-4">
             <div className="space-y-2">
               <Label htmlFor="name">Nama</Label>
@@ -97,7 +154,7 @@ export default function SignupPage() {
               <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">Masuk</Link>
             </p>
           </CardFooter>
-        </form>
+        </form>}
       </Card>
     </AuthShell>
   );

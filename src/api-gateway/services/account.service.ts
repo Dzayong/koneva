@@ -62,31 +62,33 @@ async function listWorkspaces(db: Queryable, userId: string): Promise<Workspace[
 
 export interface SignupInput { email: string; password: string; name: string; workspace_name?: string | undefined }
 
-export async function signup(input: SignupInput, meta: ClientMeta): Promise<SessionResult> {
+export interface PendingSignup { user_id: string; email: string }
+
+/** Reserve only a non-authenticating pending record. No workspace, trial, or session exists until mailbox proof succeeds. */
+export async function signup(input: SignupInput): Promise<PendingSignup> {
   const passwordHash = await hashPassword(input.password);
   const workspaceName = input.workspace_name ?? `Workspace ${input.name}`;
   try {
     return await transaction(async (client) => {
-      const user = (await client.query<{ id: string }>(
-        `INSERT INTO users (email, name, password_hash, terms_accepted_at, terms_version, last_login_at)
-         VALUES ($1, $2, $3, now(), $4, now()) RETURNING id`,
-        [input.email, input.name, passwordHash, TERMS_VERSION],
-      )).rows[0]!;
-      // The legacy tenant api_key column is required but never shown to the user;
-      // access for new workspaces goes through sessions and scoped keys.
-      const tenant = (await client.query<{ id: string }>(
-        `INSERT INTO tenants (name, email, api_key, webhook_secret) VALUES ($1, $2, $3, $4) RETURNING id`,
-        [workspaceName, input.email, `wg_${randomBytes(24).toString('hex')}`, `whsec_${randomBytes(24).toString('hex')}`],
-      )).rows[0]!;
-      // Limits and the trial period come from the 'trial' plan, so the operator can change them in one place.
-      await createTrial(client, tenant.id);
-      await client.query(`INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`, [user.id, tenant.id]);
-      const session = await createSession(client, user.id, meta);
-      return {
-        token: session.token, expires_at: session.expiresAt,
-        user: { id: user.id, email: input.email, name: input.name },
-        workspaces: [{ id: tenant.id, name: workspaceName, role: 'owner' as Role }],
-      };
+      const existing = (await client.query<{ id: string; status: string; email_verified_at: Date | null }>(
+        'SELECT id, status, email_verified_at FROM users WHERE lower(email) = lower($1) FOR UPDATE', [input.email],
+      )).rows[0];
+      if (existing && (existing.status !== 'pending_email' || existing.email_verified_at)) {
+        throw new ServiceError(409, 'EMAIL_TAKEN', 'An account with this email already exists');
+      }
+      const user = existing
+        ? (await client.query<{ id: string }>(
+          `UPDATE users SET name=$2, password_hash=$3, pending_signup_workspace_name=$4,
+             terms_accepted_at=now(), terms_version=$5
+           WHERE id=$1 RETURNING id`,
+          [existing.id, input.name, passwordHash, workspaceName, TERMS_VERSION],
+        )).rows[0]!
+        : (await client.query<{ id: string }>(
+          `INSERT INTO users (email, name, password_hash, status, pending_signup_workspace_name, terms_accepted_at, terms_version)
+           VALUES ($1, $2, $3, 'pending_email', $4, now(), $5) RETURNING id`,
+          [input.email, input.name, passwordHash, workspaceName, TERMS_VERSION],
+        )).rows[0]!;
+      return { user_id: user.id, email: input.email };
     });
   } catch (error) {
     if ((error as { code?: string }).code === '23505') {
@@ -94,6 +96,30 @@ export async function signup(input: SignupInput, meta: ClientMeta): Promise<Sess
     }
     throw error;
   }
+}
+
+/** Activate one pending signup only inside the verified-OTP transaction. */
+export async function activatePendingSignup(client: PoolClient, userId: string, meta: ClientMeta): Promise<SessionResult> {
+  const user = (await client.query<{ email: string; name: string; workspace_name: string }>(
+    `SELECT email, name, pending_signup_workspace_name AS workspace_name FROM users
+     WHERE id=$1 AND status='pending_email' AND email_verified_at IS NOT NULL FOR UPDATE`, [userId],
+  )).rows[0];
+  if (!user) throw new ServiceError(409, 'SIGNUP_STATE_INVALID', 'Pendaftaran tidak dapat diaktifkan.');
+
+  // The legacy tenant api_key column remains required, but is never shown to the user.
+  const tenant = (await client.query<{ id: string }>(
+    `INSERT INTO tenants (name, email, api_key, webhook_secret) VALUES ($1, $2, $3, $4) RETURNING id`,
+    [user.workspace_name, user.email, `wg_${randomBytes(24).toString('hex')}`, `whsec_${randomBytes(24).toString('hex')}`],
+  )).rows[0]!;
+  await createTrial(client, tenant.id);
+  await client.query(`INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`, [userId, tenant.id]);
+  await client.query("UPDATE users SET status='active', pending_signup_workspace_name=NULL, last_login_at=now() WHERE id=$1", [userId]);
+  const session = await createSession(client, userId, meta);
+  return {
+    token: session.token, expires_at: session.expiresAt,
+    user: { id: userId, email: user.email, name: user.name },
+    workspaces: [{ id: tenant.id, name: user.workspace_name, role: 'owner' as Role }],
+  };
 }
 
 export async function login(email: string, password: string, meta: ClientMeta): Promise<SessionResult> {

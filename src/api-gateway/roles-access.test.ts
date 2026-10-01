@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import http from 'node:http';
@@ -16,7 +16,8 @@ import authRoutes from './routes/auth.routes';
 import billingRoutes from './routes/billing.routes';
 import deviceRoutes from './routes/device.routes';
 import teamRoutes from './routes/team.routes';
-import { login, signup } from './services/account.service';
+import { hashPassword, login } from './services/account.service';
+import { createTrial } from './services/billing.service';
 import { emailTransport } from './services/mailer';
 import { ServiceError } from './services/service-error';
 import { newApiKey } from './services/apikey.service';
@@ -84,12 +85,22 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
   };
   const meta = { ip: '127.0.0.1', userAgent: 'test' };
   const owner = async (email = `${randomUUID()}@gmail.com`, verified = true) => {
-    const session = await signup({ email, password, name: 'Pemilik Uji' }, meta);
-    const tenant = session.workspaces[0]!.id;
+    const userId = randomUUID(), tenant = randomUUID();
+    await pool.query(
+      `INSERT INTO users(id,email,name,password_hash,status,email_verified_at,terms_accepted_at)
+       VALUES ($1,$2,'Pemilik Uji',$3,'active',$4,now())`,
+      [userId, email, await hashPassword(password), verified ? new Date() : null],
+    );
+    await pool.query(
+      'INSERT INTO tenants(id,name,email,api_key,webhook_secret) VALUES ($1,$2,$3,$4,$5)',
+      [tenant, 'Workspace Pemilik Uji', email, `wg_${randomBytes(24).toString('hex')}`, `whsec_${randomBytes(24).toString('hex')}`],
+    );
+    await createTrial(pool, tenant);
+    await pool.query("INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'owner')", [userId, tenant]);
     // The trial plan allows one member (the owner); a paid plan is what lets an owner add a Developer.
-    if (verified) await pool.query('UPDATE users SET email_verified_at = now() WHERE id = $1', [session.user.id]); // Owner email verification has its own tests
     await pool.query("UPDATE subscriptions SET plan_id='umkm', status='active', period_end=now()+interval '30 days' WHERE tenant_id=$1", [tenant]);
-    return { email, token: session.token, userId: session.user.id, tenant };
+    const session = await login(email, password, meta);
+    return { email, token: session.token, userId, tenant };
   };
   const otpFor = (to: string): string[] => fs.existsSync(outbox) ? fs.readFileSync(outbox, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { to: string; code: string }).filter((m) => m.to === to).map((m) => m.code) : [];
   const invite = async (o: Awaited<ReturnType<typeof owner>>, email: string) => {
@@ -103,6 +114,34 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
   const wrongCode = (real: string) => (real === '000000' ? '111111' : '000000');
   const accept = (token: string, body: unknown, bearerToken?: string) => call(`/auth/invitations/${token}/accept`, { method: 'POST', body, ...(bearerToken ? { token: bearerToken } : {}) });
   const newUserBody = (otp: string) => ({ otp, name: 'Developer Uji', password, accept_terms: true });
+
+  await t.test('signup creates no active account or workspace before mailbox OTP, and a pending email can safely restart registration', async () => {
+    newClient(); useOutbox();
+    const email = `${randomUUID()}@gmail.com`, firstPassword = 'first-synthetic-password-26', secondPassword = 'second-synthetic-password-26';
+    const first = await call('/auth/signup', { method: 'POST', body: { email, password: firstPassword, name: 'Pendaftar Pertama', accept_terms: true } });
+    assert.equal(first.status, 202, first.text);
+    assert.deepEqual(first.body.data, { verification_required: true, email, resend_after: 60 });
+    assert.equal('token' in first.body.data, false);
+    const pending = (await pool.query<{ status: string; email_verified_at: Date | null }>('SELECT status,email_verified_at FROM users WHERE lower(email)=lower($1)', [email])).rows[0];
+    assert.deepEqual(pending, { status: 'pending_email', email_verified_at: null });
+    assert.equal(Number((await pool.query('SELECT count(*) FROM memberships m JOIN users u ON u.id=m.user_id WHERE lower(u.email)=lower($1)', [email])).rows[0]!.count), 0);
+    assert.equal((await call('/auth/login', { method: 'POST', body: { email, password: firstPassword } })).status, 401);
+
+    const staleCode = otpFor(email).at(-1)!;
+    newClient();
+    const restarted = await call('/auth/signup', { method: 'POST', body: { email, password: secondPassword, name: 'Pemilik Sebenarnya', accept_terms: true } });
+    assert.equal(restarted.status, 202, restarted.text);
+    // The original OTP still proves the mailbox, while the pending password/name now belong to the latest attempt.
+    const activated = await call('/auth/signup/verification/confirm', { method: 'POST', body: { email, code: staleCode } });
+    assert.equal(activated.status, 200, activated.text);
+    assert.equal(activated.body.data.user.email, email);
+    assert.equal(activated.body.data.workspaces.length, 1);
+    const active = (await pool.query<{ status: string; verified: boolean }>('SELECT status,email_verified_at IS NOT NULL AS verified FROM users WHERE lower(email)=lower($1)', [email])).rows[0];
+    assert.deepEqual(active, { status: 'active', verified: true });
+    assert.equal((await call('/auth/login', { method: 'POST', body: { email, password: firstPassword } })).status, 401);
+    assert.equal((await call('/auth/login', { method: 'POST', body: { email, password: secondPassword } })).status, 200);
+    noEmail();
+  });
 
   await t.test('database: one owner per workspace; no new admin/viewer memberships; invitations Developer+Gmail only; system admin is not a customer role', async () => {
     newClient();

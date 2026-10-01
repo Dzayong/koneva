@@ -1,24 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { randomUUID } from "node:crypto";
-import { ORIGIN, asCustomer, db, type Customer } from "./support/stack";
-import { signup } from "../../src/api-gateway/services/account.service";
+import { ORIGIN, asCustomer, db, directCustomer } from "./support/stack";
 
-// T1.1 catalog, annual-close, grandfather and quota-hold meter, in a real browser against the real API,
-// real PostgreSQL and the real Next proxy (STACK-local). No WhatsApp, no real device, no email sent.
-//
-// Signs up through the account.service.ts function directly rather than support/stack.ts's customer()
-// (which goes through the real, rate-limited /auth/signup HTTP route): tests-stack/roles.spec.ts already uses
-// exactly the "10 per hour per IP" signup budget on its own (see docs/API.md), so any other file's real HTTP
-// signups reliably tip that shared, in-memory, per-process limiter over -- this is a pre-existing fragility of
-// the suite's signup budget, not something these tests are meant to exercise. Calling the service function
-// skips only the rate-limit middleware; the same INSERTs run either way.
-async function directCustomer(email = `${randomUUID()}@gmail.com`): Promise<Customer> {
-  const result = await signup({ email, password: "synthetic-customer-pass-26", name: "Pemilik Uji" }, {});
-  const tenant = result.workspaces[0]!.id;
-  await db.query("UPDATE users SET email_verified_at = now() WHERE id=$1", [result.user.id]);
-  await db.query("UPDATE subscriptions SET plan_id='umkm', status='active', period_end=now()+interval '30 days' WHERE tenant_id=$1", [tenant]);
-  return { email, token: result.token, userId: result.user.id, tenant };
-}
+// T1.1 billing tests use a pre-verified DB fixture; the roles suite separately exercises live signup + OTP.
 
 test.describe("T1.1 plans, quota and grandfather (STACK-local)", () => {
   test("public plan catalog: four monthly plans, stable ids, Bisnis CS shows the Unlimited* headline and fair-use note", async () => {

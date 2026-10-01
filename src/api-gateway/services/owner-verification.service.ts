@@ -1,6 +1,7 @@
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import config from '../../shared/config';
 import pool, { transaction } from '../../shared/database/connection';
+import { activatePendingSignup, type ClientMeta, type SessionResult } from './account.service';
 import { requireEmail, sendInvitationOtp } from './mailer';
 import { reserveIpRequest, reserveOtpSend } from './otp-limits';
 import { ServiceError } from './service-error';
@@ -19,9 +20,7 @@ export async function isEmailVerified(userId: string): Promise<boolean> {
   return Boolean((await pool.query<{ email_verified_at: Date | null }>('SELECT email_verified_at FROM users WHERE id = $1', [userId])).rows[0]?.email_verified_at);
 }
 
-export async function requestEmailVerification(userId: string, ip?: string): Promise<{ already_verified: true } | { sent: true; expires_in: number; resend_after: number }> {
-  requireEmail(); // fail safe: nothing counted or stored while no sender is configured
-  await reserveIpRequest(ip);
+async function issueEmailVerification(userId: string): Promise<{ already_verified: true } | { sent: true; expires_in: number; resend_after: number }> {
   const outcome = await transaction(async (client) => {
     const user = (await client.query<{ email: string; email_verified_at: Date | null }>('SELECT email, email_verified_at FROM users WHERE id = $1 FOR UPDATE', [userId])).rows[0];
     if (!user) throw new ServiceError(404, 'USER_NOT_FOUND', 'Akun tidak ditemukan.');
@@ -50,6 +49,24 @@ export async function requestEmailVerification(userId: string, ip?: string): Pro
   return { sent: true, expires_in: VERIFY_MINUTES * 60, resend_after: VERIFY_RESEND_SECONDS };
 }
 
+export async function requestEmailVerification(userId: string, ip?: string): Promise<{ already_verified: true } | { sent: true; expires_in: number; resend_after: number }> {
+  requireEmail(); // fail safe: nothing counted or stored while no sender is configured
+  await reserveIpRequest(ip);
+  return issueEmailVerification(userId);
+}
+
+/** Resend for pending signup without creating a session; unknown/active addresses get the same generic response. */
+export async function requestSignupEmailVerification(email: string, ip?: string): Promise<{ sent: true; expires_in: number; resend_after: number }> {
+  requireEmail();
+  await reserveIpRequest(ip);
+  const user = (await pool.query<{ id: string }>(
+    `SELECT id FROM users WHERE lower(email)=lower($1) AND status='pending_email' AND email_verified_at IS NULL`, [email],
+  )).rows[0];
+  if (!user) return { sent: true, expires_in: VERIFY_MINUTES * 60, resend_after: VERIFY_RESEND_SECONDS };
+  const result = await issueEmailVerification(user.id);
+  return 'already_verified' in result ? { sent: true, expires_in: VERIFY_MINUTES * 60, resend_after: VERIFY_RESEND_SECONDS } : result;
+}
+
 const CODE_INVALID = () => new ServiceError(422, 'OTP_INVALID', 'Kode salah, kedaluwarsa, atau sudah dipakai. Minta kode baru.') // not 401: the session itself is valid;
 
 /**
@@ -75,4 +92,29 @@ export async function confirmEmailVerification(userId: string, code: string): Pr
     return true;
   });
   if (!accepted) throw CODE_INVALID();
+}
+
+/** Public signup confirmation: possession of the mailbox OTP is the only path to account activation and session issuance. */
+export async function confirmSignupEmailVerification(email: string, code: string, meta: ClientMeta): Promise<SessionResult> {
+  const session = await transaction(async (client) => {
+    const user = (await client.query<{ id: string }>(
+      `SELECT id FROM users WHERE lower(email)=lower($1) AND status='pending_email' AND email_verified_at IS NULL FOR UPDATE`, [email],
+    )).rows[0];
+    if (!user) return undefined;
+    const row = (await client.query<{ id: string; code_hash: string }>(
+      `UPDATE email_verifications v SET attempts = v.attempts + 1
+       WHERE v.id = (SELECT id FROM email_verifications WHERE user_id = $1 AND consumed_at IS NULL AND expires_at > now() AND attempts < $2
+                     ORDER BY created_at DESC LIMIT 1)
+         AND v.consumed_at IS NULL AND v.expires_at > now() AND v.attempts < $2
+       RETURNING v.id, v.code_hash`, [user.id, VERIFY_MAX_ATTEMPTS])).rows[0];
+    if (!row) return undefined;
+    const expected = Buffer.from(row.code_hash), given = Buffer.from(codeHash(row.id, code));
+    if (expected.length !== given.length || !timingSafeEqual(expected, given)) return undefined; // commit the attempt only
+    const consumed = await client.query('UPDATE email_verifications SET consumed_at=now() WHERE id=$1 AND consumed_at IS NULL RETURNING id', [row.id]);
+    if (!consumed.rowCount) return undefined;
+    await client.query('UPDATE users SET email_verified_at=COALESCE(email_verified_at, now()) WHERE id=$1', [user.id]);
+    return activatePendingSignup(client, user.id, meta);
+  });
+  if (!session) throw CODE_INVALID();
+  return session;
 }

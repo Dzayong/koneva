@@ -7,7 +7,7 @@ import { getRedisClient } from '../../shared/redis';
 import { validate } from '../middleware/validate';
 import { login, resolveSession, revokeSession, sha256, signup } from '../services/account.service';
 import { acceptInvitation, previewInvitation, requestInvitationOtp } from '../services/team.service';
-import { confirmEmailVerification, requestEmailVerification } from '../services/owner-verification.service';
+import { confirmEmailVerification, confirmSignupEmailVerification, requestEmailVerification, requestSignupEmailVerification } from '../services/owner-verification.service';
 import { recordSiteEvent } from '../services/site-stats.service';
 import { getSubscriptionSummary } from '../services/billing.service';
 import { recordAudit } from '../services/audit.service';
@@ -51,9 +51,35 @@ function bearer(request: Request): string | undefined {
 router.post('/signup', limited(60 * 60_000, 10), validate({ body: signupSchema }), async (request: Request, response: Response) => {
   if (!config.signup.enabled) throw new ServiceError(403, 'SIGNUP_DISABLED', 'Sign-up is currently closed');
   const body = request.validated!.body as z.infer<typeof signupSchema>;
-  const result = await signup(body, meta(request));
+  const pending = await signup(body);
+  let resendAfter: number;
+  try {
+    const verification = await requestEmailVerification(pending.user_id, request.ip);
+    resendAfter = 'resend_after' in verification ? verification.resend_after : 60;
+  } catch (error) {
+    // A restarted pending signup may reuse an already-sent, still-valid OTP during its cooldown.
+    if (error instanceof ServiceError && error.code === 'OTP_COOLDOWN') resendAfter = error.retryAfter ?? 60;
+    else throw error;
+  }
+  response.status(202).json({ success: true, data: {
+    verification_required: true, email: pending.email,
+    resend_after: resendAfter,
+  } });
+});
+
+const signupVerificationRequestSchema = z.object({ email: z.string().trim().toLowerCase().email().max(255) }).strict();
+const signupVerificationConfirmSchema = signupVerificationRequestSchema.extend({ code: z.string().regex(/^\d{6}$/) }).strict();
+
+router.post('/signup/verification/request', limited(15 * 60_000, 20), validate({ body: signupVerificationRequestSchema }), async (request: Request, response: Response) => {
+  const { email } = request.validated!.body as z.infer<typeof signupVerificationRequestSchema>;
+  response.json({ success: true, data: await requestSignupEmailVerification(email, request.ip) });
+});
+
+router.post('/signup/verification/confirm', limited(15 * 60_000, 30), validate({ body: signupVerificationConfirmSchema }), async (request: Request, response: Response) => {
+  const { email, code } = request.validated!.body as z.infer<typeof signupVerificationConfirmSchema>;
+  const session = await confirmSignupEmailVerification(email, code, meta(request));
   void recordSiteEvent('signup').catch(() => undefined);
-  response.status(201).json({ success: true, data: result });
+  response.json({ success: true, data: session });
 });
 
 router.post('/login', limited(15 * 60_000, 30), validate({ body: loginSchema }), async (request: Request, response: Response) => {
