@@ -1,14 +1,17 @@
 "use client";
 
+import { Activity, AlertTriangle, Building2, CheckCircle2, CirclePause, Mail, MessageSquare, Server, Smartphone, Users } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/operator/field-list";
 import { ErrorState, ForbiddenState, LoadingBlock } from "@/components/operator/page-state";
+import { StatGrid, StatsCard } from "@/components/dashboard/stats-card";
 import { useOperatorSession, useOwnerInsights } from "@/hooks/use-operator";
 
 const number = (value: number) => new Intl.NumberFormat("id-ID").format(value);
 const dateTime = (value: string | null) => value ? new Date(value).toLocaleString("id-ID") : "Belum ada data";
 
-function Metric({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
-  return <Card><p className="text-sm text-muted-foreground">{label}</p><p className="mt-1 text-3xl font-semibold tabular-nums">{typeof value === "number" ? number(value) : value}</p>{hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}</Card>;
+function Snapshot({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
+  return <div className="rounded-xl border bg-card p-4 shadow-card"><p className="text-label">{label}</p><p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight">{value}</p>{detail && <p className="mt-1 text-xs text-muted-foreground">{detail}</p>}</div>;
 }
 
 export default function OwnerInsightsPage() {
@@ -18,37 +21,66 @@ export default function OwnerInsightsPage() {
   if (!session.can("owner:insights")) return <ForbiddenState text="Bagian ini hanya untuk pemilik sistem." />;
   if (insights.error) return <ErrorState error={insights.error} onRetry={() => void insights.refetch()} />;
   if (!insights.data) return <p role="status">Data ringkasan belum tersedia.</p>;
+
   const d = insights.data;
   return (
-    <div className="space-y-6">
-      <header><h1 className="text-2xl font-semibold tracking-tight">Panel Pemilik</h1><p className="text-sm text-muted-foreground">Ringkasan platform read-only, diukur {dateTime(d.measured_at)}.</p></header>
-      <section aria-label="Indikator bisnis" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Metric label="Akun terdaftar" value={d.kpis.registered_accounts} />
-        <Metric label="Workspace aktif" value={d.kpis.active_workspaces} />
-        <Metric label="Workspace suspend" value={d.kpis.suspended_workspaces} />
-        <Metric label="Pesan terkirim · 24 jam" value={d.kpis.messages_sent_24h} />
-        <Metric label="Pesan terkirim · 30 hari" value={d.kpis.messages_sent_30d} />
-        <Metric label="Percobaan kirim email OTP · hari ini (WIB)" value={d.kpis.otp_sender_today} hint={`Sisa batas internal: ${number(d.kpis.otp_sender_remaining_internal)} dari ${number(d.kpis.otp_sender_daily_cap)}; bukan kuota Gmail Google.`} />
-      </section>
-      <section className="space-y-3" aria-labelledby="health-title">
-        <h2 id="health-title" className="text-lg font-semibold">Kesehatan layanan</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Metric label="API" value={d.health.api === "responding" ? "Merespons" : d.health.api} />
-          <Metric label="Database" value={d.health.database === "connected" ? "Terhubung" : d.health.database} />
-          <Metric label="Antrean pesan" value={number(d.health.queue.queued)} hint={`${number(d.health.queue.sending)} sedang dikirim`} />
-          <Metric label="Gagal kirim · 24 jam" value={`${d.health.message_delivery_24h.error_rate_percent}%`} hint={`${number(d.health.message_delivery_24h.failed)} dari ${number(d.health.message_delivery_24h.attempted)} pesan`} />
+    <div className="space-y-8 md:space-y-10">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-label text-primary">PANEL PEMILIK</p>
+          <h2 className="text-display mt-2">Ringkasan bisnis</h2>
+          <p className="mt-2 text-muted-foreground">Kondisi platform saat ini · diperbarui {dateTime(d.measured_at)}.</p>
         </div>
-        <Card><h3 className="font-medium">Status device WhatsApp</h3>{d.health.devices.length ? <ul className="mt-3 divide-y">{d.health.devices.map((device) => <li key={device.id} className="flex flex-wrap justify-between gap-2 py-2 text-sm"><span>{device.workspace_name ?? "Workspace"} · {device.label}</span><span className="text-muted-foreground">{device.status} · diperbarui {dateTime(device.updated_at)}</span></li>)}</ul> : <p className="mt-2 text-sm text-muted-foreground">Belum ada device.</p>}<p className="mt-3 text-xs text-muted-foreground">Status diambil dari database; bukan pemeriksaan langsung ke proses/container bot.</p></Card>
+        <Badge variant="outline" className="w-fit gap-1.5 rounded-full bg-card px-3 py-1.5"><CheckCircle2 className="h-4 w-4 text-success" aria-hidden />Baca saja</Badge>
+      </header>
+
+      <section aria-label="Indikator bisnis" className="space-y-3">
+        <div><h3 className="text-lg font-semibold">Kinerja platform</h3><p className="text-sm text-muted-foreground">Angka utama dari data tersimpan.</p></div>
+        <StatGrid>
+          <StatsCard title="Akun terdaftar" value={number(d.kpis.registered_accounts)} icon={Users} description="Total akun" index={0} />
+          <StatsCard title="Workspace aktif" value={number(d.kpis.active_workspaces)} icon={Building2} description="Berstatus aktif" index={1} />
+          <StatsCard title="Workspace suspend" value={number(d.kpis.suspended_workspaces)} icon={CirclePause} description="Berstatus suspend" index={2} />
+          <StatsCard title="Pesan terkirim · 24 jam" value={number(d.kpis.messages_sent_24h)} icon={MessageSquare} description="Terkirim, delivered, atau read" index={3} />
+          <StatsCard title="Pesan terkirim · 30 hari" value={number(d.kpis.messages_sent_30d)} icon={MessageSquare} description="Terkirim, delivered, atau read" index={4} />
+          <StatsCard title="Email OTP · hari ini (WIB)" value={number(d.kpis.otp_sender_today)} icon={Mail} description={`Sisa batas internal: ${number(d.kpis.otp_sender_remaining_internal)} dari ${number(d.kpis.otp_sender_daily_cap)}; bukan kuota Gmail Google.`} index={5} />
+        </StatGrid>
       </section>
-      <section className="space-y-3" aria-labelledby="alerts-title">
-        <h2 id="alerts-title" className="text-lg font-semibold">Peringatan dan consent</h2>
-        <Card><p className="font-medium">Ambang email OTP</p>{d.alerts.otp_thresholds.length ? <ul className="mt-2 space-y-1 text-sm">{d.alerts.otp_thresholds.map((a) => <li key={a.id}>{a.kind === "sender_cap_reached" ? "Batas harian tercapai" : "70% batas harian tercapai"} · {a.window_count}/{a.cap} · {dateTime(a.at)}</li>)}</ul> : <p className="mt-2 text-sm text-muted-foreground">Tidak ada ambang tercatat dalam 30 hari.</p>}<p className="mt-3 text-sm">Permintaan STOP dalam 1 jam: <strong>{number(d.alerts.stop_events_last_hour)}</strong>. Pesan diblokir oleh pemeriksaan consent dalam 1 jam: <strong>{number(d.alerts.consent_blocked_messages_last_hour)}</strong>.</p><p className="mt-2 text-xs text-muted-foreground">Belum ada event persisten untuk penolakan consent sebelum antre, sehingga lonjakan penolakan itu belum dapat dihitung.</p></Card>
+
+      <section aria-labelledby="health-title" className="space-y-3">
+        <div><h3 id="health-title" className="text-lg font-semibold">Kesehatan layanan</h3><p className="text-sm text-muted-foreground">Snapshot terbaru dari API dan database.</p></div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Snapshot label="API" value="Merespons" detail="Permintaan ringkasan berhasil" />
+          <Snapshot label="Database" value="Terhubung" detail="Query ringkasan berhasil" />
+          <Snapshot label="Antrean pesan" value={number(d.health.queue.queued)} detail={`${number(d.health.queue.sending)} sedang dikirim`} />
+          <Snapshot label="Error pengiriman · 24 jam" value={`${d.health.message_delivery_24h.error_rate_percent}%`} detail={`${number(d.health.message_delivery_24h.failed)} dari ${number(d.health.message_delivery_24h.attempted)} pesan`} />
+        </div>
+        <Card className="shadow-card">
+          <div className="flex items-center gap-2"><Smartphone className="h-4 w-4 text-primary" aria-hidden /><h4 className="font-semibold">Device WhatsApp</h4></div>
+          {d.health.devices.length ? <ul className="mt-3 divide-y">{d.health.devices.map((device) => <li key={device.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"><span className="min-w-0 font-medium">{device.workspace_name ?? "Workspace"} · {device.label}</span><span className="text-muted-foreground">{device.status} · {dateTime(device.updated_at)}</span></li>)}</ul> : <p className="mt-3 text-sm text-muted-foreground">Belum ada device.</p>}
+          <p className="mt-3 text-xs text-muted-foreground">Status diambil dari database, bukan pemeriksaan langsung ke proses/container bot.</p>
+        </Card>
       </section>
-      <section className="space-y-3" aria-labelledby="activity-title">
-        <h2 id="activity-title" className="text-lg font-semibold">Aktivitas sistem · 30 hari</h2>
-        <Card>{d.activity.length ? <ol className="divide-y">{d.activity.map((event) => <li key={`${event.kind}-${event.id}`} className="py-3"><p className="text-sm font-medium">{event.title}</p>{event.detail && <p className="text-sm text-muted-foreground">{event.detail}</p>}<time className="text-xs text-muted-foreground">{dateTime(event.at)}</time></li>)}</ol> : <p className="text-sm text-muted-foreground">Belum ada aktivitas tersimpan untuk rentang ini.</p>}</Card>
+
+      <div className="grid gap-5 xl:grid-cols-5 xl:gap-6">
+        <section aria-labelledby="activity-title" className="space-y-3 xl:col-span-3">
+          <div className="flex items-end justify-between gap-3"><div><h3 id="activity-title" className="text-lg font-semibold">Aktivitas sistem</h3><p className="text-sm text-muted-foreground">Peristiwa tersimpan dalam 30 hari.</p></div><Activity className="h-5 w-5 text-primary" aria-hidden /></div>
+          <Card className="shadow-card">{d.activity.length ? <ol className="divide-y">{d.activity.map((event) => <li key={`${event.kind}-${event.id}`} className="flex gap-3 py-4 first:pt-1 last:pb-1"><span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden /><div className="min-w-0"><p className="text-sm font-medium">{event.title}</p>{event.detail && <p className="mt-0.5 text-sm text-muted-foreground">{event.detail}</p>}<time className="mt-1 block text-xs text-muted-foreground">{dateTime(event.at)}</time></div></li>)}</ol> : <p className="text-sm text-muted-foreground">Belum ada aktivitas tersimpan untuk rentang ini.</p>}</Card>
+        </section>
+
+        <section aria-labelledby="alerts-title" className="space-y-3 xl:col-span-2">
+          <div><h3 id="alerts-title" className="text-lg font-semibold">Peringatan</h3><p className="text-sm text-muted-foreground">Ambang OTP dan sinyal consent.</p></div>
+          <Card className="shadow-card">
+            <div className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-warning" aria-hidden /><h4 className="font-semibold">Ambang email OTP</h4></div>
+            {d.alerts.otp_thresholds.length ? <ul className="mt-3 space-y-2">{d.alerts.otp_thresholds.map((a) => <li key={a.id} className="rounded-lg bg-muted/60 p-3 text-sm"><p className="font-medium">{a.kind === "sender_cap_reached" ? "Batas harian tercapai" : "70% batas harian tercapai"}</p><p className="mt-0.5 text-xs text-muted-foreground">{a.window_count}/{a.cap} · {dateTime(a.at)}</p></li>)}</ul> : <p className="mt-3 text-sm text-muted-foreground">Tidak ada ambang tercatat dalam 30 hari.</p>}
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2"><Snapshot label="Permintaan STOP · 1 jam" value={number(d.alerts.stop_events_last_hour)} /><Snapshot label="Pesan diblokir consent · 1 jam" value={number(d.alerts.consent_blocked_messages_last_hour)} /></div>
+            <p className="mt-3 text-xs text-muted-foreground">Penolakan consent sebelum pesan masuk antrean belum tersimpan sebagai event.</p>
+          </Card>
+        </section>
+      </div>
+
+      <section aria-labelledby="limits-title" className="rounded-2xl border border-warning/30 bg-warning/5 p-5 md:p-6">
+        <div className="flex items-start gap-3"><Server className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden /><div><h3 id="limits-title" className="font-semibold">Batas data yang tersedia</h3><ul className="mt-3 grid gap-x-8 gap-y-2 text-sm text-muted-foreground md:grid-cols-2">{d.data_limits.map((item) => <li key={item}>{item}</li>)}</ul></div></div>
       </section>
-      <section className="space-y-2" aria-labelledby="limits-title"><h2 id="limits-title" className="text-lg font-semibold">Batas data yang tersedia</h2><ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">{d.data_limits.map((item) => <li key={item}>{item}</li>)}</ul></section>
     </div>
   );
 }
