@@ -3,7 +3,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 operator_test_container="koneva-operator-test-$$"
-cleanup() { docker rm -f "$operator_test_container" >/dev/null 2>&1 || true; }
+operator_test_redis_container=""
+cleanup() {
+  docker rm -f "$operator_test_container" >/dev/null 2>&1 || true
+  [[ -z "$operator_test_redis_container" ]] || docker rm -f "$operator_test_redis_container" >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
 docker run --rm -d --name "$operator_test_container" --label koneva.purpose=operator-isolated-test \
   -e POSTGRES_PASSWORD=operator_test_only -e POSTGRES_DB=operator_test \
@@ -15,7 +19,20 @@ done
 operator_test_binding=$(docker port "$operator_test_container" 5432/tcp)
 export DATABASE_URL="postgres://postgres:operator_test_only@${operator_test_binding}/operator_test"
 export NODE_ENV=test ADMIN_API_KEY=operator-test-admin JWT_SECRET=operator-test-jwt
-export REDIS_URL=redis://127.0.0.1:1 OPERATOR_STACK_TEST=1 OPERATOR_ENABLED=false
+if [[ "${OPERATOR_TEST_REDIS:-0}" == "1" ]]; then
+  operator_test_redis_container="koneva-operator-redis-test-$$"
+  docker run --rm -d --name "$operator_test_redis_container" --label koneva.purpose=operator-isolated-test \
+    -p 127.0.0.1::6379 redis:7-alpine redis-server --save '' --appendonly no >/dev/null
+  for attempt in {1..30}; do
+    if docker exec "$operator_test_redis_container" redis-cli ping >/dev/null 2>&1; then break; fi
+    sleep 1
+  done
+  operator_test_redis_binding=$(docker port "$operator_test_redis_container" 6379/tcp)
+  export REDIS_URL="redis://${operator_test_redis_binding}"
+else
+  export REDIS_URL=redis://127.0.0.1:1
+fi
+export OPERATOR_STACK_TEST=1 OPERATOR_ENABLED=false
 export DEVICE_MANAGER_URL=http://127.0.0.1:18093 # fake manager, started only by roles-access.test.ts
 export OPERATOR_INSECURE_DEV_COOKIES=false OPERATOR_COOKIE_SECURE=true OPERATOR_COOKIE_NAME=__Host-koneva_op
 export DOTENV_CONFIG_QUIET=true

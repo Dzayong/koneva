@@ -15,6 +15,25 @@ function unauthorized(response: Response, message: string): void {
   response.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message } });
 }
 
+async function hasExpiredUnresolvedLegacyRole(tenantId: string): Promise<boolean> {
+  const transition = await pool.query<{ suspended: boolean }>(
+    `SELECT n.deadline_at <= clock_timestamp() AND EXISTS (
+       SELECT 1 FROM memberships m
+       WHERE m.tenant_id = n.tenant_id AND m.role IN ('admin', 'viewer')
+     ) AS suspended
+     FROM legacy_role_notices n WHERE n.tenant_id = $1`,
+    [tenantId],
+  );
+  return transition.rows[0]?.suspended ?? false;
+}
+
+function legacyRoleTransitionExpired(response: Response): void {
+  response.status(403).json({
+    success: false,
+    error: { code: 'LEGACY_ROLE_TRANSITION_EXPIRED', message: 'Akses workspace ini ditangguhkan sampai Owner menentukan peran Anda. Hubungi Owner workspace untuk dijadikan Developer bila sesuai atau dikeluarkan dari workspace.' },
+  });
+}
+
 export async function tenantAuth(
   request: Request,
   response: Response,
@@ -33,15 +52,8 @@ export async function tenantAuth(
       return;
     }
     if (isLegacyRole(session.role)) {
-      const transition = await pool.query<{ suspended: boolean }>(
-        `SELECT deadline_at <= clock_timestamp() AS suspended FROM legacy_role_notices WHERE tenant_id = $1`,
-        [session.tenant.id],
-      );
-      if (transition.rows[0]?.suspended) {
-        response.status(403).json({
-          success: false,
-          error: { code: 'LEGACY_ROLE_TRANSITION_EXPIRED', message: 'Akses workspace ini ditangguhkan sampai Owner menentukan peran Anda. Hubungi Owner workspace untuk dijadikan Developer bila sesuai atau dikeluarkan dari workspace.' },
-        });
+      if (await hasExpiredUnresolvedLegacyRole(session.tenant.id)) {
+        legacyRoleTransitionExpired(response);
         return;
       }
     }
@@ -61,6 +73,10 @@ export async function tenantAuth(
     const resolved = await resolveApiKey(apiKey);
     if (!resolved) {
       unauthorized(response, 'Invalid, expired or revoked API key');
+      return;
+    }
+    if (await hasExpiredUnresolvedLegacyRole(resolved.tenant.id)) {
+      legacyRoleTransitionExpired(response);
       return;
     }
     request.tenant = resolved.tenant;
@@ -88,6 +104,11 @@ export async function tenantAuth(
 
   if (!tenant || tenant.status !== 'active') {
     unauthorized(response, 'Invalid or inactive API key');
+    return;
+  }
+
+  if (await hasExpiredUnresolvedLegacyRole(tenant.id)) {
+    legacyRoleTransitionExpired(response);
     return;
   }
 

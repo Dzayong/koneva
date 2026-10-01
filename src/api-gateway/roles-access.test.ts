@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import express, { type ErrorRequestHandler } from 'express';
 import pool from '../shared/database/connection';
+import { closeRedisClient } from '../shared/redis';
 import { authorize, tenantAuth } from './middleware/auth';
 import { auditTrail } from './middleware/audit';
 import authRoutes from './routes/auth.routes';
@@ -18,6 +19,7 @@ import teamRoutes from './routes/team.routes';
 import { login, signup } from './services/account.service';
 import { emailTransport } from './services/mailer';
 import { ServiceError } from './services/service-error';
+import { newApiKey } from './services/apikey.service';
 
 // STACK-local: real PostgreSQL (disposable), real routers and middleware, a FAKE device manager on loopback (no container, no WhatsApp).
 const enabled = process.env['OPERATOR_STACK_TEST'] === '1';
@@ -62,6 +64,7 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await new Promise<void>((resolve) => manager.close(() => resolve()));
     await fsp.rm(path.dirname(outbox), { recursive: true, force: true });
+    await closeRedisClient();
     await pool.end();
   });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -69,9 +72,10 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
 
   let clientIp = '198.51.100.1', ipCounter = 1;
   const newClient = () => { ipCounter += 1; clientIp = `198.51.100.${ipCounter}`; };
-  const call = async (route: string, o: { method?: string; body?: unknown; token?: string; workspace?: string } = {}) => {
+  const call = async (route: string, o: { method?: string; body?: unknown; token?: string; apiKey?: string; workspace?: string } = {}) => {
     const headers: Record<string, string> = { 'X-Forwarded-For': clientIp };
     if (o.token) headers['Authorization'] = `Bearer ${o.token}`;
+    if (o.apiKey) headers['apikey'] = o.apiKey;
     if (o.workspace) headers['x-workspace'] = o.workspace;
     if (o.body !== undefined) headers['Content-Type'] = 'application/json';
     const r = await fetch(base + route, { method: o.method ?? 'GET', headers, ...(o.body !== undefined ? { body: JSON.stringify(o.body) } : {}) });
@@ -424,7 +428,18 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
       await pool.query("INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'admin'),($3,$2,'viewer')", [admin.userId, o.tenant, viewer.userId]);
     } finally { await pool.query('ALTER TABLE memberships ENABLE TRIGGER memberships_no_new_legacy_role'); }
 
+    const legacyTenantKey = (await pool.query<{ api_key: string }>('SELECT api_key FROM tenants WHERE id=$1', [o.tenant])).rows[0]!.api_key;
+    const scopedKey = newApiKey();
+    await pool.query(
+      `INSERT INTO api_keys (tenant_id, name, prefix, key_hash, scopes, created_by)
+       VALUES ($1, 'Transition test', $2, $3, ARRAY['devices:read'], $4)`,
+      [o.tenant, scopedKey.prefix, scopedKey.hash, o.userId],
+    );
+
     assert.equal((await call('/api/v1/devices', { token: admin.token, workspace: o.tenant })).status, 200, 'no notice means no clock');
+    const withRedis = process.env['OPERATOR_TEST_REDIS'] === '1';
+    if (withRedis) assert.equal((await call('/api/v1/devices', { apiKey: legacyTenantKey })).status, 200, 'legacy tenant API key works before the notice deadline');
+    assert.equal((await call('/api/v1/devices', { token: scopedKey.key })).status, 200, 'scoped API key works before the notice deadline');
     assert.equal((await call('/api/v1/team/legacy-role-notice', { method: 'POST', token: admin.token, workspace: o.tenant, body: { confirm: true } })).status, 403, 'only Owner can issue notice');
     const ownerPage = await call('/api/v1/team/legacy-role-notice', { method: 'POST', token: o.token, workspace: o.tenant, body: { confirm: true } });
     assert.equal(ownerPage.status, 201, ownerPage.text);
@@ -441,10 +456,19 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
     assert.equal(suspended.status, 403);
     assert.equal(suspended.body.error.code, 'LEGACY_ROLE_TRANSITION_EXPIRED');
     assert.match(suspended.body.error.message, /Owner menentukan peran/);
+    const apiCredentials = [{ token: scopedKey.key }, ...(withRedis ? [{ apiKey: legacyTenantKey }] : [])];
+    for (const credentials of apiCredentials) {
+      const deniedKey = await call('/api/v1/devices', credentials);
+      assert.equal(deniedKey.status, 403, 'API key cannot bypass an expired workspace transition');
+      assert.equal(deniedKey.body.error.code, 'LEGACY_ROLE_TRANSITION_EXPIRED');
+    }
     assert.equal((await call('/api/v1/team', { token: o.token, workspace: o.tenant })).body.data.legacy_role_transition.phase, 'suspended', 'owner can still access the member-management page');
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM memberships WHERE tenant_id=$1 AND role IN ('admin','viewer')", [o.tenant])).rows[0].n, 2, 'no auto-promotion or deletion at day 60');
     assert.equal((await call(`/api/v1/team/members/${admin.userId}`, { method: 'PATCH', token: o.token, workspace: o.tenant, body: { role: 'developer' } })).status, 200, 'Owner can make an explicit decision after expiry');
     assert.equal((await call('/api/v1/devices', { token: admin.token, workspace: o.tenant })).status, 200, 'only an explicitly converted member regains access');
     assert.equal((await call('/api/v1/devices', { token: viewer.token, workspace: o.tenant })).status, 403, 'unresolved Viewer remains suspended');
+    assert.equal((await call(`/api/v1/team/members/${viewer.userId}`, { method: 'PATCH', token: o.token, workspace: o.tenant, body: { role: 'developer' } })).status, 200);
+    if (withRedis) assert.equal((await call('/api/v1/devices', { apiKey: legacyTenantKey })).status, 200, 'legacy tenant key resumes after the owner resolves every legacy membership');
+    assert.equal((await call('/api/v1/devices', { token: scopedKey.key })).status, 200, 'scoped key resumes after the owner resolves every legacy membership');
   });
 });

@@ -17,7 +17,7 @@ Owner and Developer are **memberships**, not account types: one account may be O
 Existing rows keep their historical access exactly (nothing is upgraded or downgraded silently):
 `admin` = everything except billing (including reading the team and removing developers/viewers); `viewer` = read devices/messages only.
 What is blocked from now on: creating, inviting and assigning them (service layer **and** database triggers), and pending invitations with those roles were revoked by the migration.
-A legacy admin can no longer invite (owner only). The dashboard labels them "Admin (lama)" / "Viewer (lama)" and offers the owner one explicit action, **Jadikan Developer**. The old tenant API key login keeps its historical admin-level access (labelled "Kunci tenant (lama)").
+A legacy admin can no longer invite (owner only). The dashboard labels them "Admin (lama)" / "Viewer (lama)" and offers the owner one explicit action, **Jadikan Developer**. The old tenant API key login keeps its historical admin-level access (labelled "Kunci tenant (lama)") until an issued 60-day transition deadline expires with unresolved legacy members; then API-key access is suspended too.
 
 Migration impact and follow-up decisions for the owner are at the end of this file.
 
@@ -55,20 +55,21 @@ Migration impact and follow-up decisions for the owner are at the end of this fi
 
 | Topic | Decision | Status |
 |---|---|---|
-| Legacy `admin`/`viewer` | **Option C**: 60-day transition that starts only after the Owner deliberately issues the formal notice. Until the deadline nothing is upgraded or revoked automatically, and `team:manage` is **not** removed from legacy admins now. | Implemented locally in T1.6, tested with disposable DB + STACK; real notices are not sent |
+| Legacy `admin`/`viewer` | **Option C**: 60-day transition that starts only after the Owner deliberately issues the in-app notice. Until the deadline nothing is upgraded or revoked automatically, and `team:manage` is **not** removed from legacy admins now. At expiry, unresolved memberships and all workspace API-key access are suspended together. | Owner decision recorded 2026-10-01; legacy tenant and scoped-key enforcement tested locally |
+| Email for legacy-role notice | Send the formal notice by email once the email transport is active in T4. The 60-day clock starts with the in-app notice and is never reset by the later email. | Owner decision recorded 2026-10-01; deferred to T4, no email sent now |
 | Trial and Pelajar | Stay at **one member (the Owner)**. No Developer invitations there. | Already the behaviour; unchanged |
 | Owner transfer | **Manual, recorded procedure first**; self-service later. | Procedure design below; not built |
 | Owner email verification | Required **before inviting or before important actions such as payment**. Sign-up keeps accepting non-Gmail addresses. | **Implemented locally** (below) |
 | OTP limits across invitations | Numbers approved (recipient 3/h + 6/24 h, invitation 3/h + 60 s pause, workspace 10/24 h, sender 200/24 h, IP 20/15 min) with Gmail alias folding for the limiter key only. | **Implemented locally** (below) |
 | Production data | No production query is run in the local stage. The counts of legacy members and duplicate owners must be obtained later by the owner under separate authorisation. | Open |
 
-### Legacy members: 60-day transition (T1.6 local implementation)
+### Legacy members: 60-day transition (T1.6)
 
-1. **Notice.** Migration 027 adds workspace-level `legacy_role_notices(tenant_id, notice_sent_at, deadline_at, issued_by)`. An explicit Owner action on `/team` creates one record only when legacy memberships exist. The API requires `{confirm:true}`; repeated requests return the original notice and cannot restart the clock. The deadline is exactly 1440 hours after issue. No notice, no clock. The Owner reviews the notice copy before issuing it. This local implementation shows the notice in the dashboard only; it does not send email. Sending to real users needs explicit owner approval.
+1. **Notice.** Migration 027 adds workspace-level `legacy_role_notices(tenant_id, notice_sent_at, deadline_at, issued_by)`. An explicit Owner action on `/team` creates one record only when legacy memberships exist. The API requires `{confirm:true}`; repeated requests return the original notice and cannot restart the clock. The deadline is exactly 1440 hours after issue. No notice, no clock. The countdown starts on the in-app notice. Email is deferred until the email transport is active in T4; sending that email does not reset or extend the existing deadline.
 2. **Until the deadline:** nothing changes automatically. Owners see who is legacy (already labelled "(lama)") and can, at any time, make a legacy member a Developer or remove them. Legacy admins keep their current access, including `team:manage`.
-3. **Day 30:** the Owner's team page shows a reminder when opened. **Day 60:** unresolved legacy memberships are suspended at request time with `LEGACY_ROLE_TRANSITION_EXPIRED` and a message to contact the Owner. They are never converted automatically. Membership rows are kept for 90 more days and remain actionable by the Owner; after that, cleanup stays an explicit Owner action.
+3. **Day 30:** the Owner's team page shows a reminder when opened. **Day 60:** unresolved legacy memberships are suspended at request time with `LEGACY_ROLE_TRANSITION_EXPIRED` and a message to contact the Owner. Workspace API-key authentication is suspended at the same deadline while any legacy admin/viewer membership remains unresolved, including both the old tenant key and scoped `wgk_` keys; there is no API-key bypass. After the Owner converts or removes all legacy memberships, API access resumes under its normal credential scopes. No role is converted automatically. Membership rows are kept for 90 more days and remain actionable by the Owner; after that, cleanup stays an explicit Owner action.
 4. **Never:** automatic promotion of a Viewer or Admin to Developer (it raises rights without the Owner's decision).
-5. **Still open for owner:** whether the legacy tenant-API-key login gets the same clock; whether real formal notice also sends an email. Until decided, legacy tenant API-key behavior is unchanged and the local notice is dashboard-only.
+5. **Email follow-up (T4):** send a notice email once transport is active, using the existing in-app notice's timestamp and deadline. Do not start or reset a 60-day clock when email is sent. No notice email has been sent.
 
 ### Owner email verification (implemented locally, migration 022)
 
