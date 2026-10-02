@@ -4,13 +4,13 @@ import { otpLimits } from '../services/otp-limits';
 import { lockActor, operatorTransaction, writeAudit, type Actor } from './core';
 
 /** Owner-only snapshot. It deliberately returns aggregate and display-safe fields, never message or recipient contents. */
-export async function ownerInsights(db: Pool, actor: Actor, requestId: string) {
+export async function ownerInsights(db: Pool, actor: Actor, requestId: string, clientIp: string) {
   await operatorTransaction(db, async (client) => {
     await lockActor(client, actor, 'owner:insights', false);
-    await writeAudit(client, actor, 'owner.insights.view', 'system_insights', randomUUID(), 'Ringkasan Pemilik', {}, requestId);
+    await writeAudit(client, actor, 'owner.insights.view', 'system_insights', randomUUID(), 'Ringkasan Pemilik', {}, requestId, clientIp);
   });
 
-  const [summary, devices, activity, alerts] = await Promise.all([
+  const [summary, devices, activity, alerts, breakGlass] = await Promise.all([
     db.query(`SELECT
       (SELECT count(*)::int FROM users) AS registered_accounts,
       (SELECT count(*)::int FROM tenants WHERE status='active') AS active_workspaces,
@@ -56,9 +56,18 @@ export async function ownerInsights(db: Pool, actor: Actor, requestId: string) {
           'Verifikasi MFA Operator gagal'::text, COALESCE(o.name, 'Akun Operator tidak dikenal')
         FROM operator_security_events s LEFT JOIN operators o ON o.id=s.operator_id
         WHERE s.event='mfa_failed' AND s.at >= now()-interval '30 days'
+        UNION ALL
+        SELECT s.id::text, 'break_glass'::text, s.at,
+          CASE WHEN s.event='break_glass_login' THEN 'Akun Operator darurat digunakan' ELSE 'Notifikasi akun darurat gagal' END,
+          COALESCE(o.name, 'Akun Operator darurat')
+        FROM operator_security_events s LEFT JOIN operators o ON o.id=s.operator_id
+        WHERE s.event IN ('break_glass_login','break_glass_alert_failed') AND s.at >= now()-interval '30 days'
       ) events ORDER BY at DESC LIMIT 100`),
     db.query(`SELECT id, at, kind, window_count, cap FROM otp_threshold_events
       WHERE at >= now()-interval '30 days' ORDER BY at DESC LIMIT 20`),
+    db.query(`SELECT break_glass_validated_at,
+        (COALESCE(break_glass_validated_at, created_at) < now()-interval '90 days') AS due
+      FROM operators WHERE is_break_glass ORDER BY created_at LIMIT 1`),
   ]);
 
   const row = summary.rows[0] as Record<string, number | Date>;
@@ -89,6 +98,11 @@ export async function ownerInsights(db: Pool, actor: Actor, requestId: string) {
       otp_thresholds: alerts.rows,
       stop_events_last_hour: Number(row['stop_events_1h']),
       consent_blocked_messages_last_hour: Number(row['consent_blocked_1h']),
+      break_glass_validation: {
+        configured: breakGlass.rowCount === 1,
+        last_validated_at: (breakGlass.rows[0]?.['break_glass_validated_at'] as Date | null)?.toISOString() ?? null,
+        due: breakGlass.rows[0]?.['due'] === true,
+      },
     },
     data_limits: [
       'OTP yang dihitung adalah hitungan sender KONEVA terhadap batas internal harian; ini bukan kuota Google Gmail yang sebenarnya.',

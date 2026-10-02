@@ -139,6 +139,30 @@ test('operator hardening: security events, offline administration, key managemen
     assert.equal((await call('/auth/login', { method: 'POST', body: { email, password } })).body.data.status, 'mfa_enrollment_required');
   });
 
+  await t.test('break-glass provisioning creates at most one audit:read-only account and never prints its password', async () => {
+    const email = `break-glass-${randomUUID()}@example.test`;
+    const input = JSON.stringify({ email, name: 'Akun Darurat Uji', password });
+    const env = { OPERATOR_PROVISION_LOCAL: 'true', OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji', DATABASE_URL: process.env['DATABASE_URL'] };
+    const created = await runScript('scripts/provision-break-glass-operator.ts', input, env);
+    assert.equal(created.code, 0, created.err);
+    assert.ok(!created.out.includes(password) && !created.err.includes(password));
+    assert.match(created.out, /audit:read only/);
+    const row = (await pool.query<{ id: string; permissions: string[]; is_break_glass: boolean; enrollment_code_hash: string | null }>(
+      'SELECT id,permissions,is_break_glass,enrollment_code_hash FROM operators WHERE email=$1', [email])).rows[0]!;
+    assert.deepEqual(row.permissions, ['audit:read']);
+    assert.equal(row.is_break_glass, true);
+    assert.ok(row.enrollment_code_hash);
+    assert.deepEqual((await events(row.id)).map((e) => [e.event,e.source,e.actor_label]), [['break_glass_provisioned','offline','pemilik-proyek-uji']]);
+
+    const secondEmail = `break-glass-${randomUUID()}@example.test`;
+    const second = await runScript('scripts/provision-break-glass-operator.ts', JSON.stringify({ email: secondEmail, name: 'Akun Darurat Kedua', password }), env);
+    assert.notEqual(second.code, 0, 'a second emergency account is refused');
+    assert.equal((await pool.query('SELECT id FROM operators WHERE email=$1', [secondEmail])).rowCount, 0);
+    // The security event proving provisioning is immutable and must stay; only the single-row flag is reset so
+    // later tests in this shared disposable database can provision their own break-glass account.
+    await pool.query('UPDATE operators SET is_break_glass=false WHERE id=$1', [row.id]);
+  });
+
   await t.test('offline MFA reset: ends sessions and open challenges, forces re-enrollment, leaves an audit trail with the actor', async () => {
     await resetLimits();
     const op = await newOperator({ mfa: true });

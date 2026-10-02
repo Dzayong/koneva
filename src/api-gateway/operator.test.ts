@@ -5,13 +5,14 @@ import path from 'node:path';
 import { test } from 'node:test';
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import { Pool } from 'pg';
 import type { AddressInfo } from 'node:net';
 import pool from '../shared/database/connection';
 import { createOperatorRouter } from './operator/router';
 import { csrfFor } from './operator/auth';
 import { hash } from './operator/core';
 import { base32Decode, codeHash, encryptSecret, newEnrollmentCode, stepAt, totp } from './operator/mfa';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { requestStudentVerification, sweepStudentVerificationDeadlines } from './services/billing.service';
 import adminRoutes from './routes/admin.routes';
 import { adminAuth } from './middleware/auth';
@@ -35,6 +36,11 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
       await client.query('INSERT INTO _migrations(name) VALUES ($1)', [file]);
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  }
+  for (const file of ['030_operator_owner_audit_ip.sql', '031_application_database_role.sql', '032_operator_break_glass.sql']) {
+    const sql = await fs.readFile(path.join(dir, file), 'utf8');
+    await pool.query(sql);
+    await pool.query(sql);
   }
   const app = express();
   app.use('/operator', createOperatorRouter(pool, config));
@@ -64,6 +70,46 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     return { id,email,code };
   }
   const op = await operator(), other = await operator();
+  await t.test('the runtime privilege role may insert audit but cannot alter/delete it and is not superuser', async () => {
+    const roles = await pool.query<{ app_superuser: boolean; grant_superuser: boolean; can_insert: boolean; can_update: boolean; can_delete: boolean; can_change_break_glass: boolean; can_change_permissions: boolean; can_change_mfa: boolean }>(
+      `SELECT app.rolsuper AS app_superuser, grant_role.rolsuper AS grant_superuser,
+        has_table_privilege('koneva_application','operator_audit','INSERT') AS can_insert,
+        has_table_privilege('koneva_application','operator_audit','UPDATE') AS can_update,
+        has_table_privilege('koneva_application','operator_audit','DELETE') AS can_delete,
+        has_column_privilege('koneva_application','operators','is_break_glass','UPDATE') AS can_change_break_glass,
+        has_column_privilege('koneva_application','operators','permissions','UPDATE') AS can_change_permissions,
+        has_column_privilege('koneva_application','operators','mfa_last_step','UPDATE') AS can_change_mfa
+       FROM pg_roles app CROSS JOIN pg_roles grant_role WHERE app.rolname='koneva_app' AND grant_role.rolname='koneva_application'`);
+    assert.equal(roles.rows[0]?.app_superuser, false);
+    assert.equal(roles.rows[0]?.grant_superuser, false);
+    assert.equal(roles.rows[0]?.can_insert, true);
+    assert.equal(roles.rows[0]?.can_update, false);
+    assert.equal(roles.rows[0]?.can_delete, false);
+    assert.equal(roles.rows[0]?.can_change_break_glass, false);
+    assert.equal(roles.rows[0]?.can_change_permissions, false);
+    assert.equal(roles.rows[0]?.can_change_mfa, true);
+    const runtimePassword = randomBytes(32).toString('hex');
+    execFileSync(process.execPath, ['--require', 'ts-node/register', 'scripts/configure-personal-db-role.ts'], {
+      cwd: path.join(__dirname, '../..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, DATABASE_URL: process.env['DATABASE_URL']!, APP_DB_PASSWORD: runtimePassword },
+    });
+    const runtimeUrl = new URL(process.env['DATABASE_URL']!);
+    runtimeUrl.username = 'koneva_app'; runtimeUrl.password = runtimePassword;
+    const runtimePool = new Pool({ connectionString: runtimeUrl.toString(), max: 1 });
+    const identity = await runtimePool.query<{ current_user: string; rolsuper: boolean }>(
+      'SELECT current_user, rolsuper FROM pg_roles WHERE rolname=current_user');
+    assert.equal(identity.rows[0]?.current_user, 'koneva_app');
+    assert.equal(identity.rows[0]?.rolsuper, false);
+    try {
+      const inserted = await runtimePool.query<{ id: string }>(`INSERT INTO operator_audit(operator_id,action,target_type,target_id,changes,request_id)
+        VALUES ($1,'test.runtime_insert','system_insights',$2,'{}',$3) RETURNING id`, [op.id, randomUUID(), randomUUID()]);
+      const id = inserted.rows[0]!.id;
+      await assert.rejects(runtimePool.query('UPDATE operator_audit SET action=$2 WHERE id=$1', [id, 'tampered']), /permission denied|append only/i);
+      await assert.rejects(runtimePool.query('DELETE FROM operator_audit WHERE action=$1', ['test.runtime_insert']), /permission denied|append only/i);
+    } finally {
+      await runtimePool.end();
+    }
+  });
   type Session = Pick<typeof op, 'cookie' | 'csrf'>;
   async function call(route: string, options: { session?: Session; method?: string; body?: unknown; key?: string; headers?: Record<string,string> } = {}) {
     const headers: Record<string,string> = { 'Origin': origin, 'X-Requested-With': 'koneva-operator', ...options.headers };
@@ -307,10 +353,50 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     assert.ok(Array.isArray(response.body.data.data_limits));
     const encoded = JSON.stringify(response.body.data);
     for (const forbidden of ['password_hash', 'api_key', 'webhook_secret', 'to_number', 'content', 'phone_number']) assert.equal(encoded.includes(forbidden), false, `response omits ${forbidden}`);
-    const audited = await pool.query("SELECT operator_id, target_type, target_label FROM operator_audit WHERE action='owner.insights.view' ORDER BY at DESC LIMIT 1");
+    const audited = await pool.query("SELECT operator_id, target_type, target_label, host(client_ip) AS client_ip FROM operator_audit WHERE action='owner.insights.view' ORDER BY at DESC LIMIT 1");
     assert.equal(audited.rows[0]?.operator_id, owner.id);
     assert.equal(audited.rows[0]?.target_type, 'system_insights');
     assert.equal(audited.rows[0]?.target_label, 'Ringkasan Pemilik');
+    assert.ok(audited.rows[0]?.client_ip, 'owner section access stores the request IP');
+    const ownerAudit = await call(`/audit?from=${encodeURIComponent(new Date(Date.now()-60_000).toISOString())}&to=${encodeURIComponent(new Date(Date.now()+60_000).toISOString())}&action=owner.insights.view`, { session: owner });
+    assert.equal(ownerAudit.status, 200);
+    assert.equal(ownerAudit.body.data[0]?.client_ip, audited.rows[0]?.client_ip, 'owner can inspect the source IP on the owner section audit row');
+    const staff = await operator(['audit:read']);
+    const staffAudit = await call(`/audit?from=${encodeURIComponent(new Date(Date.now()-60_000).toISOString())}&to=${encodeURIComponent(new Date(Date.now()+60_000).toISOString())}&action=owner.insights.view`, { session: staff });
+    assert.equal(staffAudit.status, 200);
+    assert.equal(staffAudit.body.data[0]?.client_ip, null, 'staff audit permission does not expose owner source IP');
+  });
+  await t.test('break-glass login requires a delivered owner alert, has audit:read only, and refreshes the 90-day validation clock', async () => {
+    const directory = await fs.mkdtemp(path.join(process.env['TMPDIR'] ?? '/tmp', 'koneva-break-glass-test-'));
+    const outbox = path.join(directory, 'outbox.jsonl');
+    const previous = { transport: process.env['EMAIL_TRANSPORT'], outbox: process.env['DEV_EMAIL_OUTBOX_FILE'], recipient: process.env['OPERATOR_BREAK_GLASS_ALERT_EMAIL'] };
+    process.env['EMAIL_TRANSPORT'] = 'dev-outbox';
+    process.env['DEV_EMAIL_OUTBOX_FILE'] = outbox;
+    process.env['OPERATOR_BREAK_GLASS_ALERT_EMAIL'] = 'owner@example.test';
+    try {
+      const account = await operator(['audit:read'], { mfa: true });
+      await pool.query('UPDATE operators SET is_break_glass=true WHERE id=$1', [account.id]);
+      const started = await call('/auth/login', { method: 'POST', body: { email: account.email, password: testPassword } });
+      assert.equal(started.body.data.status, 'mfa_required');
+      const result = await call('/auth/mfa/verify', { method: 'POST', body: { challenge_id: started.body.data.challenge_id, code: totp(account.secret, stepAt(Date.now())) } });
+      assert.equal(result.status, 200, result.text);
+      assert.deepEqual(result.body.data.permissions, ['audit:read']);
+      const notification = await fs.readFile(outbox, 'utf8');
+      assert.equal(notification.split('\n').filter(Boolean).length, 1);
+      assert.match(notification, /owner@example\.test/);
+      assert.match(notification, /akun Operator darurat digunakan/);
+      const state = (await pool.query<{ break_glass_validated_at: Date | null; event_count: number }>(
+        `SELECT o.break_glass_validated_at,
+          (SELECT count(*)::int FROM operator_security_events WHERE operator_id=o.id AND event='break_glass_login') AS event_count
+         FROM operators o WHERE o.id=$1`, [account.id])).rows[0]!;
+      assert.ok(state.break_glass_validated_at);
+      assert.equal(state.event_count, 1);
+    } finally {
+      if (previous.transport === undefined) delete process.env['EMAIL_TRANSPORT']; else process.env['EMAIL_TRANSPORT'] = previous.transport;
+      if (previous.outbox === undefined) delete process.env['DEV_EMAIL_OUTBOX_FILE']; else process.env['DEV_EMAIL_OUTBOX_FILE'] = previous.outbox;
+      if (previous.recipient === undefined) delete process.env['OPERATOR_BREAK_GLASS_ALERT_EMAIL']; else process.env['OPERATOR_BREAK_GLASS_ALERT_EMAIL'] = previous.recipient;
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   });
   await t.test('legacy admin lists omit credentials and never accept operator cookies as admin credentials', async () => {
     const root=base.replace(/\/operator$/,'');

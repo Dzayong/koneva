@@ -60,7 +60,7 @@ export interface WorkspaceDetail {
 export interface AuditEntry {
   id: string; at: string; operator: { id: string; name: string } | null; action: string;
   target: { type: string; id: string; label: string | null } | null; reason: string | null;
-  changes: Record<string, { from: string | number | boolean | null; to: string | number | boolean | null }>; request_id: string | null;
+  changes: Record<string, { from: string | number | boolean | null; to: string | number | boolean | null }>; request_id: string | null; client_ip: string | null;
 }
 
 // ---- allowlist parsers ---------------------------------------------------------
@@ -177,7 +177,7 @@ export function parseAudit(v: unknown): AuditEntry {
   return {
     id: str(d["id"]), at: str(d["at"]), operator: d["operator"] ? { id: str(op["id"]), name: str(op["name"]) } : null, action: str(d["action"]),
     target: d["target"] ? { type: str(t["type"]), id: str(t["id"]), label: strOrNull(t["label"]) } : null, reason: strOrNull(d["reason"]),
-    changes, request_id: strOrNull(d["request_id"]),
+    changes, request_id: strOrNull(d["request_id"]), client_ip: strOrNull(d["client_ip"]),
   };
 }
 
@@ -196,7 +196,7 @@ export interface OwnerInsights {
   kpis: { registered_accounts: number; active_workspaces: number; suspended_workspaces: number; messages_sent_24h: number; messages_sent_30d: number; otp_sender_today: number; otp_sender_daily_cap: number; otp_sender_remaining_internal: number };
   health: { api: string; database: string; queue: { queued: number; sending: number }; message_delivery_24h: { attempted: number; failed: number; error_rate_percent: number }; devices: Array<{ id: string; label: string; status: string; updated_at: string | null; workspace_name: string | null }> };
   activity: Array<{ id: string; kind: string; at: string; title: string; detail: string | null }>;
-  alerts: { otp_thresholds: Array<{ id: string; at: string; kind: string; window_count: number; cap: number }>; stop_events_last_hour: number; consent_blocked_messages_last_hour: number };
+  alerts: { otp_thresholds: Array<{ id: string; at: string; kind: string; window_count: number; cap: number }>; stop_events_last_hour: number; consent_blocked_messages_last_hour: number; break_glass_validation: { configured: boolean; last_validated_at: string | null; due: boolean } };
   data_limits: string[];
 }
 export function parseOtpAlerts(v: unknown): OtpAlerts {
@@ -222,7 +222,7 @@ export function parseOwnerInsights(v: unknown): OwnerInsights {
     kpis: { registered_accounts: num(k["registered_accounts"]), active_workspaces: num(k["active_workspaces"]), suspended_workspaces: num(k["suspended_workspaces"]), messages_sent_24h: num(k["messages_sent_24h"]), messages_sent_30d: num(k["messages_sent_30d"]), otp_sender_today: num(k["otp_sender_today"]), otp_sender_daily_cap: num(k["otp_sender_daily_cap"]), otp_sender_remaining_internal: num(k["otp_sender_remaining_internal"]) },
     health: { api: str(h["api"]), database: str(h["database"]), queue: { queued: num(q["queued"]), sending: num(q["sending"]) }, message_delivery_24h: { attempted: num(m["attempted"]), failed: num(m["failed"]), error_rate_percent: num(m["error_rate_percent"]) }, devices: arr(h["devices"]).map((v) => { const x = obj(v); return { id: str(x["id"]), label: str(x["label"]), status: str(x["status"]), updated_at: strOrNull(x["updated_at"]), workspace_name: strOrNull(x["workspace_name"]) }; }) },
     activity: arr(d["activity"]).map((v) => { const x = obj(v); return { id: str(x["id"]), kind: str(x["kind"]), at: str(x["at"]), title: str(x["title"]), detail: strOrNull(x["detail"]) }; }),
-    alerts: { otp_thresholds: arr(a["otp_thresholds"]).map((v) => { const x = obj(v); return { id: str(x["id"]), at: str(x["at"]), kind: str(x["kind"]), window_count: num(x["window_count"]), cap: num(x["cap"]) }; }), stop_events_last_hour: num(a["stop_events_last_hour"]), consent_blocked_messages_last_hour: num(a["consent_blocked_messages_last_hour"]) },
+    alerts: { otp_thresholds: arr(a["otp_thresholds"]).map((v) => { const x = obj(v); return { id: str(x["id"]), at: str(x["at"]), kind: str(x["kind"]), window_count: num(x["window_count"]), cap: num(x["cap"]) }; }), stop_events_last_hour: num(a["stop_events_last_hour"]), consent_blocked_messages_last_hour: num(a["consent_blocked_messages_last_hour"]), break_glass_validation: { configured: obj(a["break_glass_validation"])["configured"] === true, last_validated_at: strOrNull(obj(a["break_glass_validation"])["last_validated_at"]), due: obj(a["break_glass_validation"])["due"] === true } },
     data_limits: arr(d["data_limits"]).map(str),
   };
 }

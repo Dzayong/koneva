@@ -108,11 +108,11 @@ export async function workspaceDetail(db: Pool, id: string) {
   return workspaceDto(row);
 }
 
-export interface AuditFilter extends PageFilter { action?: string | undefined; operator_id?: string | undefined; target_type?: string | undefined; target_id?: string | undefined; from: string; to: string }
+export interface AuditFilter extends PageFilter { action?: string | undefined; operator_id?: string | undefined; target_type?: string | undefined; target_id?: string | undefined; from: string; to: string; includeClientIp?: boolean }
 export async function listAudit(db: Pool, filter: AuditFilter) {
   return page(db, `a.id,a.at,json_build_object('id',o.id,'name',o.name) AS operator,a.action,
     json_build_object('type',a.target_type,'id',a.target_id,'label',a.target_label) AS target,
-    a.reason,a.changes,a.request_id`, 'FROM operator_audit a JOIN operators o ON o.id=a.operator_id',
+    a.reason,a.changes,a.request_id,${filter.includeClientIp === true ? 'host(a.client_ip)' : 'NULL::text'} AS client_ip`, 'FROM operator_audit a JOIN operators o ON o.id=a.operator_id',
     `a.at >= $1::timestamptz AND a.at < $2::timestamptz AND ($3::text IS NULL OR a.action=$3)
      AND ($4::uuid IS NULL OR a.operator_id=$4) AND ($5::text IS NULL OR a.target_type=$5) AND ($6::uuid IS NULL OR a.target_id=$6)`,
     'a.at DESC,a.id DESC', [filter.from, filter.to, filter.action ?? null, filter.operator_id ?? null, filter.target_type ?? null, filter.target_id ?? null], filter);

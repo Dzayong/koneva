@@ -5,7 +5,7 @@ x-logging: &logging
   options: { max-size: 10m, max-file: "3" }
 x-env: &env
   NODE_ENV: production
-  DATABASE_URL: postgresql://${DB_USER:-wagateway}:${DB_PASSWORD:?Set DB_PASSWORD}@postgres:5432/${DB_NAME:-wagateway}
+  DATABASE_URL: postgresql://koneva_app:${APP_DB_PASSWORD:-${DB_PASSWORD:?Set DB_PASSWORD}}@postgres:5432/${DB_NAME:-wagateway}
   REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379
   JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
   ADMIN_API_KEY: ${ADMIN_API_KEY:?Set ADMIN_API_KEY}
@@ -50,7 +50,10 @@ services:
   migrate:
     image: ${PERSONAL_PROJECT:-wa-personal}-api:local
     build: { context: .., dockerfile: docker/app.Dockerfile, target: api-gateway }
-    environment: *env
+    environment:
+      <<: *env
+      DATABASE_URL: postgresql://${DB_USER:-wagateway}:${DB_PASSWORD:?Set DB_PASSWORD}@postgres:5432/${DB_NAME:-wagateway}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
     command: [node, dist/scripts/migrate.js]
     depends_on: { postgres: { condition: service_healthy } }
     restart: "no"
@@ -72,6 +75,7 @@ services:
       OPERATOR_COOKIE_NAME: ${OPERATOR_COOKIE_NAME:-__Host-koneva_op}
       OPERATOR_COOKIE_SECURE: ${OPERATOR_COOKIE_SECURE:-true}
       OPERATOR_MFA_ENC_KEY: ${OPERATOR_MFA_ENC_KEY:-}
+      OPERATOR_BREAK_GLASS_ALERT_EMAIL: ${OPERATOR_BREAK_GLASS_ALERT_EMAIL:-koneva.id26@gmail.com}
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
     ports: ["${APP_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-18000}:8000"]
     depends_on:

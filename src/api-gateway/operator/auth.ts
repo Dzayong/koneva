@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import type { OperatorConfig } from './config';
 import { hash, operatorTransaction, OperatorError, type Actor } from './core';
 import logger from '../../shared/utils/logger';
+import { sendNoticeEmail } from '../services/mailer';
 import { recordSecurityEventIn, recordSecurityEvent } from './security-events';
 import { codeHash, decryptSecret, encryptSecret, newRecoveryCodes, newSecret, otpauthUri, sameCodeHash, verifyTotp } from './mfa';
 
@@ -99,6 +100,23 @@ export async function reserveLoginAttempt(db: Pool, email: string, ip: string): 
   await reserveBucket(db, 'email', email, 5);
 }
 
+async function alertBreakGlassUse(db: Pool, request: Request, operatorId: string, operatorName: string): Promise<void> {
+  const recipient = process.env['OPERATOR_BREAK_GLASS_ALERT_EMAIL'] ?? '';
+  const sourceIp = (request.ip ?? 'unknown').replace(/[^0-9a-f:.]/gi, '').slice(0, 64) || 'unknown';
+  try {
+    if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(recipient)) throw new Error('Alert recipient is missing or invalid.');
+    await sendNoticeEmail({
+      to: recipient,
+      subject: 'KONEVA: akun Operator darurat digunakan',
+      body: `Akun Operator darurat berhasil menyelesaikan MFA.\nNama akun: ${operatorName.replace(/[\r\n\x00-\x1f\x7f]/g, ' ').slice(0, 120)}\nWaktu UTC: ${new Date().toISOString()}\nAlamat IP sumber: ${sourceIp}\n\nJika penggunaan ini tidak Anda kenali, nonaktifkan akun darurat melalui prosedur offline dan tinjau audit Operator.`,
+    });
+  } catch (error) {
+    await recordSecurityEvent(db, { event: 'break_glass_alert_failed', operatorId, ip: request.ip, requestId: requestIdOf(request) });
+    logger.error('Break-glass login refused because owner alert could not be sent', { error: error instanceof Error ? error.message : 'unknown' });
+    throw new OperatorError(503, 'BREAK_GLASS_ALERT_FAILED', 'Login akun darurat ditahan karena notifikasi keamanan belum terkirim.');
+  }
+}
+
 const MAX_CHALLENGE_ATTEMPTS = 5;
 const challengeInvalid = () => new OperatorError(401, 'MFA_CHALLENGE_INVALID', 'Verifikasi berakhir. Silakan masuk lagi.');
 const mfaInvalid = () => new OperatorError(401, 'MFA_INVALID', 'Kode verifikasi salah atau sudah dipakai.');
@@ -166,8 +184,8 @@ export async function verifyMfa(db: Pool, config: OperatorConfig, request: Reque
   const challenge = await spendAttempt(db, input.challenge_id, 'verify');
   operatorId = challenge.operator_id;
   await reserveBucket(db, 'mfa', challenge.operator_id, 10);
-  const operator = (await db.query<{ mfa_secret_enc: string | null; disabled_at: Date | null }>(
-    'SELECT mfa_secret_enc, disabled_at FROM operators WHERE id=$1', [challenge.operator_id])).rows[0];
+  const operator = (await db.query<{ mfa_secret_enc: string | null; disabled_at: Date | null; is_break_glass: boolean; name: string }>(
+    'SELECT mfa_secret_enc, disabled_at, is_break_glass, name FROM operators WHERE id=$1', [challenge.operator_id])).rows[0];
   if (!operator?.mfa_secret_enc || operator.disabled_at) throw challengeInvalid();
   if (input.code !== undefined) {
     const step = verifyTotp(openSecret(config.mfaKey!, operator.mfa_secret_enc, challenge.operator_id), input.code);
@@ -180,9 +198,14 @@ export async function verifyMfa(db: Pool, config: OperatorConfig, request: Reque
       [challenge.operator_id, codeHash(input.recovery_code ?? '')]);
     if (!used.rowCount) throw mfaInvalid();
   }
+  if (operator.is_break_glass) await alertBreakGlassUse(db, request, challenge.operator_id, operator.name);
   const { actor, token } = await createSession(db, config, request, response, challenge.operator_id, async (client) => {
     await recordSecurityEventIn(client, { event: 'mfa_verified', operatorId: challenge.operator_id, reason: input.code !== undefined ? 'totp' : 'recovery_code', ip: request.ip, requestId: requestIdOf(request) });
     if (input.code === undefined) await recordSecurityEventIn(client, { event: 'recovery_code_used', operatorId: challenge.operator_id, reason: 'recovery_code', ip: request.ip, requestId: requestIdOf(request) });
+    if (operator.is_break_glass) {
+      await client.query('UPDATE operators SET break_glass_validated_at=now() WHERE id=$1 AND is_break_glass', [challenge.operator_id]);
+      await recordSecurityEventIn(client, { event: 'break_glass_login', operatorId: challenge.operator_id, ip: request.ip, requestId: requestIdOf(request) });
+    }
     const consumed = await client.query('UPDATE operator_challenges SET consumed_at=now() WHERE token_hash=$1 AND consumed_at IS NULL RETURNING token_hash', [hash(input.challenge_id)]);
     if (!consumed.rowCount) throw challengeInvalid();
   });
@@ -235,12 +258,20 @@ export async function confirmEnrollment(db: Pool, config: OperatorConfig, reques
   const secretBytes = openSecret(config.mfaKey!, challenge.pending_secret_enc, challenge.operator_id);
   const step = verifyTotp(secretBytes, input.code);
   if (step === null) throw mfaInvalid();
+  const identity = (await db.query<{ email: string; name: string; is_break_glass: boolean }>(
+    'SELECT email, name, is_break_glass FROM operators WHERE id=$1 AND disabled_at IS NULL', [challenge.operator_id])).rows[0];
+  if (!identity) throw challengeInvalid();
+  if (identity.is_break_glass) await alertBreakGlassUse(db, request, challenge.operator_id, identity.name);
   const recoveryCodes = newRecoveryCodes();
   const { actor, token } = await createSession(db, config, request, response, challenge.operator_id, async (client) => {
     // Consume the challenge first: the credential trigger below also closes any other open challenge.
     const consumed = await client.query('UPDATE operator_challenges SET consumed_at=now() WHERE token_hash=$1 AND consumed_at IS NULL RETURNING token_hash', [hash(input.challenge_id)]);
     if (!consumed.rowCount) throw challengeInvalid();
     await recordSecurityEventIn(client, { event: 'mfa_enrolled', operatorId: challenge.operator_id, ip: request.ip, requestId: requestIdOf(request) });
+    if (identity.is_break_glass) {
+      await client.query('UPDATE operators SET break_glass_validated_at=now() WHERE id=$1 AND is_break_glass', [challenge.operator_id]);
+      await recordSecurityEventIn(client, { event: 'break_glass_login', operatorId: challenge.operator_id, ip: request.ip, requestId: requestIdOf(request) });
+    }
     const activated = await client.query(
       `UPDATE operators SET mfa_secret_enc=$2, mfa_enrolled_at=now(), mfa_last_step=$3, enrollment_code_hash=NULL, enrollment_code_expires_at=NULL
        WHERE id=$1 AND mfa_enrolled_at IS NULL AND disabled_at IS NULL RETURNING id`,

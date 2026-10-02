@@ -10,6 +10,7 @@ if [[ ! -e "$PERSONAL_ENV_FILE" ]]; then
   done
   echo "Generated credentials in $PERSONAL_ENV_FILE (mode 600)."
 fi
+python3 "$PERSONAL_ROOT/scripts/ensure-personal-runtime-db-secret.py" "$PERSONAL_ENV_FILE"
 personal_load
 personal_lock
 mkdir -p "$SESSION_HOST_PATH" "$BACKUP_DIR" "$PERSONAL_ROOT/docker/nginx/"{generated,ssl,www}
@@ -22,6 +23,8 @@ echo 'Building API, manager, dashboard, and bot images...'
 "${COMPOSE[@]}" up -d --wait --wait-timeout 180 postgres redis
 # Compiled migrations run BEFORE the new application starts, including updates.
 "${COMPOSE[@]}" run --rm migrate
+# Configure the login password for the new non-superuser runtime database role.
+"${COMPOSE[@]}" run --rm --no-deps migrate node dist/scripts/configure-personal-db-role.js
 "${COMPOSE[@]}" up -d --wait --wait-timeout 180
 resume_file="$PERSONAL_ROOT/data/personal/$PERSONAL_PROJECT.stopped-bots"
 if [[ -f $resume_file ]]; then

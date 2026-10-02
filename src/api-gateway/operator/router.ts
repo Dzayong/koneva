@@ -146,8 +146,8 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
     response.json({ success: true, data: await otpAlerts(db) });
   });
   // The entire owner-only section is a single read endpoint; every successful view writes one immutable audit record.
-  router.get('/insights', permit('owner:insights'), async (_request, response) => {
-    response.json({ success: true, data: await ownerInsights(db, actorOf(response), response.locals['requestId'] as string) });
+  router.get('/insights', permit('owner:insights'), async (request, response) => {
+    response.json({ success: true, data: await ownerInsights(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown') });
   });
   router.get('/audit', permit('audit:read'), async (request, response) => {
     const filter = auditSchema.parse(request.query);
@@ -155,7 +155,7 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
     const from = filter.from ?? new Date(new Date(to).getTime() - 30 * 86_400_000).toISOString();
     const range = new Date(to).getTime() - new Date(from).getTime();
     if (range <= 0 || range > 90 * 86_400_000) throw new OperatorError(400, 'VALIDATION_ERROR', 'Rentang audit harus lebih dari 0 dan maksimal 90 hari.');
-    response.json({ success: true, ...await listAudit(db, { ...filter, from, to }) });
+    response.json({ success: true, ...await listAudit(db, { ...filter, from, to, includeClientIp: actorOf(response).permissions.includes('owner:insights') }) });
   });
   router.use((_request, response) => { response.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Endpoint tidak ditemukan.' } }); });
   const errors: ErrorRequestHandler = (error, _request, response, _next) => {

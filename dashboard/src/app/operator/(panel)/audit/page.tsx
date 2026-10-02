@@ -48,7 +48,7 @@ function AuditList() {
           {list.error && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
           <div className="overflow-x-auto rounded-xl border">
             <Table>
-              <TableHeader><TableRow><TableHead>Waktu</TableHead><TableHead>Operator</TableHead><TableHead>Aksi</TableHead><TableHead>Target</TableHead><TableHead>Alasan</TableHead><TableHead>Perubahan</TableHead></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>Waktu</TableHead><TableHead>Operator</TableHead><TableHead>Aksi</TableHead><TableHead>Target</TableHead><TableHead>Alamat IP</TableHead><TableHead>Alasan</TableHead><TableHead>Perubahan</TableHead></TableRow></TableHeader>
               <TableBody>
                 {list.data.items.map((a) => {
                   const link = a.target ? targetLink(a.target) : null;
@@ -58,6 +58,7 @@ function AuditList() {
                       <TableCell>{a.operator?.name ?? "—"}</TableCell>
                       <TableCell className="font-mono text-xs">{a.action}</TableCell>
                       <TableCell>{a.target ? (link ? <Link href={link} className="text-primary underline underline-offset-2">{a.target.label ?? a.target.id}</Link> : (a.target.label ?? a.target.id)) : "—"}</TableCell>
+                      <TableCell className="font-mono text-xs">{can("owner:insights") ? (a.client_ip ?? "—") : "—"}</TableCell>
                       <TableCell className="max-w-56 text-sm">{a.reason ?? "—"}</TableCell>
                       <TableCell className="text-xs">
                         {Object.keys(a.changes).length === 0 ? "—" : <ul className="space-y-0.5">{Object.entries(a.changes).map(([k, v]) => <li key={k}><span className="font-medium">{k}</span>: {clip(v.from)} → {clip(v.to)}</li>)}</ul>}
