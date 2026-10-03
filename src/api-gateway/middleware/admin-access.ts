@@ -4,7 +4,9 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 /**
  * Network restriction for the legacy `/admin` maintenance interface (defence in depth behind the reverse proxy).
  * ADMIN_ALLOWED_NETWORKS: comma-separated IPs/CIDRs plus the keywords `loopback`, `private`, `any`.
- * Default: production -> `loopback,private` (localhost curl, docker/VPN networks); other environments -> `any`.
+ * Default: production -> `loopback` only (owner decision, 2026-10-02: localhost-only by default; a prior
+ * default of `loopback,private` is still available by setting ADMIN_ALLOWED_NETWORKS=loopback,private
+ * explicitly, e.g. if Docker/VPN-internal administration access is genuinely needed); other environments -> `any`.
  * Behind a proxy, set TRUST_PROXY_HOPS so req.ip is the real client; then a public client is refused here even if the proxy rule is lost.
  * The operator cookie is not an /admin credential (adminAuth only reads x-admin-key) and never becomes one.
  */
@@ -14,7 +16,7 @@ const KEYWORDS: Record<string, Array<[string, number, 'ipv4' | 'ipv6']>> = {
 };
 
 export function parseAdminNetworks(raw: string | undefined, nodeEnv: string | undefined): BlockList | null {
-  const value = (raw ?? '').trim() || (nodeEnv === 'production' ? 'loopback,private' : 'any');
+  const value = (raw ?? '').trim() || (nodeEnv === 'production' ? 'loopback' : 'any');
   const list = new BlockList();
   for (const entry of value.split(',').map((e) => e.trim()).filter(Boolean)) {
     if (entry === 'any') return null;

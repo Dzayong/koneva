@@ -34,6 +34,7 @@ import {
 import logger from '../src/shared/utils/logger';
 import { createDeviceManagerApp } from '../src/device-manager/index';
 import type { BotOrchestrator, BotPodStatus } from '../src/device-manager/types';
+import { KEY_SCOPES, newApiKey } from '../src/api-gateway/services/apikey.service';
 
 const REPO_ROOT = path.join(__dirname, '..');
 const ADMIN_API_KEY = process.env['ADMIN_API_KEY'] ?? 'admin_secret_key_here';
@@ -213,7 +214,7 @@ interface TestTenant {
 }
 
 async function createTenant(name: string, quotaMessages: number): Promise<TestTenant> {
-  const res = await req<{ success: boolean; data: { id: string; api_key: string } }>(
+  const res = await req<{ success: boolean; data: { id: string } }>(
     'POST',
     `${GATEWAY_URL}/admin/tenant/create`,
     {
@@ -224,7 +225,15 @@ async function createTenant(name: string, quotaMessages: number): Promise<TestTe
   if (res.status !== 201 || !res.body.success) {
     throw new Error(`Failed to create tenant "${name}": ${JSON.stringify(res.body)}`);
   }
-  return { id: res.body.data.id, apiKey: res.body.data.api_key };
+  const tenantId = res.body.data.id;
+  // No static tenant API key is issued any more (removed 2026-10-02); insert a scoped wgk_ key directly
+  // for this script's own synthetic HTTP calls, the same way a signed-in Owner would from the dashboard.
+  const { key, hash, prefix } = newApiKey();
+  await query(
+    `INSERT INTO api_keys (tenant_id, name, prefix, key_hash, scopes) VALUES ($1, 'integration-test', $2, $3, $4)`,
+    [tenantId, prefix, hash, [...KEY_SCOPES]],
+  );
+  return { id: tenantId, apiKey: key };
 }
 
 async function insertDevice(tenantId: string, deviceKey: string, status: string): Promise<string> {

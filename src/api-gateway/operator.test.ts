@@ -123,8 +123,8 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
   }
   async function workspace() {
     const id = randomUUID();
-    await pool.query(`INSERT INTO tenants(id,name,email,api_key,webhook_secret,used_messages) VALUES ($1,$2,$3,$4,$5,50)`,
-      [id,`Workspace ${id}`,`${id}@example.test`,`secret-key-${id}`,`secret-hook-${id}`]);
+    await pool.query(`INSERT INTO tenants(id,name,email,webhook_secret,used_messages) VALUES ($1,$2,$3,$4,50)`,
+      [id,`Workspace ${id}`,`${id}@example.test`,`secret-hook-${id}`]);
     const user = randomUUID();
     await pool.query('INSERT INTO users(id,email,name,password_hash) VALUES ($1,$2,$3,$4)', [user,`${user}@example.test`,'Pemilik Uji',passwordHash]);
     await pool.query("INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'owner')", [user,id]);

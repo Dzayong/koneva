@@ -15,7 +15,7 @@ const webhookUrl = z.string()
   }, 'Webhook URL must not point to a private/internal address');
 export const updateTenantSchema = z.object({ webhook_url: webhookUrl.nullable() }).strict();
 
-const tenantFields = `id, name, email, api_key, webhook_url, max_devices,
+const tenantFields = `id, name, email, webhook_url, max_devices,
   quota_messages, used_messages, status, created_at, updated_at`;
 
 export async function getTenant(request: Request, response: Response): Promise<void> {
@@ -23,10 +23,7 @@ export async function getTenant(request: Request, response: Response): Promise<v
     `SELECT ${tenantFields} FROM tenants WHERE id = $1 LIMIT 1`,
     [request.tenant!.id],
   );
-  const row = result.rows[0] as Record<string, unknown> | undefined;
-  // A signed-in member must not receive the legacy tenant key: it would outrank their role.
-  if (row && request.actor?.kind === 'user') delete row['api_key'];
-  response.json({ success: true, data: row });
+  response.json({ success: true, data: result.rows[0] });
 }
 
 export async function updateTenant(request: Request, response: Response): Promise<void> {

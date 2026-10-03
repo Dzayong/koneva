@@ -86,7 +86,7 @@ export default function SignupPage() {
   };
 
   return (
-    <AuthShell>
+    <AuthShell background="signup">
       <Card>
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl">{pendingEmail ? "Verifikasi email" : "Buat akun"}</CardTitle>

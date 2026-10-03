@@ -70,7 +70,7 @@ const navigation = groups.flatMap((g) => g.items);
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { logout } = useAuth();
-  const { can, role, user, workspace, legacy } = usePermissions();
+  const { can, role, user, workspace } = usePermissions();
   const navId = useId();
   const reduceMotion = useReducedMotion();
 
@@ -129,9 +129,9 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="border-t border-sidebar-border p-4">
         <div className="mb-2 px-3">
-          <p className="truncate text-sm font-medium text-sidebar-accent-foreground">{legacy ? "Akses API key" : (user?.name ?? "…")}</p>
+          <p className="truncate text-sm font-medium text-sidebar-accent-foreground">{user?.name ?? "…"}</p>
           <p className="truncate text-xs text-sidebar-foreground">
-            {workspace?.name ?? (legacy ? "Tenant" : "…")}{legacy ? " · Kunci tenant (lama)" : role ? ` · ${ROLE_LABEL[role]}` : ""}
+            {workspace?.name ?? "…"}{role ? ` · ${ROLE_LABEL[role]}` : ""}
           </p>
         </div>
         <button

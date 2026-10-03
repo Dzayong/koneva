@@ -47,7 +47,7 @@ function initials(name: string | undefined): string {
 export function Header() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, workspace, role, legacy } = usePermissions();
+  const { user, workspace, role } = usePermissions();
 
   return (
     <header className="sticky top-0 z-30 flex h-20 shrink-0 items-center justify-between border-b bg-background/95 px-4 backdrop-blur-sm md:px-8">
@@ -75,7 +75,7 @@ export function Header() {
 
       <div className="flex items-center gap-3 md:gap-4">
         <Badge variant="outline" className="hidden border-border bg-card px-2.5 py-1 font-medium lg:flex">
-          {workspace?.name ?? (legacy ? "Akses API key" : "…")}
+          {workspace?.name ?? "…"}
         </Badge>
         <TrialChip />
         <HelpButton />
@@ -83,11 +83,11 @@ export function Header() {
         <ThemeToggle />
         <div className="flex items-center gap-3">
           <Avatar>
-            <AvatarFallback className="bg-secondary text-xs font-semibold text-secondary-foreground">{legacy ? "WA" : initials(user?.name)}</AvatarFallback>
+            <AvatarFallback className="bg-secondary text-xs font-semibold text-secondary-foreground">{initials(user?.name)}</AvatarFallback>
           </Avatar>
           <div className="hidden md:block">
-            <p className="text-sm font-medium">{legacy ? "Tenant" : (user?.name ?? "…")}</p>
-            <p className="text-xs text-muted-foreground">{legacy ? "Kunci tenant (lama)" : role ? ROLE_LABEL[role] : "Masuk"}</p>
+            <p className="text-sm font-medium">{user?.name ?? "…"}</p>
+            <p className="text-xs text-muted-foreground">{role ? ROLE_LABEL[role] : "Masuk"}</p>
           </div>
         </div>
       </div>

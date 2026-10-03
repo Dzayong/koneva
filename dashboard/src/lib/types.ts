@@ -26,7 +26,6 @@ export interface Tenant {
   id: string;
   name: string;
   email: string | null;
-  api_key: string;
   webhook_url: string | null;
   max_devices: number;
   quota_messages: number;

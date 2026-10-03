@@ -8,6 +8,7 @@ import { validate } from '../middleware/validate';
 import { login, resolveSession, revokeSession, sha256, signup } from '../services/account.service';
 import { acceptInvitation, previewInvitation, requestInvitationOtp } from '../services/team.service';
 import { confirmEmailVerification, confirmSignupEmailVerification, requestEmailVerification, requestSignupEmailVerification } from '../services/owner-verification.service';
+import { confirmPasswordReset, requestPasswordReset } from '../services/password-reset.service';
 import { recordSiteEvent } from '../services/site-stats.service';
 import { getSubscriptionSummary } from '../services/billing.service';
 import { recordAudit } from '../services/audit.service';
@@ -122,6 +123,23 @@ router.get('/me', async (request: Request, response: Response) => {
       support_contact: config.billing.operatorContact || null,
     },
   });
+});
+
+const passwordResetRequestSchema = z.object({ email: z.string().trim().toLowerCase().email().max(255) }).strict();
+router.post('/password-reset/request', limited(15 * 60_000, 10), validate({ body: passwordResetRequestSchema }), async (request: Request, response: Response) => {
+  const { email } = request.validated!.body as z.infer<typeof passwordResetRequestSchema>;
+  response.json({ success: true, data: await requestPasswordReset(email) });
+});
+
+const passwordResetConfirmSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(255),
+  code: z.string().regex(/^\d{6}$/),
+  new_password: z.string().min(10, 'Password must be at least 10 characters').max(128),
+}).strict();
+router.post('/password-reset/confirm', limited(15 * 60_000, 30), validate({ body: passwordResetConfirmSchema }), async (request: Request, response: Response) => {
+  const { email, code, new_password } = request.validated!.body as z.infer<typeof passwordResetConfirmSchema>;
+  await confirmPasswordReset(email, code, new_password);
+  response.json({ success: true, data: { reset: true } });
 });
 
 // Owner email verification (any domain). Needs a signed-in session; the OTP mail and its limits are shared with invitation OTPs.

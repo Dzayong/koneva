@@ -21,20 +21,8 @@ export function useAuth() {
     getServerSnapshot,
   );
 
-  /** Legacy sign-in with a tenant API key. */
-  const login = useCallback(
-    (apiKey: string) => {
-      api.clearSession();
-      api.setApiKey(apiKey);
-      queryClient.clear();
-      router.push("/dashboard");
-    },
-    [router, queryClient],
-  );
-
   const loginWithSession = useCallback(
     (result: AuthResult, destination = "/dashboard") => {
-      api.clearApiKey();
       api.setSession(result.token, result.workspaces[0]?.id);
       queryClient.clear();
       router.push(destination);
@@ -45,10 +33,9 @@ export function useAuth() {
   const logout = useCallback(async () => {
     await api.logoutRemote();
     api.clearSession();
-    api.clearApiKey();
     queryClient.clear();
     router.push("/login");
   }, [router, queryClient]);
 
-  return { isAuthenticated, login, loginWithSession, logout };
+  return { isAuthenticated, loginWithSession, logout };
 }

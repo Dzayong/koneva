@@ -4,9 +4,9 @@ import logger from '../src/shared/utils/logger';
 async function seed(): Promise<void> {
   try {
     const tenantResult = await pool.query<{ id: string }>(`
-      INSERT INTO tenants (name, email, api_key, max_devices, quota_messages)
-      VALUES ('Test Tenant', 'test@example.com', 'test_api_key_123', 5, 10000)
-      ON CONFLICT (api_key) DO UPDATE SET name = EXCLUDED.name
+      INSERT INTO tenants (name, email, max_devices, quota_messages)
+      VALUES ('Test Tenant', 'test@example.com', 5, 10000)
+      ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
       RETURNING id
     `);
 

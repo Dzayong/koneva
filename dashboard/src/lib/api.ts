@@ -1,6 +1,6 @@
 import axios, { type AxiosInstance, type AxiosError } from "axios";
 import { toast } from "sonner";
-import { API_BASE_URL, API_KEY_STORAGE_KEY, SESSION_STORAGE_KEY, WORKSPACE_STORAGE_KEY } from "./constants";
+import { API_BASE_URL, SESSION_STORAGE_KEY, WORKSPACE_STORAGE_KEY } from "./constants";
 
 declare module "axios" {
   interface AxiosRequestConfig {
@@ -62,7 +62,6 @@ import type {
 
 class ApiClient {
   private client: AxiosInstance;
-  private apiKey: string | null = null;
   private session: string | null = null;
   private workspaceId: string | null = null;
   private authListeners = new Set<() => void>();
@@ -74,17 +73,11 @@ class ApiClient {
     });
 
     this.client.interceptors.request.use((config) => {
-      // A signed-in person takes precedence over the legacy tenant key.
       const session = this.getSession();
       if (session) {
         config.headers.Authorization = `Bearer ${session}`;
         const workspace = this.getWorkspaceId();
         if (workspace) config.headers["x-workspace"] = workspace;
-        return config;
-      }
-      const key = this.getApiKey();
-      if (key) {
-        config.headers.apikey = key;
       }
       return config;
     });
@@ -100,7 +93,6 @@ class ApiClient {
           // Expected (wrong credentials); the caller shows its own message.
         } else if (status === 401) {
           this.clearSession();
-          this.clearApiKey();
           if (typeof window !== "undefined" && window.location.pathname !== "/login") {
             // Hard navigation, not router.push: this runs outside React (an
             // axios interceptor) and a full reload is wanted anyway, to drop
@@ -129,34 +121,11 @@ class ApiClient {
     );
   }
 
-  setApiKey(key: string): void {
-    this.apiKey = key;
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(API_KEY_STORAGE_KEY, key);
-    }
-    this.notifyAuthListeners();
-  }
-
-  getApiKey(): string | null {
-    if (!this.apiKey && typeof window !== "undefined") {
-      this.apiKey = window.localStorage.getItem(API_KEY_STORAGE_KEY);
-    }
-    return this.apiKey;
-  }
-
-  clearApiKey(): void {
-    this.apiKey = null;
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(API_KEY_STORAGE_KEY);
-    }
-    this.notifyAuthListeners();
-  }
-
   isAuthenticated(): boolean {
-    return this.getSession() !== null || this.getApiKey() !== null;
+    return this.getSession() !== null;
   }
 
-  /** True when a person is signed in (as opposed to the legacy tenant API key). */
+  /** True when a person is signed in. There is no other way to use the dashboard any more. */
   hasSession(): boolean {
     return this.getSession() !== null;
   }
@@ -195,7 +164,7 @@ class ApiClient {
     this.notifyAuthListeners();
   }
 
-  /** For useSyncExternalStore — notifies on setApiKey/clearApiKey. */
+  /** For useSyncExternalStore — notifies on setSession/clearSession. */
   subscribeAuth(listener: () => void): () => void {
     this.authListeners.add(listener);
     return () => this.authListeners.delete(listener);
@@ -362,15 +331,6 @@ class ApiClient {
     return response.data.data;
   }
 
-  /** Not implemented by api-gateway yet — see dashboard/README.md "Known gaps". */
-  async regenerateApiKey() {
-    const response = await this.client.post<ApiSuccess<{ api_key: string }>>(
-      "/api/v1/tenant/api-key/regenerate",
-      undefined,
-      { skipErrorToast: true },
-    );
-    return response.data.data;
-  }
 
   async getDeviceHealth(deviceKey: string): Promise<DeviceHealthData> {
     const response = await this.client.get<ApiSuccess<DeviceHealthData>>(

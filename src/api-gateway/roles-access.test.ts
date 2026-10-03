@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -20,7 +21,7 @@ import { hashPassword, login } from './services/account.service';
 import { createTrial } from './services/billing.service';
 import { emailTransport } from './services/mailer';
 import { ServiceError } from './services/service-error';
-import { newApiKey } from './services/apikey.service';
+import { createApiKey, newApiKey } from './services/apikey.service';
 
 // STACK-local: real PostgreSQL (disposable), real routers and middleware, a FAKE device manager on loopback (no container, no WhatsApp).
 const enabled = process.env['OPERATOR_STACK_TEST'] === '1';
@@ -30,6 +31,17 @@ if (enabled) {
     'refusing to run: EMAIL_TRANSPORT/GMAIL_* must be pinned by the test scripts (see scripts/test-operator-*.sh)');
 }
 const root = path.join(__dirname, '../..');
+
+/** Spawns an offline admin script (scripts/migrate-legacy-api-keys.ts) the same way an owner would. */
+function runMigrationScript(args: string[], env: Record<string, string | undefined> = {}): Promise<{ code: number; out: string; err: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      process.execPath, ['--require', 'ts-node/register', 'scripts/migrate-legacy-api-keys.ts', ...args],
+      { cwd: root, env: { ...process.env, NODE_ENV: 'test', OPERATOR_PROVISION_LOCAL: 'true', OPERATOR_ADMIN_LABEL: 'test-cutover', ...env } },
+      (error, out, err) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, out, err }),
+    );
+  });
+}
 
 test('roles, Gmail invitations and OTP (disposable database only)', { skip: !enabled }, async (t) => {
   const url = new URL(process.env['DATABASE_URL']!);
@@ -92,8 +104,8 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
       [userId, email, await hashPassword(password), verified ? new Date() : null],
     );
     await pool.query(
-      'INSERT INTO tenants(id,name,email,api_key,webhook_secret) VALUES ($1,$2,$3,$4,$5)',
-      [tenant, 'Workspace Pemilik Uji', email, `wg_${randomBytes(24).toString('hex')}`, `whsec_${randomBytes(24).toString('hex')}`],
+      'INSERT INTO tenants(id,name,email,webhook_secret) VALUES ($1,$2,$3,$4)',
+      [tenant, 'Workspace Pemilik Uji', email, `whsec_${randomBytes(24).toString('hex')}`],
     );
     await createTrial(pool, tenant);
     await pool.query("INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'owner')", [userId, tenant]);
@@ -467,7 +479,6 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
       await pool.query("INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'admin'),($3,$2,'viewer')", [admin.userId, o.tenant, viewer.userId]);
     } finally { await pool.query('ALTER TABLE memberships ENABLE TRIGGER memberships_no_new_legacy_role'); }
 
-    const legacyTenantKey = (await pool.query<{ api_key: string }>('SELECT api_key FROM tenants WHERE id=$1', [o.tenant])).rows[0]!.api_key;
     const scopedKey = newApiKey();
     await pool.query(
       `INSERT INTO api_keys (tenant_id, name, prefix, key_hash, scopes, created_by)
@@ -476,8 +487,6 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
     );
 
     assert.equal((await call('/api/v1/devices', { token: admin.token, workspace: o.tenant })).status, 200, 'no notice means no clock');
-    const withRedis = process.env['OPERATOR_TEST_REDIS'] === '1';
-    if (withRedis) assert.equal((await call('/api/v1/devices', { apiKey: legacyTenantKey })).status, 200, 'legacy tenant API key works before the notice deadline');
     assert.equal((await call('/api/v1/devices', { token: scopedKey.key })).status, 200, 'scoped API key works before the notice deadline');
     assert.equal((await call('/api/v1/team/legacy-role-notice', { method: 'POST', token: admin.token, workspace: o.tenant, body: { confirm: true } })).status, 403, 'only Owner can issue notice');
     const ownerPage = await call('/api/v1/team/legacy-role-notice', { method: 'POST', token: o.token, workspace: o.tenant, body: { confirm: true } });
@@ -495,7 +504,7 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
     assert.equal(suspended.status, 403);
     assert.equal(suspended.body.error.code, 'LEGACY_ROLE_TRANSITION_EXPIRED');
     assert.match(suspended.body.error.message, /Owner menentukan peran/);
-    const apiCredentials = [{ token: scopedKey.key }, ...(withRedis ? [{ apiKey: legacyTenantKey }] : [])];
+    const apiCredentials = [{ token: scopedKey.key }];
     for (const credentials of apiCredentials) {
       const deniedKey = await call('/api/v1/devices', credentials);
       assert.equal(deniedKey.status, 403, 'API key cannot bypass an expired workspace transition');
@@ -507,7 +516,128 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
     assert.equal((await call('/api/v1/devices', { token: admin.token, workspace: o.tenant })).status, 200, 'only an explicitly converted member regains access');
     assert.equal((await call('/api/v1/devices', { token: viewer.token, workspace: o.tenant })).status, 403, 'unresolved Viewer remains suspended');
     assert.equal((await call(`/api/v1/team/members/${viewer.userId}`, { method: 'PATCH', token: o.token, workspace: o.tenant, body: { role: 'developer' } })).status, 200);
-    if (withRedis) assert.equal((await call('/api/v1/devices', { apiKey: legacyTenantKey })).status, 200, 'legacy tenant key resumes after the owner resolves every legacy membership');
     assert.equal((await call('/api/v1/devices', { token: scopedKey.key })).status, 200, 'scoped key resumes after the owner resolves every legacy membership');
+  });
+
+  await t.test('Password reset: emailed 6-digit code, no account enumeration, old sessions revoked, wrong/reused code refused', async () => {
+    useOutbox();
+    try {
+      const o = await owner();
+      const resetCodeFor = (to: string): string | undefined => {
+        if (!fs.existsSync(outbox)) return undefined;
+        const last = fs.readFileSync(outbox, 'utf8').trim().split('\n').filter(Boolean)
+          .map((l) => JSON.parse(l) as { to: string; body: string }).filter((m) => m.to === to).at(-1);
+        return last?.body.match(/\b(\d{6})\b/)?.[1];
+      };
+      const unknownEmail = `nobody-${randomUUID()}@example.test`;
+      const req1 = await call('/auth/password-reset/request', { method: 'POST', body: { email: o.email } });
+      assert.equal(req1.status, 200);
+      const req2 = await call('/auth/password-reset/request', { method: 'POST', body: { email: unknownEmail } });
+      assert.equal(req2.status, 200, 'an unknown address gets the same generic response');
+      assert.equal(resetCodeFor(unknownEmail), undefined, 'and genuinely no email was sent to it');
+      const code = resetCodeFor(o.email)!;
+      assert.match(code, /^\d{6}$/);
+
+      const wrong = await call('/auth/password-reset/confirm', { method: 'POST', body: { email: o.email, code: '000000', new_password: 'another-strong-password-1' } });
+      assert.equal(wrong.status, 422);
+
+      // The session from owner() is still valid right up until the reset succeeds.
+      assert.equal((await call('/auth/me', { token: o.token })).status, 200);
+
+      const newPassword = 'another-strong-password-1';
+      const confirm = await call('/auth/password-reset/confirm', { method: 'POST', body: { email: o.email, code, new_password: newPassword } });
+      assert.equal(confirm.status, 200, confirm.text);
+
+      assert.equal((await call('/auth/me', { token: o.token })).status, 401, 'every session is revoked by a successful reset');
+      const reuse = await call('/auth/password-reset/confirm', { method: 'POST', body: { email: o.email, code, new_password: 'yet-another-password-2' } });
+      assert.equal(reuse.status, 422, 'the code is single-use');
+
+      const oldPasswordLogin = await call('/auth/login', { method: 'POST', body: { email: o.email, password } });
+      assert.equal(oldPasswordLogin.status, 401);
+      const newPasswordLogin = await call('/auth/login', { method: 'POST', body: { email: o.email, password: newPassword } });
+      assert.equal(newPasswordLogin.status, 200);
+    } finally { noEmail(); }
+  });
+
+  await t.test('legacy static API key: fully removed (no fallback path), and the owner-run cutover script provisions a scoped key then clears it, never printing either value', async () => {
+    // tenants.api_key is nullable but still present (migration 034); a row with a value simulates one of
+    // the pre-existing tenants from before 2026-10-02's removal. owner() itself never sets api_key any more.
+    const legacy = await owner();
+    const fakeLegacyKey = `wg_${randomBytes(24).toString('hex')}`;
+    await pool.query('UPDATE tenants SET api_key = $2 WHERE id = $1', [legacy.tenant, fakeLegacyKey]);
+
+    // The old static key never authenticates: there is no code path left that reads tenants.api_key for auth.
+    const deniedLegacy = await call('/api/v1/devices', { apiKey: fakeLegacyKey });
+    assert.equal(deniedLegacy.status, 401, 'the static key format is simply an unrecognised apikey now');
+
+    const provisionDry = await runMigrationScript(['provision']);
+    assert.equal(provisionDry.code, 0, provisionDry.err);
+    assert.match(provisionDry.out, /tenant\(s\) need a scoped key/);
+    assert.match(provisionDry.out, new RegExp(legacy.tenant));
+    assert.doesNotMatch(provisionDry.out, /wg_|wgk_/, 'dry-run never prints a key value');
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM api_keys WHERE tenant_id=$1', [legacy.tenant])).rows[0].n, 0, 'dry-run creates nothing');
+
+    const outDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'koneva-legacy-key-cutover-'));
+    const outFile = path.join(outDir, 'new-keys.jsonl');
+    await fsp.writeFile(outFile, '', { mode: 0o600 });
+    const provisioned = await runMigrationScript(['provision', '--out', outFile, '--execute']);
+    assert.equal(provisioned.code, 0, provisioned.err);
+    assert.doesNotMatch(provisioned.out, /wg_[0-9a-f]{40,}|wgk_[A-Za-z0-9_-]{30,}/, 'the stdout summary never prints a key value');
+    const scopedRow = (await pool.query<{ key_hash: string; scopes: string[] }>('SELECT key_hash, scopes FROM api_keys WHERE tenant_id=$1', [legacy.tenant])).rows[0]!;
+    assert.ok(scopedRow, 'a scoped key row was created');
+    assert.ok(!scopedRow.scopes.includes('billing:manage') && !scopedRow.scopes.includes('keys:manage') && !scopedRow.scopes.includes('team:manage'), 'ceiling matches KEY_SCOPES, never the management scopes');
+    const fileLine = (await fsp.readFile(outFile, 'utf8')).trim();
+    assert.match(fileLine, new RegExp(`"tenant_id":"${legacy.tenant}"`));
+    assert.match(fileLine, /"key":"wgk_/, 'the new key is written only to the private --out file');
+    assert.equal((await pool.query('SELECT api_key FROM tenants WHERE id=$1', [legacy.tenant])).rows[0].api_key, fakeLegacyKey, 'provision alone does not touch the legacy key yet');
+    assert.equal((await fsp.stat(outFile)).mode & 0o777, 0o600);
+
+    // Idempotent: a second provision run finds nothing left to do for this tenant.
+    const provisionAgain = await runMigrationScript(['provision']);
+    assert.doesNotMatch(provisionAgain.out, new RegExp(legacy.tenant), 're-running provision skips an already-migrated tenant');
+
+    // A second tenant, also legacy, left un-provisioned on purpose: cutover must refuse to touch it.
+    const notReady = await owner();
+    const notReadyKey = `wg_${randomBytes(24).toString('hex')}`;
+    await pool.query('UPDATE tenants SET api_key = $2 WHERE id = $1', [notReady.tenant, notReadyKey]);
+
+    const cutoverDry = await runMigrationScript(['cutover']);
+    assert.equal(cutoverDry.code, 0, cutoverDry.err);
+    assert.match(cutoverDry.out, new RegExp(`${legacy.tenant}[\\s\\S]*ready`));
+    assert.match(cutoverDry.out, /NOT ready/);
+    assert.match(cutoverDry.out, new RegExp(notReady.tenant));
+
+    const cutoverExec = await runMigrationScript(['cutover', '--execute']);
+    assert.equal(cutoverExec.code, 0, cutoverExec.err);
+    assert.equal((await pool.query('SELECT api_key FROM tenants WHERE id=$1', [legacy.tenant])).rows[0].api_key, null, 'the ready tenant is cut over');
+    assert.equal((await pool.query('SELECT api_key FROM tenants WHERE id=$1', [notReady.tenant])).rows[0].api_key, notReadyKey, 'a tenant with no scoped key yet is left untouched');
+
+    await fsp.rm(outDir, { recursive: true, force: true });
+  });
+
+  await t.test('legacy static API key: the guarded column-drop script refuses while any tenant still has one, and succeeds once none do', async () => {
+    // Exercises scripts/drop-legacy-api-key-column.sql's exact SQL text (run deliberately by
+    // scripts/drop-legacy-api-key-column.ts, never by the automatic migrations/ sweep) against a
+    // throwaway schema-qualified replica of `tenants`, so this never risks the shared suite database.
+    const client = await pool.connect();
+    const schema = `cutover_guard_test_${randomUUID().replace(/-/g, '')}`;
+    try {
+      await client.query(`CREATE SCHEMA ${schema}`);
+      await client.query(`SET search_path TO ${schema}, public`);
+      await client.query('CREATE TABLE tenants (id uuid PRIMARY KEY, api_key text)');
+      await client.query("INSERT INTO tenants (id, api_key) VALUES ('11111111-1111-4111-8111-111111111111', 'still-has-a-key')");
+      const migrationSql = await fsp.readFile(path.join(root, 'scripts/drop-legacy-api-key-column.sql'), 'utf8');
+      await assert.rejects(() => client.query(migrationSql), /Refusing to drop tenants\.api_key: 1 tenant/);
+      const stillThere = await client.query<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name='tenants' AND column_name='api_key'`, [schema]);
+      assert.equal(stillThere.rowCount, 1, 'the column survives a refused attempt');
+
+      await client.query('UPDATE tenants SET api_key = NULL');
+      await client.query(migrationSql);
+      const goneNow = await client.query<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name='tenants' AND column_name='api_key'`, [schema]);
+      assert.equal(goneNow.rowCount, 0, 'the column is dropped once no tenant has a value');
+    } finally {
+      await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      client.release();
+    }
   });
 });

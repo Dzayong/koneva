@@ -92,7 +92,7 @@ export interface ResolvedKey { tenant: TenantContext; scopes: Permission[]; keyI
 export async function resolveApiKey(key: string): Promise<ResolvedKey | undefined> {
   const { rows } = await pool.query<TenantContext & { key_id: string; scopes: Permission[]; last_used_at: Date | null }>(
     `SELECT k.id AS key_id, k.scopes, k.last_used_at,
-            t.id, t.name, t.email, t.api_key, t.webhook_url, t.webhook_secret,
+            t.id, t.name, t.email, t.webhook_url, t.webhook_secret,
             t.max_devices, t.quota_messages, t.used_messages, t.status
      FROM api_keys k JOIN tenants t ON t.id = k.tenant_id
      WHERE k.key_hash = $1 AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > now())`,

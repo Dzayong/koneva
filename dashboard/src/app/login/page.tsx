@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { PasswordInput } from "@/components/auth/password-input";
 import { Button } from "@/components/ui/button";
@@ -14,13 +14,11 @@ import { api } from "@/lib/api";
 import { apiFailure } from "@/lib/errors";
 
 export default function LoginPage() {
-  const { login, loginWithSession } = useAuth();
+  const { loginWithSession } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showKey, setShowKey] = useState(false);
-  const [apiKey, setApiKey] = useState("");
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +38,7 @@ export default function LoginPage() {
   };
 
   return (
-    <AuthShell>
+    <AuthShell background="login">
       <Card>
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl">Masuk</CardTitle>
@@ -69,28 +67,6 @@ export default function LoginPage() {
           </CardFooter>
         </form>
       </Card>
-
-      <div className="rounded-lg border bg-card">
-        <button
-          type="button"
-          onClick={() => setShowKey((v) => !v)}
-          aria-expanded={showKey}
-          className="flex w-full items-center justify-between px-4 py-3 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-        >
-          Masuk dengan API key (cara lama)
-          <ChevronDown className={`h-4 w-4 transition-transform ${showKey ? "rotate-180" : ""}`} />
-        </button>
-        {showKey && (
-          <form
-            className="space-y-3 border-t p-4"
-            onSubmit={(e) => { e.preventDefault(); if (apiKey.trim()) login(apiKey.trim()); }}
-          >
-            <Label htmlFor="apiKey">API key tenant</Label>
-            <Input id="apiKey" type="password" placeholder="wg_..." autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-            <Button type="submit" variant="outline" className="w-full" disabled={!apiKey.trim()}>Masuk dengan API key</Button>
-          </form>
-        )}
-      </div>
     </AuthShell>
   );
 }

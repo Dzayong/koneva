@@ -7,7 +7,7 @@ import { getTenant, updateTenant, updateTenantSchema } from './routes/tenant.rou
 
 const tenant = {
   id: '8fca6485-b3df-47c2-b87e-0c235c0a4bb9',
-  name: 'Test tenant', email: null, api_key: 'tenant-key', webhook_url: null,
+  name: 'Test tenant', email: null, webhook_url: null,
   webhook_secret: null, max_devices: 2, quota_messages: 1_000, used_messages: 10,
   status: 'active',
 } satisfies TenantContext;

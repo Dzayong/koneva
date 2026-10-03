@@ -160,7 +160,7 @@ test('OTP limits against PostgreSQL: rolling windows, aliases, concurrency, send
 
   await t.test('OTP housekeeping: expired/consumed codes are deleted after a day, live ones never; threshold records and the 60 s pause are unaffected; the schedule runs', async () => {
     const tenant = randomUUID(), user = randomUUID(), other = randomUUID();
-    await pool.query("INSERT INTO tenants(id,name,email,api_key,webhook_secret) VALUES ($1,'Uji',$2,$3,$4)", [tenant, `${tenant}@example.test`, `k-${tenant}`, `w-${tenant}`]);
+    await pool.query("INSERT INTO tenants(id,name,email,webhook_secret) VALUES ($1,'Uji',$2,$3)", [tenant, `${tenant}@example.test`, `w-${tenant}`]);
     for (const u of [user, other]) await pool.query("INSERT INTO users(id,email,name,password_hash) VALUES ($1,$2,'Uji','x')", [u, `${u}@example.test`]);
     const invitation = async () => (await pool.query<{ id: string }>("INSERT INTO invitations(tenant_id,email,role,token_hash,expires_at) VALUES ($1,$2,'developer',$3,now()+interval '2 days') RETURNING id", [tenant, `x${id()}@gmail.com`, randomUUID().replace(/-/g, '').padEnd(64, '0')])).rows[0]!.id;
     const inv = await invitation();

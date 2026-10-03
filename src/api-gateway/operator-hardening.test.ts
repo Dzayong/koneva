@@ -268,7 +268,7 @@ test('operator hardening: security events, offline administration, key managemen
     assert.equal(verify.status, 200, verify.text);
     const cookie = verify.headers.get('set-cookie')!.split(';')[0]!, csrf = verify.body.data.csrf_token as string;
     const tenant = randomUUID(), invoice = randomUUID();
-    await pool.query("INSERT INTO tenants(id,name,email,api_key,webhook_secret) VALUES ($1,'Uji',$2,$3,$4)", [tenant, `${tenant}@example.test`, `k-${tenant}`, `w-${tenant}`]);
+    await pool.query("INSERT INTO tenants(id,name,email,webhook_secret) VALUES ($1,'Uji',$2,$3)", [tenant, `${tenant}@example.test`, `w-${tenant}`]);
     await pool.query("INSERT INTO invoices(id,tenant_id,number,plan_id,cycle,amount_idr,due_at) VALUES ($1,$2,$3,'umkm','monthly',99000,now()+interval '7 days')", [invoice, tenant, `RET-${invoice.slice(0, 16)}`]);
     const key = randomUUID();
     const body = { method: 'transfer', reference: `REF-${key.slice(0, 8)}`, expected: { amount_idr: 99000, version: 1 } };
@@ -292,13 +292,27 @@ test('operator hardening: security events, offline administration, key managemen
     const gs = guarded.listen(0, '127.0.0.1');
     await new Promise<void>((resolve) => gs.once('listening', resolve));
     try {
+      // Owner decision 2026-10-02: production default is loopback-only. A private-range or public client is
+      // refused unless ADMIN_ALLOWED_NETWORKS explicitly widens it (see the next block).
       const at = (xff?: string) => fetch(`http://127.0.0.1:${(gs.address() as AddressInfo).port}/admin/x`, { headers: xff ? { 'X-Forwarded-For': xff } : {} }).then((r) => r.status);
       assert.equal(await at(), 200, 'direct loopback');
-      assert.equal(await at('10.1.2.3'), 200, 'private');
+      assert.equal(await at('10.1.2.3'), 403, 'private range is refused by default (localhost-only)');
       assert.equal(await at('203.0.113.9'), 403, 'public client behind the proxy');
-      assert.equal(await at('::ffff:172.16.0.4'), 200, 'v4-mapped private');
+      assert.equal(await at('::ffff:127.0.0.1'), 200, 'v4-mapped loopback');
+      assert.equal(await at('::ffff:172.16.0.4'), 403, 'v4-mapped private is refused by default');
       assert.equal(await at('2001:db8::1'), 403, 'public v6');
+      assert.equal(await at('::1'), 200, 'v6 loopback');
     } finally { await new Promise<void>((resolve) => gs.close(() => resolve())); }
+    const widened = express();
+    widened.set('trust proxy', 1);
+    widened.use('/admin', adminNetworkGuard({ NODE_ENV: 'production', ADMIN_ALLOWED_NETWORKS: 'loopback,private' }), (_req, res) => { res.json({ ok: true }); });
+    const ws = widened.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => ws.once('listening', resolve));
+    try {
+      const at = (xff: string) => fetch(`http://127.0.0.1:${(ws.address() as AddressInfo).port}/admin/x`, { headers: { 'X-Forwarded-For': xff } }).then((r) => r.status);
+      assert.equal(await at('10.1.2.3'), 200, 'explicit opt-back-in to private ranges still works');
+      assert.equal(await at('203.0.113.9'), 403, 'still refuses public clients');
+    } finally { await new Promise<void>((resolve) => ws.close(() => resolve())); }
     const allow = express();
     allow.use(adminNetworkGuard({ NODE_ENV: 'production', ADMIN_ALLOWED_NETWORKS: '198.51.100.0/24' }), (_req, res) => { res.json({ ok: true }); });
     const as = allow.listen(0, '127.0.0.1');
@@ -316,7 +330,7 @@ test('operator hardening: security events, offline administration, key managemen
 
   await t.test('legacy pending student request: flagged for resubmission, approvals stay valid, nothing invented', async () => {
     const legacy = randomUUID(), approved = randomUUID(), fresh = randomUUID();
-    for (const id of [legacy, approved, fresh]) await pool.query("INSERT INTO tenants(id,name,email,api_key,webhook_secret) VALUES ($1,'Uji',$2,$3,$4)", [id, `${id}@example.test`, `k-${id}`, `w-${id}`]);
+    for (const id of [legacy, approved, fresh]) await pool.query("INSERT INTO tenants(id,name,email,webhook_secret) VALUES ($1,'Uji',$2,$3)", [id, `${id}@example.test`, `w-${id}`]);
     await pool.query('UPDATE tenants SET student_request_at=now(), student_note=$2 WHERE id=$1', [legacy, 'catatan lama']);
     await pool.query('UPDATE tenants SET student_request_at=now(), student_verified_at=now() WHERE id=$1', [approved]);
     await requestStudentVerification(fresh, 'mahasiswa@kampus.ac.id', 'baru');

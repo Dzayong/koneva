@@ -23,3 +23,6 @@ docker/grafana/data/
 
 # Real k8s secrets stay local-only; k8s/secrets.yaml.example is the tracked template.
 k8s/secrets.yaml
+
+# Default output of scripts/inject-secrets.sh: per-secret files, never tracked.
+secrets-runtime/

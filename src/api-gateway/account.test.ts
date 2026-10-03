@@ -3,7 +3,7 @@ import { afterEach, test } from 'node:test';
 import type { NextFunction, Request, Response } from 'express';
 import pool from '../shared/database/connection';
 import { authorize } from './middleware/auth';
-import { hashPassword, login, newSessionToken, resolveSession, sha256, verifyPassword } from './services/account.service';
+import { hashPassword, login, newSessionToken, resolveSession, sha256, verifyPassword, type SessionResult } from './services/account.service';
 import { ServiceError } from './services/service-error';
 
 type Query = (text: string, values?: unknown[]) => Promise<{ rows: unknown[] }>;
@@ -47,7 +47,7 @@ test('login succeeds, stores only a token hash, and lists workspaces', async () 
     if (text.includes('FROM memberships')) return { rows: [{ id: 't1', name: 'Acme', role: 'owner' }] };
     return { rows: [] };
   };
-  const result = await login('a@b.co', 'right-password-123', { ip: '1.2.3.4' });
+  const result = await login('a@b.co', 'right-password-123', { ip: '1.2.3.4' }) as SessionResult;
   assert.match(result.token, /^wgs_/);
   assert.equal(inserted[0]?.[1], sha256(result.token));
   assert.notEqual(inserted[0]?.[1], result.token);
@@ -62,7 +62,7 @@ test('a suspended user cannot log in even with the right password', async () => 
 
 test('resolveSession picks the requested workspace and rejects one the user is not in', async () => {
   const membership = (id: string, role: string) => ({
-    role, id, name: id, email: null, api_key: 'k', webhook_url: null, webhook_secret: null,
+    role, id, name: id, email: null, webhook_url: null, webhook_secret: null,
     max_devices: 1, quota_messages: 10, used_messages: 0, status: 'active',
   });
   database.query = async (text) => {

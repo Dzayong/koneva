@@ -41,7 +41,7 @@ export interface SessionResult {
 
 type Queryable = Pick<PoolClient, 'query'> | typeof pool;
 
-async function createSession(db: Queryable, userId: string, meta: ClientMeta): Promise<{ token: string; expiresAt: Date }> {
+async function issueSessionToken(db: Queryable, userId: string, meta: ClientMeta): Promise<{ token: string; expiresAt: Date }> {
   const { token, hash } = newSessionToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
   await db.query(
@@ -106,15 +106,16 @@ export async function activatePendingSignup(client: PoolClient, userId: string, 
   )).rows[0];
   if (!user) throw new ServiceError(409, 'SIGNUP_STATE_INVALID', 'Pendaftaran tidak dapat diaktifkan.');
 
-  // The legacy tenant api_key column remains required, but is never shown to the user.
+  // No static tenant API key is issued any more (decision 2026-10-02: removed entirely). Integrations use
+  // scoped wgk_ keys created from the dashboard by a signed-in person.
   const tenant = (await client.query<{ id: string }>(
-    `INSERT INTO tenants (name, email, api_key, webhook_secret) VALUES ($1, $2, $3, $4) RETURNING id`,
-    [user.workspace_name, user.email, `wg_${randomBytes(24).toString('hex')}`, `whsec_${randomBytes(24).toString('hex')}`],
+    `INSERT INTO tenants (name, email, webhook_secret) VALUES ($1, $2, $3) RETURNING id`,
+    [user.workspace_name, user.email, `whsec_${randomBytes(24).toString('hex')}`],
   )).rows[0]!;
   await createTrial(client, tenant.id);
   await client.query(`INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`, [userId, tenant.id]);
   await client.query("UPDATE users SET status='active', pending_signup_workspace_name=NULL, last_login_at=now() WHERE id=$1", [userId]);
-  const session = await createSession(client, userId, meta);
+  const session = await issueSessionToken(client, userId, meta);
   return {
     token: session.token, expires_at: session.expiresAt,
     user: { id: userId, email: user.email, name: user.name },
@@ -132,7 +133,7 @@ export async function login(email: string, password: string, meta: ClientMeta): 
   if (!user || !ok || user.status !== 'active') {
     throw new ServiceError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect');
   }
-  const session = await createSession(pool, user.id, meta);
+  const session = await issueSessionToken(pool, user.id, meta);
   await pool.query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
   return {
     token: session.token, expires_at: session.expiresAt,
@@ -168,7 +169,7 @@ export async function resolveSession(token: string, workspaceId?: string): Promi
   if (!session || session.user_status !== 'active') return undefined;
 
   const memberships = (await pool.query<TenantContext & { role: Role }>(
-    `SELECT m.role, t.id, t.name, t.email, t.api_key, t.webhook_url, t.webhook_secret,
+    `SELECT m.role, t.id, t.name, t.email, t.webhook_url, t.webhook_secret,
             t.max_devices, t.quota_messages, t.used_messages, t.status
      FROM memberships m JOIN tenants t ON t.id = m.tenant_id
      WHERE m.user_id = $1 AND t.status = 'active' ORDER BY m.created_at`,

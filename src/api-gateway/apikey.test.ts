@@ -58,7 +58,7 @@ test('a workspace cannot exceed its active key limit', async () => {
 });
 
 test('resolveApiKey returns the tenant and scopes for a live key, and nothing otherwise', async () => {
-  const row = { key_id: 'k1', scopes: ['messages:send'], last_used_at: new Date(), id: 't1', name: 'Acme', email: null, api_key: 'x', webhook_url: null, webhook_secret: null, max_devices: 1, quota_messages: 5, used_messages: 0, status: 'active' };
+  const row = { key_id: 'k1', scopes: ['messages:send'], last_used_at: new Date(), id: 't1', name: 'Acme', email: null, webhook_url: null, webhook_secret: null, max_devices: 1, quota_messages: 5, used_messages: 0, status: 'active' };
   database.query = async (_t, values) => { assert.equal(values?.[0], sha256('wgk_live')); return { rows: [row] }; };
   const ok = await resolveApiKey('wgk_live');
   assert.equal(ok?.tenant.id, 't1');

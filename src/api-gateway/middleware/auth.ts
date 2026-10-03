@@ -1,15 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
 import config from '../../shared/config';
 import pool from '../../shared/database/connection';
-import { getRedisClient } from '../../shared/redis';
-import type { TenantContext } from '../../shared/types/api';
 import { safeEqual } from '../../shared/utils/secure-compare';
 import { can, isLegacyRole, permissionFor } from '../../shared/permissions';
 import { resolveSession } from '../services/account.service';
 import { resolveApiKey } from '../services/apikey.service';
-
-// Created on first use so importing this module (e.g. in tests) does not open a connection.
-const redisClient = () => getRedisClient(config.redis.url);
 
 function unauthorized(response: Response, message: string): void {
   response.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message } });
@@ -63,58 +58,24 @@ export async function tenantAuth(
     return;
   }
 
+  // The legacy static tenant key (and its Redis-cached lookup) was removed entirely 2026-10-02 (owner
+  // decision: no fallback, no grace period). Only a scoped wgk_ key or a user session authenticate here.
   const apiKey = bearer ?? request.header('apikey');
-  if (!apiKey) {
-    unauthorized(response, 'Missing apikey or Authorization header');
+  if (!apiKey?.startsWith('wgk_')) {
+    unauthorized(response, 'Missing or invalid apikey');
     return;
   }
-
-  if (apiKey.startsWith('wgk_')) {
-    const resolved = await resolveApiKey(apiKey);
-    if (!resolved) {
-      unauthorized(response, 'Invalid, expired or revoked API key');
-      return;
-    }
-    if (await hasExpiredUnresolvedLegacyRole(resolved.tenant.id)) {
-      legacyRoleTransitionExpired(response);
-      return;
-    }
-    request.tenant = resolved.tenant;
-    request.actor = { kind: 'api_key', role: 'viewer', scopes: resolved.scopes, keyId: resolved.keyId };
-    next();
+  const resolved = await resolveApiKey(apiKey);
+  if (!resolved) {
+    unauthorized(response, 'Invalid, expired or revoked API key');
     return;
   }
-
-  const cacheKey = `tenant:apikey:${apiKey}`;
-  const cached = await redisClient().get(cacheKey);
-  let tenant: TenantContext | undefined = cached
-    ? (JSON.parse(cached) as TenantContext)
-    : undefined;
-
-  if (!tenant) {
-    const result = await pool.query<TenantContext>(
-      `SELECT id, name, email, api_key, webhook_url, webhook_secret,
-              max_devices, quota_messages, used_messages, status
-       FROM tenants WHERE api_key = $1 LIMIT 1`,
-      [apiKey],
-    );
-    tenant = result.rows[0];
-    if (tenant) await redisClient().set(cacheKey, JSON.stringify(tenant), 'EX', 300);
-  }
-
-  if (!tenant || tenant.status !== 'active') {
-    unauthorized(response, 'Invalid or inactive API key');
-    return;
-  }
-
-  if (await hasExpiredUnresolvedLegacyRole(tenant.id)) {
+  if (await hasExpiredUnresolvedLegacyRole(resolved.tenant.id)) {
     legacyRoleTransitionExpired(response);
     return;
   }
-
-  request.tenant = tenant;
-  // Legacy tenant keys keep the access they always had until scoped keys replace them.
-  request.actor = { kind: 'api_key', role: 'admin' };
+  request.tenant = resolved.tenant;
+  request.actor = { kind: 'api_key', role: 'viewer', scopes: resolved.scopes, keyId: resolved.keyId };
   next();
 }
 

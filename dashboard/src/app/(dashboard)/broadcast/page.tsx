@@ -1,6 +1,6 @@
 "use client";
 
-import { apiFailure } from "@/lib/errors";
+import { apiFailure, sendRejectionGuidance } from "@/lib/errors";
 
 import { useMemo, useState } from "react";
 import { CheckCircle2, Loader2, Radio, XCircle } from "lucide-react";
@@ -129,7 +129,9 @@ export default function BroadcastPage() {
           prev.map((r, idx) => (idx === i ? { ...r, status: "queued" } : r)),
         );
       } catch (err) {
-        const message = apiFailure(err, "Gagal").message;
+        const failure = apiFailure(err, "Gagal");
+        const guidance = sendRejectionGuidance(failure.code);
+        const message = guidance ? `${guidance.title}: ${guidance.description}` : failure.message;
         setRecipients((prev) =>
           prev.map((r, idx) => (idx === i ? { ...r, status: "failed", error: message } : r)),
         );

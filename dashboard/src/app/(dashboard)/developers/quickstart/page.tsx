@@ -17,7 +17,7 @@ import { useDevices } from "@/hooks/use-devices";
 import { usePermissions } from "@/hooks/use-me";
 import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import { apiFailure } from "@/lib/errors";
+import { apiFailure, sendRejectionGuidance } from "@/lib/errors";
 import { messageErrorText } from "@/lib/message-errors";
 import type { CreatedApiKey, MessageStatus } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
@@ -105,7 +105,11 @@ export default function QuickstartPage() {
 
   const send = useMutation({
     mutationFn: () => api.sendMessage({ device_key: selected, to: digits, message: text }),
-    onError: (error) => toast.error("Gagal mengirim", { description: apiFailure(error).message }),
+    onError: (error) => {
+      const failure = apiFailure(error);
+      const guidance = sendRejectionGuidance(failure.code);
+      toast.error(guidance?.title ?? "Gagal mengirim", { description: guidance?.description ?? failure.message });
+    },
   });
 
   const code = snippet(lang, {

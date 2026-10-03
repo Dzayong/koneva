@@ -19,7 +19,7 @@ afterEach(() => { database.query = originalQuery; });
 
 const tenant: TenantContext = {
   id: '8fca6485-b3df-47c2-b87e-0c235c0a4bb9', name: 'Test', email: null,
-  api_key: 'key', webhook_url: null, webhook_secret: null, max_devices: 3,
+  webhook_url: null, webhook_secret: null, max_devices: 3,
   quota_messages: 1000, used_messages: 0, status: 'active',
 };
 function response(): Response & { payload?: unknown } {

@@ -48,7 +48,7 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
   const key = () => `T${randomUUID().replace(/-/g, '').slice(0, 12)}`; // real keys look like WAPI-XXXXXXXX (messages.from_number is varchar(20))
   async function workspace(plan: { status?: string; end?: string } = {}, tenantStatus = 'active') {
     const id = randomUUID();
-    await pool.query("INSERT INTO tenants(id,name,email,api_key,webhook_secret,status) VALUES ($1,'Uji',$2,$3,$4,$5)", [id, `${id}@example.test`, `k-${id}`, `w-${id}`, tenantStatus]);
+    await pool.query("INSERT INTO tenants(id,name,email,webhook_secret,status) VALUES ($1,'Uji',$2,$3,$4)", [id, `${id}@example.test`, `w-${id}`, tenantStatus]);
     await pool.query(`INSERT INTO subscriptions(tenant_id,plan_id,status,cycle,period_start,period_end) VALUES ($1,'umkm',$2,'monthly',now()-interval '10 days', now() + $3::interval)
       ON CONFLICT (tenant_id) DO UPDATE SET status=$2, period_end=now()+$3::interval`, [id, plan.status ?? 'active', plan.end ?? '20 days']);
     await pool.query(`INSERT INTO recipient_preferences(tenant_id,phone_number,status,source,evidence_ref)

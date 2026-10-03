@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { legacyBillingWrites } from '../middleware/admin-access';
@@ -22,13 +21,14 @@ const createDeviceSchema = z.object({
   tenant_id: z.string().uuid(), phone_number: z.string().max(20).optional(), label: z.string().max(100).optional(),
 });
 
+// No static API key is issued any more (removed 2026-10-02). Create an owner next (see /admin/tenant/owner)
+// so a signed-in person can mint a scoped wgk_ key from the dashboard when the tenant needs API access.
 router.post('/tenant/create', validate({ body: createTenantSchema }), async (request, response) => {
   const input = request.validated!.body as z.infer<typeof createTenantSchema>;
-  const apiKey = `wg_${randomBytes(24).toString('hex')}`;
   const row = (await pool.query(
-    `INSERT INTO tenants (name, email, api_key, max_devices, quota_messages)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [input.name, input.email, apiKey, input.max_devices, input.quota_messages],
+    `INSERT INTO tenants (name, email, max_devices, quota_messages)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [input.name, input.email, input.max_devices, input.quota_messages],
   )).rows[0];
   response.status(201).json({ success: true, data: row });
 });
