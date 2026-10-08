@@ -35,7 +35,7 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
-  for (const file of ['030_operator_owner_audit_ip.sql', '031_application_database_role.sql', '032_operator_break_glass.sql']) {
+  for (const file of ['030_operator_owner_audit_ip.sql', '031_application_database_role.sql', '036_operator_login_success_event.sql', '037_owner_insights_any_operator.sql', '038_owner_unique_index.sql']) {
     const sql = await fs.readFile(path.join(dir, file), 'utf8');
     await pool.query(sql);
     await pool.query(sql);
@@ -51,10 +51,10 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
   const ownerPermissions = [...allPermissions, 'owner:insights'];
   const testPassword = 'synthetic-test-password-26';
   const passwordHash = await bcrypt.hash(testPassword, 12);
-  async function operator(permissions = allPermissions, emailOverride?: string) {
-    const id = randomUUID(), token = randomBytes(32).toString('hex'), email = emailOverride ?? `${id}@example.test`;
-    await pool.query('INSERT INTO operators(id,email,name,password_hash,permissions) VALUES ($1,$2,$3,$4,$5)',
-      [id,email,'Operator Uji',passwordHash,permissions]);
+  async function operator(permissions = allPermissions, isOwner = false) {
+    const id = randomUUID(), token = randomBytes(32).toString('hex'), email = `${id}@example.test`;
+    await pool.query('INSERT INTO operators(id,email,name,password_hash,permissions,is_owner) VALUES ($1,$2,$3,$4,$5,$6)',
+      [id,email,'Operator Uji',passwordHash,permissions,isOwner]);
     await pool.query('INSERT INTO operator_sessions(token_hash,operator_id) VALUES ($1,$2)', [hash(token),id]);
     return { id,email,token,cookie: `${config.cookieName}=${token}`,csrf: csrfFor(token) };
   }
@@ -316,16 +316,22 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     assert.equal((await call('/insights', { session: denied })).status, 403, 'staff without the owner permission cannot load insights');
     assert.equal(Number((await pool.query("SELECT count(*)::int AS n FROM operator_audit WHERE action='owner.insights.view'")).rows[0]!.n), before, 'denied access does not create a successful-view audit row');
 
-    const owner = await operator(ownerPermissions, 'koneva.id26@gmail.com');
-    const ownerRow = await pool.query<{ permissions: string[] }>('SELECT permissions FROM operators WHERE id=$1', [owner.id]);
+    const owner = await operator(ownerPermissions, true);
+    const ownerRow = await pool.query<{ permissions: string[]; is_owner: boolean }>('SELECT permissions, is_owner FROM operators WHERE id=$1', [owner.id]);
     assert.deepEqual(new Set(ownerRow.rows[0]?.permissions), new Set(ownerPermissions), 'owner receives the full operational set plus insights');
+    assert.equal(ownerRow.rows[0]?.is_owner, true);
     await assert.rejects(
       pool.query(
         'INSERT INTO operators(email,name,password_hash,permissions) VALUES ($1,$2,$3,$4)',
         [`staff-${randomUUID()}@example.test`, 'Staf Uji', passwordHash, ownerPermissions],
       ),
       (error: unknown) => (error as { code?: string }).code === '23514',
-      'database policy prevents granting owner insights to staff identities',
+      'database policy prevents granting owner:insights to non-owner operators',
+    );
+    await assert.rejects(
+      pool.query('UPDATE operators SET permissions=$1 WHERE id=$2', [ownerPermissions, denied.id]),
+      (error: unknown) => (error as { code?: string }).code === '23514',
+      'staff cannot acquire owner:insights via permission update',
     );
     const response = await call('/insights', { session: owner });
     assert.equal(response.status, 200);

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { PROXY, PASSWORD, apiSignIn, call, createOperator, db, invoice, nextCode, resetLimits, signInBrowser, studentRequest, workspace, type Op } from "./support/stack";
+import { PROXY, PASSWORD, apiSignIn, call, createOperator, db, invoice, resetLimits, signInBrowser, studentRequest, workspace, type Op } from "./support/stack";
 
 const NOTE = "Catatan pribadi mahasiswa NIM 998877";
 
@@ -140,6 +140,5 @@ test.describe("dates, pagination and data exposure (STACK-local)", () => {
     const ghost = await call("/auth/login", { method: "POST", body: { email: "nobody@example.test", password: "whatever-password-1" } });
     expect([401, 429]).toContain(ghost.status);
     await resetLimits();
-    expect(await nextCode(op)).toMatch(/^\d{6}$/);
   });
 });

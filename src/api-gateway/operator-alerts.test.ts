@@ -46,7 +46,7 @@ test('OTP alerts in the Operator Panel API (disposable database only; email stay
     const text = await r.text();
     return { status: r.status, headers: r.headers, text, body: text ? JSON.parse(text) : undefined };
   };
-  const reset = async () => { await pool.query("DELETE FROM otp_rate_events WHERE dim = 'sender'"); await pool.query('DELETE FROM otp_threshold_events'); };
+  const reset = async () => { await pool.query("DELETE FROM otp_rate_events WHERE dim IN ('sender','ip')"); await pool.query('DELETE FROM otp_threshold_events'); };
   const seed = (kind: string, count: number, cap: number, ago: string) => pool.query("INSERT INTO otp_threshold_events(at, kind, window_count, cap) VALUES (now() - $1::interval, $2, $3, $4)", [ago, kind, count, cap]);
   const send = (limits: OtpLimits) => reserveOtpSend({ email: `d${randomUUID().slice(0, 8)}@gmail.com`, invitationId: randomUUID(), tenantId: randomUUID() }, limits);
   const viewer = await operator(['audit:read']);

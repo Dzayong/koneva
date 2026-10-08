@@ -101,6 +101,7 @@ test('OTP limits against PostgreSQL: rolling windows, aliases, concurrency, send
   });
 
   await t.test('per IP: 20 OTP requests per 15 minutes, another address unaffected, rolling recovery', async () => {
+    await pool.query("DELETE FROM otp_rate_events WHERE dim = 'ip'");
     const ip = `203.0.113.${Math.floor(Math.random() * 200) + 1}`;
     for (let i = 0; i < 20; i++) await reserveIpRequest(ip);
     const refused = await reserveIpRequest(ip).then(() => undefined, (e: ServiceError) => e);

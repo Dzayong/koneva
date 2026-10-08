@@ -112,11 +112,12 @@ test('operator hardening: security events, offline administration, key managemen
     assert.deepEqual((await events(row.id)).map((e) => [e.event, e.source, e.actor_label]), [['operator_provisioned', 'offline', 'pemilik-proyek-uji']]);
     const loginResult = await call('/auth/login', { method: 'POST', body: { email, password } });
     assert.equal(loginResult.body.data.status, 'authenticated');
-    // owner:insights can now be assigned via provisioning.
-    const ownerEmail = `owner-insights-${randomUUID()}@example.test`;
-    const ownerInput = JSON.stringify({ email: ownerEmail, name: 'Staf Uji', password, permissions: ['payments:read','owner:insights'] });
-    const ownerResult = await runScript('scripts/create-local-operator.ts', ownerInput, { ...local, OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji' });
-    assert.equal(ownerResult.code, 0, ownerResult.err);
+    // Staff path rejects owner:insights — the zod schema does not allow it.
+    const staffOwnerEmail = `staff-insights-${randomUUID()}@example.test`;
+    const staffOwnerInput = JSON.stringify({ email: staffOwnerEmail, name: 'Staf Uji', password, permissions: ['payments:read','owner:insights'] });
+    const staffOwnerResult = await runScript('scripts/create-local-operator.ts', staffOwnerInput, { ...local, OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji' });
+    assert.notEqual(staffOwnerResult.code, 0, 'staff provisioning must reject owner:insights');
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM operators WHERE email=$1', [staffOwnerEmail])).rows[0].n, 0, 'no account was created');
   });
 
   await t.test('break-glass provisioning creates at most one audit:read-only account and never prints its password', async () => {
@@ -138,6 +139,62 @@ test('operator hardening: security events, offline administration, key managemen
     assert.notEqual(second.code, 0, 'a second emergency account is refused');
     assert.equal((await pool.query('SELECT id FROM operators WHERE email=$1', [secondEmail])).rowCount, 0);
     await pool.query('UPDATE operators SET is_break_glass=false WHERE id=$1', [row.id]);
+  });
+
+  await t.test('Owner provisioning: provision-owner-operator creates is_owner=true with full permissions; at most one Owner allowed', async () => {
+    const ownerEmail = `owner-${randomUUID()}@example.test`;
+    const ownerInput = JSON.stringify({ email: ownerEmail, name: 'Pemilik Uji', password });
+    const env = { OPERATOR_PROVISION_LOCAL: 'true', OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji', DATABASE_URL: process.env['DATABASE_URL'] };
+    const created = await runScript('scripts/provision-owner-operator.ts', ownerInput, env);
+    assert.equal(created.code, 0, created.err);
+    assert.ok(!created.out.includes(password) && !created.err.includes(password));
+    assert.match(created.out, /is_owner=true/);
+    const row = (await pool.query<{ id: string; permissions: string[]; is_owner: boolean }>(
+      'SELECT id,permissions,is_owner FROM operators WHERE email=$1', [ownerEmail])).rows[0]!;
+    assert.equal(row.is_owner, true);
+    assert.ok(row.permissions.includes('owner:insights'));
+    assert.deepEqual((await events(row.id)).map((e) => [e.event,e.source,e.actor_label]), [['operator_provisioned','offline','pemilik-proyek-uji']]);
+
+    const secondEmail = `owner-${randomUUID()}@example.test`;
+    const second = await runScript('scripts/provision-owner-operator.ts', JSON.stringify({ email: secondEmail, name: 'Owner Kedua', password }), env);
+    assert.notEqual(second.code, 0, 'a second Owner account is refused');
+    assert.equal((await pool.query('SELECT id FROM operators WHERE email=$1', [secondEmail])).rowCount, 0);
+
+    // Owner can access insights; staff with the provisioned account gets 403.
+    await resetLimits();
+    const ownerLogin = await login(ownerEmail);
+    const insightsResult = await call('/insights', { cookie: ownerLogin.cookie, csrf: ownerLogin.csrf });
+    assert.ok([200, 404].includes(insightsResult.status), `Owner should reach insights (got ${insightsResult.status})`);
+    assert.notEqual(insightsResult.status, 403, 'Owner must not be forbidden');
+
+    const staffOp = await newOperator();
+    await resetLimits();
+    const staffLogin = await login(staffOp.email);
+    const staffInsights = await call('/insights', { cookie: staffLogin.cookie, csrf: staffLogin.csrf });
+    assert.equal(staffInsights.status, 403, 'staff without owner:insights gets 403 on insights');
+
+    await pool.query("UPDATE operators SET permissions = ARRAY['audit:read']::text[], is_owner = false WHERE id=$1", [row.id]);
+  });
+
+  await t.test('Owner provisioning race: two concurrent attempts, exactly one wins, no partial data', async () => {
+    const env = { OPERATOR_PROVISION_LOCAL: 'true', OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji', DATABASE_URL: process.env['DATABASE_URL'] };
+    const emailA = `race-owner-a-${randomUUID()}@example.test`;
+    const emailB = `race-owner-b-${randomUUID()}@example.test`;
+    const [a, b] = await Promise.all([
+      runScript('scripts/provision-owner-operator.ts', JSON.stringify({ email: emailA, name: 'Race A', password }), env),
+      runScript('scripts/provision-owner-operator.ts', JSON.stringify({ email: emailB, name: 'Race B', password }), env),
+    ]);
+    const codes = [a.code, b.code].sort();
+    assert.deepEqual(codes, [0, 1], `exactly one must win: a=${a.code} b=${b.code}`);
+    const owners = (await pool.query('SELECT id, email FROM operators WHERE is_owner')).rows;
+    assert.equal(owners.length, 1, 'unique partial index enforces a single Owner');
+    const winnerEmail = a.code === 0 ? emailA : emailB;
+    const loserEmail = a.code === 0 ? emailB : emailA;
+    assert.equal(owners[0].email, winnerEmail);
+    assert.equal((await pool.query('SELECT id FROM operators WHERE email=$1', [loserEmail])).rowCount, 0, 'loser left no partial account');
+    const loserEvents = (await pool.query("SELECT id FROM operator_security_events WHERE operator_id IN (SELECT id FROM operators WHERE email=$1)", [loserEmail])).rows;
+    assert.equal(loserEvents.length, 0, 'loser left no orphaned audit events');
+    await pool.query("UPDATE operators SET permissions = ARRAY['audit:read']::text[], is_owner = false WHERE id=$1", [owners[0].id]);
   });
 
   await t.test('offline MFA reset script exits with error message since MFA was removed', async () => {

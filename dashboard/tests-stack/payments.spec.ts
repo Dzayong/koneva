@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { PASSWORD, PROXY, apiSignIn, auditCount, call, createOperator, db, fault, faultsApplied, invoice, invoiceRow, nextCode, signInBrowser, type Op } from "./support/stack";
+import { PASSWORD, PROXY, apiSignIn, auditCount, call, createOperator, db, fault, faultsApplied, invoice, invoiceRow, signInBrowser, type Op } from "./support/stack";
 import { randomUUID } from "node:crypto";
 
 const payBody = (extra = {}) => ({ method: "transfer", expected: { amount_idr: 99000, version: 1 }, ...extra });
@@ -86,9 +86,7 @@ test.describe("manual payment confirmation (STACK-local)", () => {
     expect(await invoiceRow(inv.id)).toMatchObject({ status: "unpaid" });
     expect(await auditCount(inv.id)).toBe(0);
     await dialog.getByLabel("Kata sandi").fill(PASSWORD);
-    await dialog.getByRole("button", { name: "Lanjut" }).click();
-    await dialog.getByLabel("Kode verifikasi").fill(await nextCode(op));
-    await dialog.getByRole("button", { name: "Verifikasi" }).click();
+    await dialog.getByRole("button", { name: "Masuk" }).click();
     await expect(paid(page)).toBeVisible();
     expect(await auditCount(inv.id)).toBe(1);
   });

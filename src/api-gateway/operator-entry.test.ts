@@ -129,37 +129,38 @@ test('real entrypoint: startup failures, middleware, cookies, proxy config, erro
     try { assert.equal((await client(noRedis, nextIp())('/operator/me')).status, 401); } finally { await noRedis.stop(); }
   });
 
-  await t.test('production-mode instance: /admin is key-only and network-restricted, legacy billing writes are closed, operator cookie/admin key never cross', async () => {
+  await t.test('production-mode instance: /admin is localhost-only by default, legacy billing writes are closed, operator cookie/admin key never cross', async () => {
     const server = await start({ ...production, ...operatorOn, OPERATOR_ALLOWED_ORIGIN: 'https://panel.example.test', OPERATOR_ALLOW_PRODUCTION: 'true', TRUST_PROXY_HOPS: '1' });
     try {
-      const inside = client(server, '10.20.30.40', 'https://panel.example.test'), outside = client(server, '203.0.113.50', 'https://panel.example.test');
-      assert.equal((await outside('/admin/plans', { headers: { 'x-admin-key': strong } })).body.error.code, 'ADMIN_NETWORK_FORBIDDEN', 'a public client is stopped before the key is even checked');
-      assert.equal((await inside('/admin/plans', { headers: { 'x-admin-key': strong } })).status, 200);
-      assert.equal((await inside('/admin/plans')).status, 401);
-      assert.equal((await inside('/admin/plans', { headers: { 'x-admin-key': 'wrong' } })).status, 401);
+      const loopback = client(server, '127.0.0.1', 'https://panel.example.test'), privateNet = client(server, '10.20.30.40', 'https://panel.example.test'), publicNet = client(server, '203.0.113.50', 'https://panel.example.test');
+      assert.equal((await publicNet('/admin/plans', { headers: { 'x-admin-key': strong } })).body.error.code, 'ADMIN_NETWORK_FORBIDDEN', 'a public client is stopped before the key is even checked');
+      assert.equal((await privateNet('/admin/plans', { headers: { 'x-admin-key': strong } })).body.error.code, 'ADMIN_NETWORK_FORBIDDEN', 'a private non-loopback client is also rejected under the localhost-only default');
+      assert.equal((await loopback('/admin/plans', { headers: { 'x-admin-key': strong } })).status, 200);
+      assert.equal((await loopback('/admin/plans')).status, 401);
+      assert.equal((await loopback('/admin/plans', { headers: { 'x-admin-key': 'wrong' } })).status, 401);
       // Operator credentials are not admin credentials, and the admin key is not an operator credential.
       const op = await operator();
-      const loginResult = await inside('/operator/auth/login', { method: 'POST', body: { email: op.email, password } });
+      const loginResult = await loopback('/operator/auth/login', { method: 'POST', body: { email: op.email, password } });
       assert.equal(loginResult.status, 200, loginResult.text);
       const cookie = loginResult.headers.get('set-cookie')!.split(';')[0]!;
-      assert.equal((await inside('/admin/plans', { cookie })).status, 401);
-      assert.equal((await inside('/admin/plans', { headers: { Authorization: `Bearer ${cookie.split('=')[1]}` } })).status, 401);
-      assert.equal((await inside('/operator/me', { headers: { 'x-admin-key': strong } })).status, 401);
-      assert.equal((await inside('/operator/me', { cookie })).status, 200);
+      assert.equal((await loopback('/admin/plans', { cookie })).status, 401);
+      assert.equal((await loopback('/admin/plans', { headers: { Authorization: `Bearer ${cookie.split('=')[1]}` } })).status, 401);
+      assert.equal((await loopback('/operator/me', { headers: { 'x-admin-key': strong } })).status, 401);
+      assert.equal((await loopback('/operator/me', { cookie })).status, 200);
       // Legacy payment/student writes: closed while the panel is enabled; reads and unreplaced maintenance stay.
       const id = randomUUID();
-      const pay = await inside(`/admin/invoices/${id}/pay`, { method: 'POST', body: { method: 'transfer' }, headers: { 'x-admin-key': strong } });
+      const pay = await loopback(`/admin/invoices/${id}/pay`, { method: 'POST', body: { method: 'transfer' }, headers: { 'x-admin-key': strong } });
       assert.equal(pay.status, 403); assert.equal(pay.body.error.code, 'LEGACY_ENDPOINT_DISABLED');
-      assert.equal((await inside(`/admin/tenant/${id}/student-verify`, { method: 'POST', body: { approved: true }, headers: { 'x-admin-key': strong } })).body.error.code, 'LEGACY_ENDPOINT_DISABLED');
-      assert.notEqual((await inside(`/admin/invoices/${id}/void`, { method: 'POST', headers: { 'x-admin-key': strong } })).body?.error?.code, 'LEGACY_ENDPOINT_DISABLED', 'void has no replacement yet and stays');
-      assert.equal((await inside('/admin/invoices', { headers: { 'x-admin-key': strong } })).status, 200);
+      assert.equal((await loopback(`/admin/tenant/${id}/student-verify`, { method: 'POST', body: { approved: true }, headers: { 'x-admin-key': strong } })).body.error.code, 'LEGACY_ENDPOINT_DISABLED');
+      assert.notEqual((await loopback(`/admin/invoices/${id}/void`, { method: 'POST', headers: { 'x-admin-key': strong } })).body?.error?.code, 'LEGACY_ENDPOINT_DISABLED', 'void has no replacement yet and stays');
+      assert.equal((await loopback('/admin/invoices', { headers: { 'x-admin-key': strong } })).status, 200);
     } finally { await server.stop(); }
     // The panel off (today's production state): legacy writes keep working exactly as before.
     const off = await start({ ...production, TRUST_PROXY_HOPS: '1', OPERATOR_ENABLED: 'false' });
     try {
-      const pay = await client(off, '10.20.30.40')(`/admin/invoices/${randomUUID()}/pay`, { method: 'POST', body: { method: 'transfer' }, headers: { 'x-admin-key': strong } });
+      const pay = await client(off, '127.0.0.1')(`/admin/invoices/${randomUUID()}/pay`, { method: 'POST', body: { method: 'transfer' }, headers: { 'x-admin-key': strong } });
       assert.equal(pay.status, 404, 'reaches the business logic (invoice does not exist), not the guard');
-      assert.equal((await client(off, '10.20.30.40')('/operator/me')).body.error.code, 'OPERATOR_DISABLED');
+      assert.equal((await client(off, '127.0.0.1')('/operator/me')).body.error.code, 'OPERATOR_DISABLED');
     } finally { await off.stop(); }
   });
 
