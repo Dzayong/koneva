@@ -172,6 +172,129 @@ export function parseAudit(v: unknown): AuditEntry {
   };
 }
 
+// ---- Owner Phase A types ----
+
+export interface OwnerDeviceSummary {
+  id: string; label: string; workspace: WorkspaceRef; phone_masked: string | null;
+  status: string; status_label: string; status_since: string | null;
+  health_score: number | null; health_badge: string; created_at: string | null;
+}
+export interface OwnerDeviceEvent {
+  id: string; status: string; status_label: string;
+  previous_status: string | null; previous_status_label: string | null;
+  reason_label: string; at: string;
+}
+export interface OwnerDeviceDetail extends OwnerDeviceSummary {
+  reconnect_24h: number; stream_error_24h: number;
+  fail_ratio: { failed: number; attempted: number; percent: number | null };
+  container_status: string; events: OwnerDeviceEvent[];
+  thresholds: { reconnect_24h: number; stream_error_24h: number; fail_ratio_percent: number; fail_ratio_min_messages: number; offline_hours: number };
+}
+
+export interface OwnerSystemHealth {
+  measured_at: string;
+  api_status: string; db_status: string;
+  queue: { queued: number; sending: number; oldest_queued_at: string | null };
+  error_rate_24h: { attempted: number; failed: number; percent: number };
+  error_rate_1h: { attempted: number; failed: number; percent: number };
+  email_transport: string;
+  otp: { today: number; daily_cap: number; remaining: number };
+  otp_alerts: Array<{ id: string; at: string; kind: string; window_count: number; cap: number }>;
+  thresholds: { reconnect_24h: number; stream_error_24h: number; fail_ratio_percent: number; fail_ratio_min_messages: number; offline_hours: number };
+  threshold_devices: { reconnect_exceeded: number; error_exceeded: number; offline_exceeded: number };
+  container_status: string; downtime_history: string;
+}
+
+export interface OwnerWorkspaceSummary {
+  id: string; name: string; status: string; created_at: string | null;
+  owner: { name: string; email: string } | null;
+  subscription: { plan: string; status: string } | null;
+  device_count: number; member_count: number; messages_30d: number; last_activity: string | null;
+}
+export interface OwnerWorkspaceMember { name: string; email: string; role: string; joined_at: string | null }
+export interface OwnerWorkspacePayment { id: string; number: string; amount_idr: number; status: string; plan_name: string | null; cycle: string | null; created_at: string | null; paid_at: string | null }
+export interface OwnerWorkspaceDetailData {
+  id: string; name: string; status: string; created_at: string | null;
+  owner: { name: string; email: string } | null;
+  subscription: Record<string, unknown> | null; student: { status: string } | null;
+  device_count: number; member_count: number; quota_messages: number; max_devices: number;
+  used_messages: number; usage_period_start: string | null;
+  messages_30d: number; last_activity: string | null;
+  devices: Array<{ id: string; label: string; status: string; status_label: string; health_score: number | null; health_badge: string }>;
+  members: OwnerWorkspaceMember[];
+  recent_payments: OwnerWorkspacePayment[];
+}
+
+export function parseOwnerDeviceSummary(v: unknown): OwnerDeviceSummary {
+  const d = obj(v);
+  return {
+    id: str(d["id"]), label: str(d["label"]), workspace: wsRef(d["workspace"]), phone_masked: strOrNull(d["phone_masked"]),
+    status: str(d["status"]), status_label: str(d["status_label"]), status_since: strOrNull(d["status_since"]),
+    health_score: numOrNull(d["health_score"]), health_badge: str(d["health_badge"]), created_at: strOrNull(d["created_at"]),
+  };
+}
+export function parseOwnerDeviceDetail(v: unknown): OwnerDeviceDetail {
+  const d = obj(v); const fr = obj(d["fail_ratio"]); const th = obj(d["thresholds"]);
+  return {
+    ...parseOwnerDeviceSummary(v),
+    reconnect_24h: num(d["reconnect_24h"]), stream_error_24h: num(d["stream_error_24h"]),
+    fail_ratio: { failed: num(fr["failed"]), attempted: num(fr["attempted"]), percent: numOrNull(fr["percent"]) },
+    container_status: str(d["container_status"]),
+    events: arr(d["events"]).map((e) => {
+      const x = obj(e);
+      return { id: str(x["id"]), status: str(x["status"]), status_label: str(x["status_label"]),
+        previous_status: strOrNull(x["previous_status"]), previous_status_label: strOrNull(x["previous_status_label"]),
+        reason_label: str(x["reason_label"]), at: str(x["at"]) };
+    }),
+    thresholds: { reconnect_24h: num(th["reconnect_24h"]), stream_error_24h: num(th["stream_error_24h"]),
+      fail_ratio_percent: num(th["fail_ratio_percent"]), fail_ratio_min_messages: num(th["fail_ratio_min_messages"]), offline_hours: num(th["offline_hours"]) },
+  };
+}
+export function parseOwnerSystemHealth(v: unknown): OwnerSystemHealth {
+  const d = obj(v); const q = obj(d["queue"]); const e24 = obj(d["error_rate_24h"]); const e1 = obj(d["error_rate_1h"]);
+  const o = obj(d["otp"]); const th = obj(d["thresholds"]); const td = obj(d["threshold_devices"]);
+  return {
+    measured_at: str(d["measured_at"]),
+    api_status: str(d["api_status"]) || "unknown", db_status: str(d["db_status"]) || "unknown",
+    queue: { queued: num(q["queued"]), sending: num(q["sending"]), oldest_queued_at: strOrNull(q["oldest_queued_at"]) },
+    error_rate_24h: { attempted: num(e24["attempted"]), failed: num(e24["failed"]), percent: num(e24["percent"]) },
+    error_rate_1h: { attempted: num(e1["attempted"]), failed: num(e1["failed"]), percent: num(e1["percent"]) },
+    email_transport: str(d["email_transport"]),
+    otp: { today: num(o["today"]), daily_cap: num(o["daily_cap"]), remaining: num(o["remaining"]) },
+    otp_alerts: arr(d["otp_alerts"]).map((a) => { const x = obj(a); return { id: str(x["id"]), at: str(x["at"]), kind: str(x["kind"]), window_count: num(x["window_count"]), cap: num(x["cap"]) }; }),
+    thresholds: { reconnect_24h: num(th["reconnect_24h"]), stream_error_24h: num(th["stream_error_24h"]),
+      fail_ratio_percent: num(th["fail_ratio_percent"]), fail_ratio_min_messages: num(th["fail_ratio_min_messages"]), offline_hours: num(th["offline_hours"]) },
+    threshold_devices: { reconnect_exceeded: num(td["reconnect_exceeded"]), error_exceeded: num(td["error_exceeded"]), offline_exceeded: num(td["offline_exceeded"]) },
+    container_status: str(d["container_status"]), downtime_history: str(d["downtime_history"]),
+  };
+}
+export function parseOwnerWorkspaceSummary(v: unknown): OwnerWorkspaceSummary {
+  const d = obj(v); const o = obj(d["owner"]); const s = obj(d["subscription"]);
+  return {
+    id: str(d["id"]), name: str(d["name"]), status: str(d["status"]), created_at: strOrNull(d["created_at"]),
+    owner: d["owner"] ? { name: str(o["name"]), email: str(o["email"]) } : null,
+    subscription: d["subscription"] ? { plan: str(s["plan"]), status: str(s["status"]) } : null,
+    device_count: num(d["device_count"]), member_count: num(d["member_count"]),
+    messages_30d: num(d["messages_30d"]), last_activity: strOrNull(d["last_activity"]),
+  };
+}
+export function parseOwnerWorkspaceDetailData(v: unknown): OwnerWorkspaceDetailData {
+  const d = obj(v); const o = obj(d["owner"]); const st = obj(d["student"]);
+  return {
+    id: str(d["id"]), name: str(d["name"]), status: str(d["status"]), created_at: strOrNull(d["created_at"]),
+    owner: d["owner"] ? { name: str(o["name"]), email: str(o["email"]) } : null,
+    subscription: d["subscription"] && typeof d["subscription"] === "object" ? d["subscription"] as Record<string, unknown> : null,
+    student: d["student"] ? { status: str(st["status"]) } : null,
+    device_count: num(d["device_count"]), member_count: num(d["member_count"]),
+    quota_messages: num(d["quota_messages"]), max_devices: num(d["max_devices"]),
+    used_messages: num(d["used_messages"]), usage_period_start: strOrNull(d["usage_period_start"]),
+    messages_30d: num(d["messages_30d"]), last_activity: strOrNull(d["last_activity"]),
+    devices: arr(d["devices"]).map((dv) => { const x = obj(dv); return { id: str(x["id"]), label: str(x["label"]), status: str(x["status"]), status_label: str(x["status_label"]), health_score: numOrNull(x["health_score"]), health_badge: str(x["health_badge"]) }; }),
+    members: arr(d["members"]).map((m) => { const x = obj(m); return { name: str(x["name"]), email: str(x["email"]), role: str(x["role"]), joined_at: strOrNull(x["joined_at"]) }; }),
+    recent_payments: arr(d["recent_payments"]).map((p) => { const x = obj(p); return { id: str(x["id"]), number: str(x["number"]), amount_idr: num(x["amount_idr"]), status: str(x["status"]), plan_name: strOrNull(x["plan_name"]), cycle: strOrNull(x["cycle"]), created_at: strOrNull(x["created_at"]), paid_at: strOrNull(x["paid_at"]) }; }),
+  };
+}
+
 // ---- OTP sender-budget alerts (counts and times only; the parser drops anything else) ---------------------------------------------
 export interface OtpAlertEvent {
   id: string; at: string; kind: "sender_70_percent" | "sender_cap_reached"; scope: "sender_daily"; window_hours: number;
@@ -185,6 +308,7 @@ export interface OtpAlerts {
 export interface OwnerInsights {
   measured_at: string;
   kpis: { registered_accounts: number; active_workspaces: number; suspended_workspaces: number; messages_sent_24h: number; messages_sent_30d: number; otp_sender_today: number; otp_sender_daily_cap: number; otp_sender_remaining_internal: number };
+  device_counts: { total: number; online: number; offline: number; attention: number };
   health: { api: string; database: string; queue: { queued: number; sending: number }; message_delivery_24h: { attempted: number; failed: number; error_rate_percent: number }; devices: Array<{ id: string; label: string; status: string; updated_at: string | null; workspace_name: string | null }> };
   activity: Array<{ id: string; kind: string; at: string; title: string; detail: string | null }>;
   alerts: { otp_thresholds: Array<{ id: string; at: string; kind: string; window_count: number; cap: number }>; stop_events_last_hour: number; consent_blocked_messages_last_hour: number; break_glass_validation: { configured: boolean; last_validated_at: string | null; due: boolean } };
@@ -207,10 +331,11 @@ export function parseOtpAlerts(v: unknown): OtpAlerts {
 }
 
 export function parseOwnerInsights(v: unknown): OwnerInsights {
-  const d = obj(v); const k = obj(d["kpis"]); const h = obj(d["health"]); const q = obj(h["queue"]); const m = obj(h["message_delivery_24h"]); const a = obj(d["alerts"]);
+  const d = obj(v); const k = obj(d["kpis"]); const dc = obj(d["device_counts"]); const h = obj(d["health"]); const q = obj(h["queue"]); const m = obj(h["message_delivery_24h"]); const a = obj(d["alerts"]);
   return {
     measured_at: str(d["measured_at"]),
     kpis: { registered_accounts: num(k["registered_accounts"]), active_workspaces: num(k["active_workspaces"]), suspended_workspaces: num(k["suspended_workspaces"]), messages_sent_24h: num(k["messages_sent_24h"]), messages_sent_30d: num(k["messages_sent_30d"]), otp_sender_today: num(k["otp_sender_today"]), otp_sender_daily_cap: num(k["otp_sender_daily_cap"]), otp_sender_remaining_internal: num(k["otp_sender_remaining_internal"]) },
+    device_counts: { total: num(dc["total"]), online: num(dc["online"]), offline: num(dc["offline"]), attention: num(dc["attention"]) },
     health: { api: str(h["api"]), database: str(h["database"]), queue: { queued: num(q["queued"]), sending: num(q["sending"]) }, message_delivery_24h: { attempted: num(m["attempted"]), failed: num(m["failed"]), error_rate_percent: num(m["error_rate_percent"]) }, devices: arr(h["devices"]).map((v) => { const x = obj(v); return { id: str(x["id"]), label: str(x["label"]), status: str(x["status"]), updated_at: strOrNull(x["updated_at"]), workspace_name: strOrNull(x["workspace_name"]) }; }) },
     activity: arr(d["activity"]).map((v) => { const x = obj(v); return { id: str(x["id"]), kind: str(x["kind"]), at: str(x["at"]), title: str(x["title"]), detail: strOrNull(x["detail"]) }; }),
     alerts: { otp_thresholds: arr(a["otp_thresholds"]).map((v) => { const x = obj(v); return { id: str(x["id"]), at: str(x["at"]), kind: str(x["kind"]), window_count: num(x["window_count"]), cap: num(x["cap"]) }; }), stop_events_last_hour: num(a["stop_events_last_hour"]), consent_blocked_messages_last_hour: num(a["consent_blocked_messages_last_hour"]), break_glass_validation: { configured: obj(a["break_glass_validation"])["configured"] === true, last_validated_at: strOrNull(obj(a["break_glass_validation"])["last_validated_at"]), due: obj(a["break_glass_validation"])["due"] === true } },

@@ -9,7 +9,7 @@ import { authenticate, checkCsrf, checkOrigin, clearSessionCookie, login, me, re
 import { operatorTransaction, OperatorError, type Actor } from './core';
 import { confirmPayment, decideStudent } from './mutations';
 import { otpAlerts } from './alerts';
-import { ownerInsights } from './insights';
+import { ownerInsights, ownerDeviceList, ownerDeviceDetail, ownerSystemHealth, ownerWorkspaceList, ownerWorkspaceDetail } from './insights';
 import { invoiceDetail, listAudit, listInvoices, listStudents, listWorkspaces, studentDetail, workspaceDetail } from './reads';
 
 const uuid = z.string().uuid().transform((v) => v.toLowerCase());
@@ -23,6 +23,17 @@ const paymentSchema = z.object({ method: z.enum(['transfer','ewallet','qris','tu
   expected: z.object({ amount_idr: z.number().int().nonnegative(), version: z.number().int().positive() }).strict() }).strict();
 const decisionSchema = z.object({ decision: z.enum(['approve','reject']), reason: z.string().max(500).optional(),
   expected: z.object({ request_id: z.string().uuid(), version: z.number().int().positive() }).strict() }).strict();
+const ownerPageSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+  offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
+  q: z.string().max(100).optional(),
+  status: z.string().max(40).optional(),
+  workspace: z.string().max(80).optional(),
+  sort: z.string().max(40).optional(),
+  since: z.string().max(30).optional(),
+  attention: z.enum(['1']).optional(),
+  plan: z.string().max(80).optional(),
+}).strict();
 const auditSchema = pageSchema.omit({ q: true }).extend({ action: z.string().max(80).optional(), operator_id: uuid.optional(),
   target_type: z.enum(['invoice','student_request']).optional(), target_id: uuid.optional(),
   from: z.iso.datetime({ offset: true }).optional(), to: z.iso.datetime({ offset: true }).optional() });
@@ -130,9 +141,33 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
   router.get('/alerts/otp', permit('audit:read'), async (_request, response) => {
     response.json({ success: true, data: await otpAlerts(db) });
   });
-  // The entire owner-only section is a single read endpoint; every successful view writes one immutable audit record.
+  // Owner-only section: every successful view writes one immutable audit record.
   router.get('/insights', permit('owner:insights'), async (request, response) => {
     response.json({ success: true, data: await ownerInsights(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown') });
+  });
+  router.get('/insights/devices', permit('owner:insights'), async (request, response) => {
+    const { limit, offset } = ownerPageSchema.parse(request.query);
+    const status = typeof request.query['status'] === 'string' ? request.query['status'] : undefined;
+    const workspace = typeof request.query['workspace'] === 'string' ? request.query['workspace'] : undefined;
+    const sort = typeof request.query['sort'] === 'string' ? request.query['sort'] : undefined;
+    const since = typeof request.query['since'] === 'string' ? request.query['since'] : undefined;
+    const attentionOnly = request.query['attention'] === '1';
+    response.json({ success: true, ...await ownerDeviceList(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown', limit, offset, status, workspace, sort, since, attentionOnly) });
+  });
+  router.get('/insights/devices/:id', permit('owner:insights'), async (request, response) => {
+    response.json({ success: true, data: await ownerDeviceDetail(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown', uuid.parse(request.params['id'])) });
+  });
+  router.get('/insights/health', permit('owner:insights'), async (request, response) => {
+    response.json({ success: true, data: await ownerSystemHealth(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown') });
+  });
+  router.get('/insights/workspaces', permit('owner:insights'), async (request, response) => {
+    const { limit, offset, q } = ownerPageSchema.parse(request.query);
+    const plan = typeof request.query['plan'] === 'string' ? request.query['plan'] : undefined;
+    const status = typeof request.query['status'] === 'string' ? request.query['status'] : undefined;
+    response.json({ success: true, ...await ownerWorkspaceList(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown', limit, offset, q, plan, status) });
+  });
+  router.get('/insights/workspaces/:id', permit('owner:insights'), async (request, response) => {
+    response.json({ success: true, data: await ownerWorkspaceDetail(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown', uuid.parse(request.params['id'])) });
   });
   router.get('/audit', permit('audit:read'), async (request, response) => {
     const filter = auditSchema.parse(request.query);

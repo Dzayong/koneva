@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Activity, AlertTriangle, Building2, CheckCircle2, CirclePause, Mail, MessageSquare, Server, Smartphone, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/operator/field-list";
@@ -46,6 +47,12 @@ export default function OwnerInsightsPage() {
         </StatGrid>
       </section>
 
+      <Link href={d.device_counts.attention > 0 ? "/operator/insights/devices?attention=1" : "/operator/insights/devices"} className="block">
+        <section aria-label="Butuh perhatian" className={`rounded-2xl border p-5 md:p-6 transition-colors hover:bg-accent/5 ${d.device_counts.attention > 0 ? "border-destructive/30 bg-destructive/5" : "border-muted bg-muted/30"}`}>
+          <div className="flex items-start gap-3"><AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${d.device_counts.attention > 0 ? "text-destructive" : "text-muted-foreground"}`} aria-hidden /><div><h3 className={`font-semibold ${d.device_counts.attention > 0 ? "text-destructive" : ""}`}>Butuh Perhatian</h3><p className="mt-1 text-sm text-muted-foreground">{d.device_counts.attention > 0 ? `${number(d.device_counts.attention)} device butuh perhatian — klik untuk melihat daftar.` : "Tidak ada device yang butuh perhatian saat ini."}</p></div></div>
+        </section>
+      </Link>
+
       <section aria-labelledby="health-title" className="space-y-3">
         <div><h3 id="health-title" className="text-lg font-semibold">Kesehatan layanan</h3><p className="text-sm text-muted-foreground">Snapshot terbaru dari API dan database.</p></div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -53,6 +60,11 @@ export default function OwnerInsightsPage() {
           <Snapshot label="Database" value="Terhubung" detail="Query ringkasan berhasil" />
           <Snapshot label="Antrean pesan" value={number(d.health.queue.queued)} detail={`${number(d.health.queue.sending)} sedang dikirim`} />
           <Snapshot label="Error pengiriman · 24 jam" value={`${d.health.message_delivery_24h.error_rate_percent}%`} detail={`${number(d.health.message_delivery_24h.failed)} dari ${number(d.health.message_delivery_24h.attempted)} pesan`} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Snapshot label="Device total" value={number(d.device_counts.total)} />
+          <Snapshot label="Device online" value={number(d.device_counts.online)} />
+          <Snapshot label="Device offline" value={number(d.device_counts.offline)} />
         </div>
         <Card className="shadow-card">
           <div className="flex items-center gap-2"><Smartphone className="h-4 w-4 text-primary" aria-hidden /><h4 className="font-semibold">Device WhatsApp</h4></div>

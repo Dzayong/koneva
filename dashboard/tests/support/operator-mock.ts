@@ -63,10 +63,19 @@ export function freshState(over: Partial<MockState> = {}): MockState {
     },
     audit: [{ id: "a-1", at: now, operator: { id: "op-1", name: "Operator Uji" }, action: "invoice.confirm_payment", target: { type: "invoice", id: "inv-3", label: "INV-202609-0003" }, reason: null, changes: { status: { from: "unpaid", to: "paid" } }, request_id: "req-EXAMPLE" }],
     otpAlerts: { events: [], has_active: false, history_days: 30, current: { scope: "sender_daily", window_hours: 24, usage: 12, cap: 200, percent: 6, measured_at: "2026-09-26T03:00:00Z" } },
-    ownerInsights: { measured_at: now, kpis: { registered_accounts: 42, active_workspaces: 17, suspended_workspaces: 2, messages_sent_24h: 800, messages_sent_30d: 12000, otp_sender_today: 12, otp_sender_daily_cap: 200, otp_sender_remaining_internal: 188 }, health: { api: "responding", database: "connected", queue: { queued: 4, sending: 2 }, message_delivery_24h: { attempted: 100, failed: 3, error_rate_percent: 3 }, devices: [{ id: "device-1", label: "Toko utama", status: "online", updated_at: now, workspace_name: "Warung Contoh" }] }, activity: [{ id: "signup-1", kind: "signup", at: now, title: "Akun baru terdaftar", detail: null }, { id: "stop-1", kind: "opt_out", at: now, title: "Permintaan STOP diterima", detail: "Warung Contoh" }], alerts: { otp_thresholds: [], stop_events_last_hour: 1, consent_blocked_messages_last_hour: 0 }, data_limits: ["Sisa batas OTP merupakan hitungan internal, bukan kuota Google Gmail."] },
+    ownerInsights: { measured_at: now, kpis: { registered_accounts: 42, active_workspaces: 17, suspended_workspaces: 2, messages_sent_24h: 800, messages_sent_30d: 12000, otp_sender_today: 12, otp_sender_daily_cap: 200, otp_sender_remaining_internal: 188 }, device_counts: { total: 3, online: 1, offline: 1, attention: 1 }, health: { api: "responding", database: "connected", queue: { queued: 4, sending: 2 }, message_delivery_24h: { attempted: 100, failed: 3, error_rate_percent: 3 }, devices: [{ id: "device-1", label: "Toko utama", status: "online", updated_at: now, workspace_name: "Warung Contoh" }] }, activity: [{ id: "signup-1", kind: "signup", at: now, title: "Akun baru terdaftar", detail: null }, { id: "stop-1", kind: "opt_out", at: now, title: "Permintaan STOP diterima", detail: "Warung Contoh" }], alerts: { otp_thresholds: [], stop_events_last_hour: 1, consent_blocked_messages_last_hour: 0, break_glass_validation: { configured: false, last_validated_at: null, due: false } }, data_limits: ["Sisa batas OTP merupakan hitungan internal, bukan kuota Google Gmail."] },
     effects: { confirm: 0, decide: 0 }, seenKeys: [], requests: [], idempotency: new Map(), ...over,
   };
 }
+
+const ownerDevices = [
+  { id: "device-1", label: "Device Uji", workspace: { id: "w-1", name: "Toko Uji" }, phone_masked: "****7890", status: "online", status_label: "Online", status_since: now, health_score: 85, health_badge: "OK", created_at: now },
+  { id: "device-2", label: "Device Offline", workspace: { id: "w-2", name: "Warung Contoh" }, phone_masked: "****1234", status: "offline", status_label: "Offline", status_since: "2026-09-25T00:00:00Z", health_score: 45, health_badge: "Perlu Perhatian", created_at: now },
+];
+const ownerWorkspaces = [
+  { id: "w-1", name: "Toko Uji", status: "active", created_at: now, owner: { name: "Pemilik Uji", email: "owner@example.test" }, subscription: { plan: "UMKM", status: "active" }, device_count: 1, member_count: 1, messages_30d: 800, last_activity: now },
+  { id: "w-2", name: "Warung Contoh", status: "active", created_at: now, owner: { name: "Pemilik Warung", email: "warung@example.test" }, subscription: { plan: "Asisten", status: "active" }, device_count: 1, member_count: 2, messages_30d: 200, last_activity: now },
+];
 
 const ok = (data: unknown, extra: Json = {}, status = 200, headers: Record<string, string> = {}) => ({ status, contentType: "application/json", headers, body: JSON.stringify({ success: true, data, ...extra }) });
 const fail = (status: number, code: string, message: string, details: Json = {}, headers: Record<string, string> = {}) => ({ status, contentType: "application/json", headers, body: JSON.stringify({ success: false, error: { code, message, details } }) });
@@ -146,6 +155,32 @@ export async function installOperatorMock(page_: Page, state: MockState): Promis
     if (path === "/audit" && method === "GET") return route.fulfill(page(state.audit, offset, limit));
     if (path === "/alerts/otp" && method === "GET") return route.fulfill(state.permissions.includes("audit:read") ? ok(state.otpAlerts) : fail(403, "FORBIDDEN", "x"));
     if (path === "/insights" && method === "GET") return route.fulfill(state.permissions.includes("owner:insights") ? ok(state.ownerInsights) : fail(403, "FORBIDDEN", "x"));
+    if (path === "/insights/devices" && method === "GET") {
+      if (!state.permissions.includes("owner:insights")) return route.fulfill(fail(403, "FORBIDDEN", "x"));
+      return route.fulfill(page(ownerDevices, offset, limit));
+    }
+    const devMatch = /^\/insights\/devices\/([^/]+)$/.exec(path);
+    if (devMatch && method === "GET") {
+      if (!state.permissions.includes("owner:insights")) return route.fulfill(fail(403, "FORBIDDEN", "x"));
+      const dev = ownerDevices.find((d) => d.id === devMatch[1]);
+      if (!dev) return route.fulfill(fail(404, "DEVICE_NOT_FOUND", "x"));
+      return route.fulfill(ok({ ...dev, reconnect_24h: 1, stream_error_24h: 0, fail_ratio: { failed: 2, attempted: 50, percent: 4 }, container_status: "unavailable", events: [], thresholds: { reconnect_24h: 5, stream_error_24h: 10, fail_ratio_percent: 15, fail_ratio_min_messages: 20, offline_hours: 24 } }));
+    }
+    if (path === "/insights/health" && method === "GET") {
+      if (!state.permissions.includes("owner:insights")) return route.fulfill(fail(403, "FORBIDDEN", "x"));
+      return route.fulfill(ok({ measured_at: now, api_status: "responding", db_status: "connected", queue: { queued: 4, sending: 2, oldest_queued_at: null }, error_rate_24h: { attempted: 100, failed: 3, percent: 3 }, error_rate_1h: { attempted: 20, failed: 0, percent: 0 }, email_transport: "dev-outbox", otp: { today: 12, daily_cap: 200, remaining: 188 }, otp_alerts: [], thresholds: { reconnect_24h: 5, stream_error_24h: 10, fail_ratio_percent: 15, fail_ratio_min_messages: 20, offline_hours: 24 }, threshold_devices: { reconnect_exceeded: 0, error_exceeded: 0, offline_exceeded: 0 }, container_status: "unavailable", downtime_history: "unavailable" }));
+    }
+    if (path === "/insights/workspaces" && method === "GET") {
+      if (!state.permissions.includes("owner:insights")) return route.fulfill(fail(403, "FORBIDDEN", "x"));
+      return route.fulfill(page(ownerWorkspaces, offset, limit));
+    }
+    const wsMatch = /^\/insights\/workspaces\/([^/]+)$/.exec(path);
+    if (wsMatch && method === "GET") {
+      if (!state.permissions.includes("owner:insights")) return route.fulfill(fail(403, "FORBIDDEN", "x"));
+      const w = ownerWorkspaces.find((ws) => ws.id === wsMatch[1]);
+      if (!w) return route.fulfill(fail(404, "WORKSPACE_NOT_FOUND", "x"));
+      return route.fulfill(ok({ ...w, subscription: { plan: "UMKM", status: "active", cycle: "yearly", period_start: now, period_end: "2027-09-26T03:00:00Z" }, student: null, device_count: 1, member_count: 1, quota_messages: 10000, max_devices: 3, used_messages: 120, usage_period_start: now, messages_30d: 800, last_activity: now, devices: [{ id: "device-1", label: "Device Uji", status: "online", status_label: "Online", health_score: 85, health_badge: "OK" }], members: [{ name: "Pemilik", email: "pemilik@example.test", role: "owner", joined_at: now }], recent_payments: [] }));
+    }
     return route.fulfill(fail(404, "NOT_FOUND", "x"));
   });
   return state;

@@ -70,5 +70,21 @@ export function useOtpAlerts(enabled = true) {
 
 /** Owner data is fetched only for an owner with the explicit insights permission. The server enforces it again. */
 export function useOwnerInsights(enabled = true) {
-  return useQuery({ queryKey: [OP, "owner-insights"], queryFn: () => operatorApi.getOwnerInsights(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always" });
+  return useQuery({ queryKey: [OP, "owner-insights"], queryFn: () => operatorApi.getOwnerInsights(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always", refetchInterval: 60_000 });
+}
+
+export function useOwnerDevices(params: { limit?: number; offset?: number; status?: string; workspace?: string; sort?: string; since?: string; attention?: boolean }, enabled = true) {
+  return useQuery({ queryKey: [OP, "owner-devices", params], queryFn: () => operatorApi.listOwnerDevices(params), enabled, retry: retryTransient, placeholderData: keepPreviousData, refetchInterval: 60_000 });
+}
+export function useOwnerDevice(id: string, enabled = true) {
+  return useQuery({ queryKey: [OP, "owner-device", id], queryFn: () => operatorApi.getOwnerDevice(id), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always", refetchInterval: 60_000 });
+}
+export function useSystemHealth(enabled = true) {
+  return useQuery({ queryKey: [OP, "system-health"], queryFn: () => operatorApi.getSystemHealth(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always", refetchInterval: 60_000 });
+}
+export function useOwnerWorkspaces(params: { q?: string; limit?: number; offset?: number; plan?: string; status?: string }, enabled = true) {
+  return useQuery({ queryKey: [OP, "owner-workspaces", params], queryFn: () => operatorApi.listOwnerWorkspaces(params), enabled, retry: retryTransient, placeholderData: keepPreviousData, refetchInterval: 60_000 });
+}
+export function useOwnerWorkspace(id: string, enabled = true) {
+  return useQuery({ queryKey: [OP, "owner-workspace", id], queryFn: () => operatorApi.getOwnerWorkspace(id), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always", refetchInterval: 60_000 });
 }

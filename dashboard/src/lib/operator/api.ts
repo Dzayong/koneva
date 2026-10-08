@@ -1,15 +1,18 @@
 import { operatorClient } from "./client";
 import {
-  parseAudit, parseOtpAlerts, parseOwnerInsights, parseConfirmResult, parseDecisionResult, parseInvoiceDetail, parseInvoiceSummary, parseMe, parsePagination, parseSignedIn,
+  parseAudit, parseOtpAlerts, parseOwnerInsights, parseOwnerDeviceSummary, parseOwnerDeviceDetail, parseOwnerSystemHealth, parseOwnerWorkspaceSummary, parseOwnerWorkspaceDetailData,
+  parseConfirmResult, parseDecisionResult, parseInvoiceDetail, parseInvoiceSummary, parseMe, parsePagination, parseSignedIn,
   parseStudentDetail, parseStudentSummary, parseWorkspace,
   type AuditEntry, type OtpAlerts, type SignedIn, type ConfirmPaymentInput, type ConfirmPaymentResult, type DecisionInput, type DecisionResult, type InvoiceDetail,
-  type InvoiceSummary, type InvoiceStatus, type OperatorMe, type OwnerInsights, type Page, type StudentRequestDetail, type StudentRequestSummary,
+  type InvoiceSummary, type InvoiceStatus, type OperatorMe, type OwnerInsights, type OwnerDeviceSummary, type OwnerDeviceDetail, type OwnerSystemHealth,
+  type OwnerWorkspaceSummary, type OwnerWorkspaceDetailData, type Page, type StudentRequestDetail, type StudentRequestSummary,
   type StudentStatus, type WorkspaceDetail,
 } from "./types";
 
 /** Every path below is part of the PROPOSED contract (dashboard/docs/operator-panel-contract.md). */
 
 export const PAGE_SIZE = 25;
+export const OWNER_PAGE_SIZE = 10;
 
 function page<T>(res: { data: unknown; pagination?: unknown } | undefined, parse: (v: unknown) => T): Page<T> {
   const items = Array.isArray(res?.data) ? (res.data as unknown[]).map(parse) : [];
@@ -67,6 +70,21 @@ export const operatorApi = {
   },
   async getOwnerInsights(): Promise<OwnerInsights> {
     return parseOwnerInsights((await operatorClient.request("/insights"))?.data);
+  },
+  async listOwnerDevices(params: { limit?: number; offset?: number; status?: string; workspace?: string; sort?: string; since?: string; attention?: boolean }): Promise<Page<OwnerDeviceSummary>> {
+    return page(await operatorClient.request("/insights/devices", { query: { limit: params.limit ?? OWNER_PAGE_SIZE, offset: params.offset ?? 0, status: params.status, workspace: params.workspace, sort: params.sort, since: params.since, attention: params.attention ? "1" : undefined } }), parseOwnerDeviceSummary);
+  },
+  async getOwnerDevice(id: string): Promise<OwnerDeviceDetail> {
+    return parseOwnerDeviceDetail((await operatorClient.request(`/insights/devices/${encodeURIComponent(id)}`))?.data);
+  },
+  async getSystemHealth(): Promise<OwnerSystemHealth> {
+    return parseOwnerSystemHealth((await operatorClient.request("/insights/health"))?.data);
+  },
+  async listOwnerWorkspaces(params: { q?: string; limit?: number; offset?: number; plan?: string; status?: string }): Promise<Page<OwnerWorkspaceSummary>> {
+    return page(await operatorClient.request("/insights/workspaces", { query: { q: params.q, limit: params.limit ?? OWNER_PAGE_SIZE, offset: params.offset ?? 0, plan: params.plan, status: params.status } }), parseOwnerWorkspaceSummary);
+  },
+  async getOwnerWorkspace(id: string): Promise<OwnerWorkspaceDetailData> {
+    return parseOwnerWorkspaceDetailData((await operatorClient.request(`/insights/workspaces/${encodeURIComponent(id)}`))?.data);
   },
   async listAudit(params: { action?: string | undefined; targetType?: string | undefined; targetId?: string | undefined; from?: string | undefined; to?: string | undefined; offset?: number | undefined }): Promise<Page<AuditEntry>> {
     return page(await operatorClient.request("/audit", {

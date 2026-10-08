@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
-import { Activity, BarChart3, BellRing, CreditCard, GraduationCap, LayoutDashboard, LogOut, Menu, ScrollText, ShieldCheck } from "lucide-react";
+import { Activity, BarChart3, BellRing, Building2, CreditCard, GraduationCap, HeartPulse, LayoutDashboard, LogOut, Menu, ScrollText, ShieldCheck, Smartphone } from "lucide-react";
 import { KonevaMark } from "@/components/brand/koneva-logo";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -29,7 +29,10 @@ const NAV_GROUPS: Array<{ label: string; items: OperatorNavItem[] }> = [
     { href: "/operator/alerts", label: "Peringatan", icon: BellRing, permission: "audit:read" },
   ] },
   { label: "KHUSUS OWNER", items: [
-    { href: "/operator/insights", label: "Panel Pemilik", icon: BarChart3, permission: "owner:insights" },
+    { href: "/operator/insights", label: "Ringkasan Pemilik", icon: BarChart3, permission: "owner:insights" },
+    { href: "/operator/insights/devices", label: "Device Monitor", icon: Smartphone, permission: "owner:insights" },
+    { href: "/operator/insights/health", label: "Kesehatan Sistem", icon: HeartPulse, permission: "owner:insights" },
+    { href: "/operator/insights/workspaces", label: "Workspace", icon: Building2, permission: "owner:insights" },
   ] },
 ];
 

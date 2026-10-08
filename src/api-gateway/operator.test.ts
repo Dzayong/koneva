@@ -59,6 +59,7 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     return { id,email,token,cookie: `${config.cookieName}=${token}`,csrf: csrfFor(token) };
   }
   const op = await operator(), other = await operator();
+  const phaseAOwner = await operator(ownerPermissions, true);
   await t.test('the runtime privilege role may insert audit but cannot alter/delete it and is not superuser', async () => {
     const roles = await pool.query<{ app_superuser: boolean; grant_superuser: boolean; can_insert: boolean; can_update: boolean; can_delete: boolean; can_change_break_glass: boolean; can_change_permissions: boolean; can_change_mfa: boolean }>(
       `SELECT app.rolsuper AS app_superuser, grant_role.rolsuper AS grant_superuser,
@@ -316,7 +317,7 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     assert.equal((await call('/insights', { session: denied })).status, 403, 'staff without the owner permission cannot load insights');
     assert.equal(Number((await pool.query("SELECT count(*)::int AS n FROM operator_audit WHERE action='owner.insights.view'")).rows[0]!.n), before, 'denied access does not create a successful-view audit row');
 
-    const owner = await operator(ownerPermissions, true);
+    const owner = phaseAOwner;
     const ownerRow = await pool.query<{ permissions: string[]; is_owner: boolean }>('SELECT permissions, is_owner FROM operators WHERE id=$1', [owner.id]);
     assert.deepEqual(new Set(ownerRow.rows[0]?.permissions), new Set(ownerPermissions), 'owner receives the full operational set plus insights');
     assert.equal(ownerRow.rows[0]?.is_owner, true);
@@ -442,6 +443,140 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
       const result = await call(route, { session: op, method: 'POST', body: {} });
       assert.equal(result.status, 410, `${route}: ${result.text}`);
       assert.equal(result.body.error.code, 'MFA_REMOVED');
+    }
+  });
+
+  // ---- Phase A: Owner Panel Extensions acceptance tests ----
+  await t.test('Phase A: device list supports status filter and paginates', async () => {
+    const owner = phaseAOwner;
+    const ws = await workspace();
+    const deviceId = randomUUID();
+    await pool.query(`INSERT INTO devices(id,tenant_id,device_key,label,status,phone_number) VALUES ($1,$2,$3,'Device Uji','online','6281234567890')`, [deviceId, ws, `TEST-${deviceId.slice(0, 20)}`]);
+    const attentionId = randomUUID();
+    await pool.query(`INSERT INTO devices(id,tenant_id,device_key,label,status) VALUES ($1,$2,$3,'Device Perhatian','error')`, [attentionId, ws, `TEST-${attentionId.slice(0, 20)}`]);
+    const all = await call('/insights/devices?limit=10&offset=0', { session: owner });
+    assert.equal(all.status, 200);
+    assert.ok(Array.isArray(all.body.data));
+    assert.ok(all.body.pagination.total >= 1);
+    const device = all.body.data.find((d: Record<string, unknown>) => d['id'] === deviceId);
+    assert.ok(device, 'inserted device appears in list');
+    assert.equal(device.status, 'online');
+    assert.equal(device.status_label, 'Online');
+    assert.ok(device.phone_masked?.startsWith('****'), 'phone is masked server-side');
+    assert.ok(device.workspace?.name);
+    const filtered = await call('/insights/devices?status=offline&limit=10&offset=0', { session: owner });
+    assert.equal(filtered.status, 200);
+    for (const d of filtered.body.data) assert.equal(d.status, 'offline', 'status filter works');
+    const attention = await call('/insights/devices?attention=1&limit=50&offset=0', { session: owner });
+    assert.equal(attention.status, 200);
+    assert.ok(attention.body.data.some((d: Record<string, unknown>) => d['id'] === attentionId), 'attention filter includes an error-state device');
+    const auditRow = await pool.query("SELECT 1 FROM operator_audit WHERE action='owner.device_monitor.view' AND operator_id=$1", [owner.id]);
+    assert.ok(auditRow.rowCount! >= 1, 'device list view is audited');
+  });
+
+  await t.test('Phase A: device detail uses 24h fail ratio and audits', async () => {
+    const owner = phaseAOwner;
+    const ws = await workspace();
+    const deviceId = randomUUID();
+    await pool.query(`INSERT INTO devices(id,tenant_id,device_key,label,status,phone_number) VALUES ($1,$2,$3,'Device Detail','online','6281234560000')`, [deviceId, ws, `TEST-${deviceId.slice(0, 20)}`]);
+    const detail = await call(`/insights/devices/${deviceId}`, { session: owner });
+    assert.equal(detail.status, 200);
+    const d = detail.body.data;
+    assert.equal(d.id, deviceId);
+    assert.equal(d.status, 'online');
+    assert.ok('reconnect_24h' in d);
+    assert.ok('stream_error_24h' in d);
+    assert.ok('fail_ratio' in d);
+    assert.ok('thresholds' in d);
+    assert.ok(Array.isArray(d.events));
+    assert.equal(d.container_status, 'unavailable');
+    const encoded = JSON.stringify(d);
+    for (const forbidden of ['password_hash', 'api_key', 'webhook_secret', 'content']) assert.equal(encoded.includes(forbidden), false, `device detail omits ${forbidden}`);
+    const auditRow = await pool.query("SELECT 1 FROM operator_audit WHERE action='owner.device_detail.view' AND operator_id=$1", [owner.id]);
+    assert.ok(auditRow.rowCount! >= 1, 'device detail view is audited');
+  });
+
+  await t.test('Phase A: system health returns 1h error rate, api/db status, email transport', async () => {
+    const owner = phaseAOwner;
+    const health = await call('/insights/health', { session: owner });
+    assert.equal(health.status, 200);
+    const h = health.body.data;
+    assert.ok(h.measured_at);
+    assert.equal(h.api_status, 'responding');
+    assert.equal(h.db_status, 'connected');
+    assert.ok('error_rate_1h' in h, 'has 1h error rate');
+    assert.ok('error_rate_24h' in h, 'has 24h error rate');
+    assert.ok(typeof h.error_rate_1h.percent === 'number');
+    assert.ok(h.email_transport && h.email_transport !== 'unavailable', 'email transport shows config mode');
+    assert.ok(h.queue);
+    assert.ok(h.otp);
+    assert.ok(h.thresholds);
+    assert.ok(h.threshold_devices);
+    const auditRow = await pool.query("SELECT 1 FROM operator_audit WHERE action='owner.system_health.view' AND operator_id=$1", [owner.id]);
+    assert.ok(auditRow.rowCount! >= 1, 'system health view is audited');
+  });
+
+  await t.test('Phase A: workspace list supports email search, plan/status filter', async () => {
+    const owner = phaseAOwner;
+    const all = await call('/insights/workspaces?limit=10&offset=0', { session: owner });
+    assert.equal(all.status, 200);
+    assert.ok(Array.isArray(all.body.data));
+    assert.ok(all.body.pagination.total >= 1);
+    const item = all.body.data[0];
+    assert.ok('name' in item);
+    assert.ok('status' in item);
+    assert.ok('device_count' in item);
+    assert.ok('member_count' in item);
+    assert.ok('messages_30d' in item);
+    const byStatus = await call('/insights/workspaces?status=active&limit=10&offset=0', { session: owner });
+    assert.equal(byStatus.status, 200);
+    for (const w of byStatus.body.data) assert.equal(w.status, 'active', 'status filter works');
+    const byEmail = await call(`/insights/workspaces?q=example.test&limit=10&offset=0`, { session: owner });
+    assert.equal(byEmail.status, 200, 'email search succeeds');
+    const auditRow = await pool.query("SELECT 1 FROM operator_audit WHERE action='owner.workspace_list.view' AND operator_id=$1", [owner.id]);
+    assert.ok(auditRow.rowCount! >= 1, 'workspace list view is audited');
+  });
+
+  await t.test('Phase A: workspace detail includes members, payments, used_messages', async () => {
+    const owner = phaseAOwner;
+    const ws = await workspace();
+    const detail = await call(`/insights/workspaces/${ws}`, { session: owner });
+    assert.equal(detail.status, 200);
+    const w = detail.body.data;
+    assert.equal(w.id, ws);
+    assert.ok('used_messages' in w, 'returns used_messages');
+    assert.ok(typeof w.used_messages === 'number');
+    assert.ok(Array.isArray(w.members), 'returns members array');
+    assert.ok(w.members.length >= 1, 'workspace has at least the owner member');
+    assert.ok(w.members[0].name);
+    assert.ok(w.members[0].email);
+    assert.ok(w.members[0].role);
+    assert.ok(Array.isArray(w.recent_payments), 'returns recent_payments array');
+    assert.ok(Array.isArray(w.devices));
+    assert.ok('quota_messages' in w);
+    assert.ok('max_devices' in w);
+    const encoded = JSON.stringify(w);
+    for (const forbidden of ['password_hash', 'api_key', 'webhook_secret', 'content']) assert.equal(encoded.includes(forbidden), false, `workspace detail omits ${forbidden}`);
+    const auditRow = await pool.query("SELECT 1 FROM operator_audit WHERE action='owner.workspace_detail.view' AND operator_id=$1", [owner.id]);
+    assert.ok(auditRow.rowCount! >= 1, 'workspace detail view is audited');
+  });
+
+  await t.test('Phase A: owner insights includes device_counts', async () => {
+    const owner = phaseAOwner;
+    const response = await call('/insights', { session: owner });
+    assert.equal(response.status, 200);
+    const d = response.body.data;
+    assert.ok(d.device_counts, 'response includes device_counts');
+    assert.ok(typeof d.device_counts.total === 'number');
+    assert.ok(typeof d.device_counts.online === 'number');
+    assert.ok(typeof d.device_counts.offline === 'number');
+    assert.ok(typeof d.device_counts.attention === 'number');
+  });
+
+  await t.test('Phase A: staff without owner:insights is denied on all Phase A endpoints', async () => {
+    const staff = await operator(['payments:read']);
+    for (const route of ['/insights/devices', '/insights/devices/' + randomUUID(), '/insights/health', '/insights/workspaces', '/insights/workspaces/' + randomUUID()]) {
+      assertCode(await call(route, { session: staff }), 403, 'FORBIDDEN');
     }
   });
 });
