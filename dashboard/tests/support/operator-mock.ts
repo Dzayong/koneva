@@ -19,10 +19,9 @@ export type DecideMode = "ok" | "not_pending" | "lose_response_once" | "reauth_r
 export interface MockState {
   authenticated: boolean;
   permissions: string[];
-  loginMode: "ok" | "bad_password" | "rate_limited" | "enroll" | "not_operator" | "absent" | "challenge_dies";
+  loginMode: "ok" | "bad_password" | "rate_limited" | "not_operator" | "absent";
   /** Reauthentication window: confirm/decide answer REAUTH_REQUIRED (before any effect) while false. */
   recentAuth: boolean;
-  validCode: string;
   meMode: "ok" | "expired";
   listMode: "ok" | "expired" | "forbidden" | "error" | "hang";
   detailDelayMs: number;
@@ -37,7 +36,6 @@ export interface MockState {
   otpAlerts: Json;
   ownerInsights: Json;
   effects: { confirm: number; decide: number };
-  mfaVerified: number;
   seenKeys: string[];
   requests: Array<{ method: string; path: string; query: string; headers: Record<string, string>; body: unknown }>;
   idempotency: Map<string, { hash: string; response: Json }>;
@@ -55,7 +53,7 @@ const stu = (n: number, ws: string, over: Partial<StudentReq> = {}): StudentReq 
 
 export function freshState(over: Partial<MockState> = {}): MockState {
   return {
-    authenticated: true, permissions: [...ALL_PERMISSIONS], loginMode: "ok", recentAuth: true, validCode: "123456", meMode: "ok", listMode: "ok", confirmMode: "ok", decideMode: "ok", delayMs: 0, detailDelayMs: 0,
+    authenticated: true, permissions: [...ALL_PERMISSIONS], loginMode: "ok", recentAuth: true, meMode: "ok", listMode: "ok", confirmMode: "ok", decideMode: "ok", delayMs: 0, detailDelayMs: 0,
     invoices: [inv(1, "Toko Uji"), inv(2, "Warung Contoh"), inv(3, "Studio Sample", { status: "paid", paid_at: now, method: "transfer", reference: "TRF-9", version: 2, confirmed_by: { name: "Operator Lain" } })],
     students: [stu(1, "Uji Pelajar"), stu(2, "Kelas Contoh", { status: "approved", version: 2, decided_by: { name: "Operator Lain" } })],
     workspace: {
@@ -66,7 +64,7 @@ export function freshState(over: Partial<MockState> = {}): MockState {
     audit: [{ id: "a-1", at: now, operator: { id: "op-1", name: "Operator Uji" }, action: "invoice.confirm_payment", target: { type: "invoice", id: "inv-3", label: "INV-202609-0003" }, reason: null, changes: { status: { from: "unpaid", to: "paid" } }, request_id: "req-EXAMPLE" }],
     otpAlerts: { events: [], has_active: false, history_days: 30, current: { scope: "sender_daily", window_hours: 24, usage: 12, cap: 200, percent: 6, measured_at: "2026-09-26T03:00:00Z" } },
     ownerInsights: { measured_at: now, kpis: { registered_accounts: 42, active_workspaces: 17, suspended_workspaces: 2, messages_sent_24h: 800, messages_sent_30d: 12000, otp_sender_today: 12, otp_sender_daily_cap: 200, otp_sender_remaining_internal: 188 }, health: { api: "responding", database: "connected", queue: { queued: 4, sending: 2 }, message_delivery_24h: { attempted: 100, failed: 3, error_rate_percent: 3 }, devices: [{ id: "device-1", label: "Toko utama", status: "online", updated_at: now, workspace_name: "Warung Contoh" }] }, activity: [{ id: "signup-1", kind: "signup", at: now, title: "Akun baru terdaftar", detail: null }, { id: "stop-1", kind: "opt_out", at: now, title: "Permintaan STOP diterima", detail: "Warung Contoh" }], alerts: { otp_thresholds: [], stop_events_last_hour: 1, consent_blocked_messages_last_hour: 0 }, data_limits: ["Sisa batas OTP merupakan hitungan internal, bukan kuota Google Gmail."] },
-    effects: { confirm: 0, decide: 0 }, mfaVerified: 0, seenKeys: [], requests: [], idempotency: new Map(), ...over,
+    effects: { confirm: 0, decide: 0 }, seenKeys: [], requests: [], idempotency: new Map(), ...over,
   };
 }
 
@@ -89,8 +87,7 @@ export async function installOperatorMock(page_: Page, state: MockState): Promis
     if (state.loginMode === "absent") return route.fulfill({ status: 404, contentType: "text/html", body: "<html>Not Found</html>" });
 
     const unsafe = method !== "GET";
-    // Pre-session steps (password, MFA, enrollment) have no session and therefore no CSRF token yet; Origin and the custom header apply.
-    if (unsafe && path !== "/auth/login" && !path.startsWith("/auth/mfa/")) {
+    if (unsafe && path !== "/auth/login") {
       if (headers["x-csrf-token"] !== CSRF) return route.fulfill(fail(403, "CSRF_INVALID", "csrf"));
     }
     if (headers["x-requested-with"] !== "koneva-operator") return route.fulfill(fail(403, "ORIGIN_NOT_ALLOWED", "origin"));
@@ -98,24 +95,11 @@ export async function installOperatorMock(page_: Page, state: MockState): Promis
     if (path === "/auth/login" && method === "POST") {
       if (state.loginMode === "bad_password") return route.fulfill(fail(401, "INVALID_CREDENTIALS", "x"));
       if (state.loginMode === "rate_limited") return route.fulfill(fail(429, "RATE_LIMITED", "x", {}, { "Retry-After": "42" }));
-      // Password never yields a session: only a challenge that MFA must complete.
-      return route.fulfill(ok({ status: state.loginMode === "enroll" ? "mfa_enrollment_required" : "mfa_required", challenge_id: "c".repeat(64), expires_in: 300 }));
+      state.authenticated = true; state.recentAuth = true;
+      return route.fulfill(ok(meBody(state)));
     }
-    if (path === "/auth/mfa/verify" && method === "POST") {
-      const b = body as Json;
-      if (state.loginMode === "challenge_dies") return route.fulfill(fail(401, "MFA_CHALLENGE_INVALID", "x"));
-      if (b["code"] !== state.validCode && b["recovery_code"] !== "AAAAA-BBBBB") return route.fulfill(fail(401, "MFA_INVALID", "x"));
-      state.authenticated = true; state.recentAuth = true; state.mfaVerified += 1;
-      return route.fulfill(ok({ ...meBody(state), recovery_codes_remaining: b["recovery_code"] ? 9 : 10 }));
-    }
-    if (path === "/auth/mfa/enroll/start" && method === "POST") {
-      if ((body as Json)["enrollment_code"] !== "AAAAA-BBBBB-CCCCC") return route.fulfill(fail(401, "ENROLLMENT_CODE_INVALID", "x"));
-      return route.fulfill(ok({ secret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", otpauth_uri: "otpauth://totp/KONEVA%20Operator%3Aops%40example.test?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=KONEVA%20Operator" }));
-    }
-    if (path === "/auth/mfa/enroll/confirm" && method === "POST") {
-      if ((body as Json)["code"] !== state.validCode) return route.fulfill(fail(401, "MFA_INVALID", "x"));
-      state.authenticated = true; state.recentAuth = true; state.mfaVerified += 1;
-      return route.fulfill(ok({ ...meBody(state), recovery_codes: ["ABCDE-FGHJK", "MNPQR-STUVW", "XYZ23-45678", "9ABCD-EFGHJ"], recovery_codes_remaining: 4 }));
+    if (path.startsWith("/auth/mfa/") && method === "POST") {
+      return route.fulfill(fail(410, "MFA_REMOVED", "MFA has been removed"));
     }
     if (path === "/auth/logout" && method === "POST") { state.authenticated = false; return route.fulfill({ status: 204 }); }
 

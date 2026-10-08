@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GraduationCap, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmailVerificationDialog } from "@/components/account/email-verification-dialog";
 import { PlanCards, rupiah } from "@/components/billing/plan-cards";
-import { useBilling, useCreateOrder, useStudentRequest } from "@/hooks/use-billing";
+import { useBilling, useCreateOrder, useDokuCheckout, useStudentRequest } from "@/hooks/use-billing";
 import { usePermissions } from "@/hooks/use-me";
 import { apiFailure } from "@/lib/errors";
 import type { BillingState, Invoice, PublicPlan } from "@/lib/types";
@@ -62,16 +62,61 @@ function MessageMeter({ usage }: { usage: BillingState["usage"] }) {
   );
 }
 
-function Payment({ invoice, payment }: { invoice: Invoice; payment: BillingState["payment"] }) {
+function Payment({ invoice, payment, dokuReturned }: { invoice: Invoice; payment: BillingState["payment"]; dokuReturned: string | null }) {
+  const checkout = useDokuCheckout();
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
+  const handleCheckout = () => {
+    setCheckoutError(null);
+    checkout.mutate(undefined, {
+      onSuccess: (result) => { window.location.href = result.payment_url; },
+      onError: (err) => {
+        const f = apiFailure(err);
+        setCheckoutError(
+          f.code === "DOKU_NOT_CONFIGURED" ? "Pembayaran online belum tersedia di server ini."
+            : f.code === "APP_PUBLIC_URL_NOT_CONFIGURED" ? "Konfigurasi server belum lengkap untuk pembayaran online."
+            : f.code === "DOKU_CHECKOUT_FAILED" ? "DOKU menolak permintaan checkout. Coba lagi nanti."
+            : f.message,
+        );
+      },
+    });
+  };
+
   return (
-    <div className="rounded-xl border border-primary/40 bg-primary/5 p-5">
-      <p className="text-sm text-muted-foreground">Tagihan {invoice.number}</p>
-      <p className="mt-1 text-2xl font-semibold">{rupiah(invoice.amount_idr)}</p>
-      <p className="mt-1 text-sm">Jatuh tempo {formatDate(invoice.due_at)}</p>
-      <div className="mt-4 whitespace-pre-line rounded-lg bg-background p-3 text-sm">{payment.instructions}</div>
-      <p className="mt-3 text-sm text-muted-foreground">
-        Setelah membayar, kirim bukti pembayaran dan nomor tagihan{payment.contact ? <> ke <span className="font-medium text-foreground">{payment.contact}</span></> : " ke penyedia layanan"}. Paket aktif setelah pembayaran dikonfirmasi, tidak otomatis.
-      </p>
+    <div className="space-y-4">
+      <div className="rounded-xl border border-primary/40 bg-primary/5 p-5">
+        <p className="text-sm text-muted-foreground">Tagihan {invoice.number}</p>
+        <p className="mt-1 text-2xl font-semibold">{rupiah(invoice.amount_idr)}</p>
+        <p className="mt-1 text-sm">Jatuh tempo {formatDate(invoice.due_at)}</p>
+
+        {dokuReturned && dokuReturned !== "cancel" && (
+          <div role="status" className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+            <p className="font-medium">Menunggu konfirmasi pembayaran</p>
+            <p className="mt-1 text-muted-foreground">Pembayaran sedang diproses DOKU. Status tagihan akan diperbarui otomatis setelah dikonfirmasi.</p>
+          </div>
+        )}
+        {dokuReturned === "cancel" && (
+          <div role="status" className="mt-4 rounded-lg border border-muted bg-muted/50 p-3 text-sm">
+            <p className="font-medium">Pembayaran dibatalkan</p>
+            <p className="mt-1 text-muted-foreground">Anda bisa mencoba lagi atau bayar manual di bawah.</p>
+          </div>
+        )}
+
+        <Button className="mt-4 w-full" onClick={handleCheckout} disabled={checkout.isPending}>
+          {checkout.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Bayar dengan DOKU
+        </Button>
+        {checkoutError && <p role="alert" className="mt-2 text-sm text-destructive">{checkoutError}</p>}
+        <p className="mt-2 text-xs text-muted-foreground">Status tagihan diperbarui otomatis setelah pembayaran diverifikasi DOKU — tidak perlu mengirim bukti.</p>
+      </div>
+
+      <div className="rounded-xl border bg-card p-5">
+        <p className="text-sm font-medium">Atau transfer manual</p>
+        <div className="mt-3 whitespace-pre-line rounded-lg bg-muted/50 p-3 text-sm">{payment.instructions}</div>
+        <p className="mt-3 text-sm text-muted-foreground">
+          Setelah transfer, kirim bukti pembayaran dan nomor tagihan{payment.contact ? <> ke <span className="font-medium text-foreground">{payment.contact}</span></> : " ke penyedia layanan"}. Paket aktif setelah dikonfirmasi operator, tidak otomatis.
+        </p>
+      </div>
     </div>
   );
 }
@@ -123,6 +168,14 @@ export default function BillingPage() {
   const [created, setCreated] = useState<{ invoice: Invoice; payment: BillingState["payment"] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [verifyOpen, setVerifyOpen] = useState(false);
+  const [dokuReturned] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("doku");
+  });
+
+  useEffect(() => {
+    if (dokuReturned) window.history.replaceState(null, "", "/billing");
+  }, [dokuReturned]);
 
   if (!permsLoading && !can("billing:manage")) return <p className="text-muted-foreground">Hanya pemilik workspace yang bisa membuka Tagihan.</p>;
   if (isLoading || !data) return <div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-40" /><Skeleton className="h-64" /></div>;
@@ -169,7 +222,13 @@ export default function BillingPage() {
         </section>
       )}
 
-      {shown && <Payment invoice={shown.invoice} payment={shown.payment} />}
+      {dokuReturned && dokuReturned !== "cancel" && !shown && (
+        <div role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5">
+          <p className="font-medium">Menunggu konfirmasi pembayaran</p>
+          <p className="mt-1 text-sm text-muted-foreground">Jika Anda baru menyelesaikan pembayaran via DOKU, status akan diperbarui otomatis setelah diverifikasi.</p>
+        </div>
+      )}
+      {shown && <Payment invoice={shown.invoice} payment={shown.payment} dokuReturned={dokuReturned} />}
 
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

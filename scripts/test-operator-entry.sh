@@ -22,7 +22,6 @@ export REDIS_URL="redis://$(docker port "$redis" 6379/tcp | head -1)"
 export EMAIL_TRANSPORT=none GMAIL_OAUTH_CLIENT_ID= GMAIL_OAUTH_CLIENT_SECRET= GMAIL_OAUTH_REFRESH_TOKEN= GMAIL_SENDER_EMAIL= DEV_EMAIL_OUTBOX_FILE=
 export NODE_ENV=test JWT_SECRET=entry-test-jwt ADMIN_API_KEY=entry-test-admin DOTENV_CONFIG_QUIET=true
 export DEVICE_MANAGER_URL=http://127.0.0.1:1 OPERATOR_ENTRY_TEST=1 OPERATOR_STACK_TEST=1 TS_NODE_TRANSPILE_ONLY=true
-OPERATOR_MFA_ENC_KEY=$(head -c 32 /dev/urandom | base64); export OPERATOR_MFA_ENC_KEY
 ./node_modules/.bin/tsc --noEmit
 node --require ts-node/register scripts/migrate.ts >/dev/null   # the repository's own migration runner
 node --require ts-node/register --test --test-concurrency=1 src/api-gateway/operator-entry.test.ts

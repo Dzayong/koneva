@@ -109,7 +109,6 @@ test.describe("mutations whose outcome cannot be known (UI evidence, faults inje
     expect(posts).toHaveLength(2);
     expect(posts[1]!.headers["idempotency-key"]).toBe(posts[0]!.headers["idempotency-key"]);
     expect(state.effects.confirm).toBe(1);
-    expect(state.mfaVerified).toBe(1);
   });
 
   test("student decisions also ask for a fresh sign-in before any effect", async ({ page }) => {
@@ -133,8 +132,6 @@ test.describe("mutations whose outcome cannot be known (UI evidence, faults inje
 
 async function signInWithin(dialog: import("@playwright/test").Locator) {
   await dialog.getByLabel("Kata sandi").fill("rahasia-uji");
-  await dialog.getByRole("button", { name: "Lanjut" }).click();
-  await dialog.getByLabel("Kode verifikasi").fill("123456");
-  await dialog.getByRole("button", { name: "Verifikasi" }).click();
+  await dialog.getByRole("button", { name: "Masuk" }).click();
 }
 void signIn;

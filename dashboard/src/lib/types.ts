@@ -502,3 +502,7 @@ export interface DeviceProfile {
 export interface ProfileUpdate { name?: string; about?: string; business?: BusinessUpdate }
 
 export interface StatusViewers { viewers: Array<{ number: string | null; viewed_at: string }>; total: number }
+
+// ---- DOKU checkout ---------------------------------------------------------
+
+export interface DokuCheckoutResult { invoice_number: string; payment_url: string }

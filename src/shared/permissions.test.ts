@@ -73,7 +73,7 @@ test('a viewer cannot reach the QR code, sending, or any write', () => {
 
 test('every route mounted on /api/v1 has a permission rule (guards against forgotten routes)', () => {
   const dir = path.join(__dirname, '..', 'api-gateway', 'routes');
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.routes.ts') && !['admin.routes.ts', 'auth.routes.ts', 'public.routes.ts'].includes(f));
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.routes.ts') && !['admin.routes.ts', 'auth.routes.ts', 'public.routes.ts', 'doku-webhook.routes.ts'].includes(f));
   const missing: string[] = [];
   let seen = 0;
   for (const file of files) {

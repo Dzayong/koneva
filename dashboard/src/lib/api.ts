@@ -46,6 +46,7 @@ import type {
   ContactRecord,
   CreateContactRequest,
   ApiSuccess,
+  DokuCheckoutResult,
   AutoReplyRule,
   AutoReplyRuleInput,
   CreateDeviceRequest,
@@ -555,6 +556,13 @@ class ApiClient {
 
   async requestStudentVerification(note: string): Promise<void> {
     await this.client.post("/api/v1/billing/student-request", { note }, { skipErrorToast: true });
+  }
+
+  async createDokuCheckout(): Promise<DokuCheckoutResult> {
+    const response = await this.client.post<ApiSuccess<DokuCheckoutResult>>(
+      "/api/v1/billing/doku/checkout", {}, { skipErrorToast: true },
+    );
+    return response.data.data;
   }
 
   // ---- Sending behaviour --------------------------------------------------

@@ -208,23 +208,44 @@ export async function createOrder(tenantId: string, planId: string, cycle: Billi
   });
 }
 
+/** The one open invoice a tenant may currently pay (createOrder voids any earlier unpaid invoice). */
+export async function getLatestUnpaidInvoice(tenantId: string): Promise<{ id: string; number: string; amount_idr: number } | null> {
+  const row = (await pool.query<{ id: string; number: string; amount_idr: number }>(
+    `SELECT id, number, amount_idr FROM invoices WHERE tenant_id = $1 AND status = 'unpaid' ORDER BY created_at DESC LIMIT 1`,
+    [tenantId],
+  )).rows[0];
+  return row ?? null;
+}
+
+/**
+ * Core of markInvoicePaid, usable inside a caller's OWN transaction (e.g. the DOKU webhook handler,
+ * which must record the notification and activate the workspace atomically — either both happen or
+ * neither does, so a retry after a failure can't be mistaken for "already handled"). Takes an already-open
+ * client; does not BEGIN/COMMIT/ROLLBACK itself.
+ */
+export async function markInvoicePaidWithClient(
+  client: PoolClient,
+  invoiceId: string,
+  input: { method: string; reference?: string | undefined; note?: string | undefined },
+) {
+  await client.query('SELECT id FROM tenants WHERE id = (SELECT tenant_id FROM invoices WHERE id = $1) FOR UPDATE', [invoiceId]);
+  const invoice = (await client.query<InvoiceRow & { tenant_id: string }>(
+    'SELECT id, tenant_id, number, plan_id, cycle, amount_idr, status, due_at, paid_at, method, reference, created_at FROM invoices WHERE id = $1 FOR UPDATE',
+    [invoiceId],
+  )).rows[0];
+  if (!invoice) throw new ServiceError(404, 'INVOICE_NOT_FOUND', 'Invoice not found');
+  if (invoice.status !== 'unpaid') throw new ServiceError(409, 'INVOICE_NOT_PAYABLE', `Invoice is already ${invoice.status}`);
+  const plan = (await client.query<PlanRow>(`SELECT ${PLAN_COLUMNS} FROM plans WHERE id = $1`, [invoice.plan_id])).rows[0]!;
+  await client.query(
+    `UPDATE invoices SET status = 'paid', paid_at = now(), method = $2, reference = $3, note = $4 WHERE id = $1`,
+    [invoiceId, input.method, input.reference ?? null, input.note ?? null],
+  );
+  const period = await activatePaid(client, invoice.tenant_id, plan, invoice.cycle);
+  return { tenant_id: invoice.tenant_id, invoice: invoice.number, plan: plan.id, amount_idr: invoice.amount_idr, ...period };
+}
+
 export async function markInvoicePaid(invoiceId: string, input: { method: string; reference?: string | undefined; note?: string | undefined }) {
-  return transaction(async (client) => {
-    await client.query('SELECT id FROM tenants WHERE id = (SELECT tenant_id FROM invoices WHERE id = $1) FOR UPDATE', [invoiceId]);
-    const invoice = (await client.query<InvoiceRow & { tenant_id: string }>(
-      'SELECT id, tenant_id, number, plan_id, cycle, amount_idr, status, due_at, paid_at, method, reference, created_at FROM invoices WHERE id = $1 FOR UPDATE',
-      [invoiceId],
-    )).rows[0];
-    if (!invoice) throw new ServiceError(404, 'INVOICE_NOT_FOUND', 'Invoice not found');
-    if (invoice.status !== 'unpaid') throw new ServiceError(409, 'INVOICE_NOT_PAYABLE', `Invoice is already ${invoice.status}`);
-    const plan = (await client.query<PlanRow>(`SELECT ${PLAN_COLUMNS} FROM plans WHERE id = $1`, [invoice.plan_id])).rows[0]!;
-    await client.query(
-      `UPDATE invoices SET status = 'paid', paid_at = now(), method = $2, reference = $3, note = $4 WHERE id = $1`,
-      [invoiceId, input.method, input.reference ?? null, input.note ?? null],
-    );
-    const period = await activatePaid(client, invoice.tenant_id, plan, invoice.cycle);
-    return { tenant_id: invoice.tenant_id, invoice: invoice.number, plan: plan.id, ...period };
-  });
+  return transaction((client) => markInvoicePaidWithClient(client, invoiceId, input));
 }
 
 export async function voidInvoice(invoiceId: string): Promise<void> {

@@ -45,7 +45,8 @@ ALLOWLIST=(
   APP_DB_PASSWORD
   GMAIL_OAUTH_CLIENT_SECRET
   GMAIL_OAUTH_REFRESH_TOKEN
-  OPERATOR_MFA_ENC_KEY
+  DOKU_CLIENT_ID
+  DOKU_SHARED_KEY
 )
 
 usage() { echo "Usage: $0 --from <protected 0600 env file> --out <target dir> NAME [NAME...]" >&2; exit 1; }

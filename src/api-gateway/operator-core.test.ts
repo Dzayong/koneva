@@ -9,12 +9,10 @@ test('operator configuration fails closed and never weakens production cookies',
   for (const overrides of [
     { OPERATOR_INSECURE_DEV_COOKIES: 'true' }, { OPERATOR_COOKIE_SECURE: 'false' }, { OPERATOR_COOKIE_NAME: 'plain' }, { OPERATOR_ENABLED: 'true' },
   ]) assert.throws(() => readOperatorConfig({ NODE_ENV: 'production', ...overrides }));
-  const k = Buffer.alloc(32, 7).toString('base64');
-  assert.throws(() => readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_MFA_ENC_KEY: k, OPERATOR_ALLOWED_ORIGIN: 'http://example.test' }));
-  assert.throws(() => readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_MFA_ENC_KEY: k, OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000/' }));
-  assert.throws(() => readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_MFA_ENC_KEY: k, OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000', OPERATOR_COOKIE_SECURE: 'false' }));
-  const key = Buffer.alloc(32, 7).toString('base64');
-  assert.equal(readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_MFA_ENC_KEY: key, OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000', OPERATOR_COOKIE_NAME: 'koneva_op_dev', OPERATOR_COOKIE_SECURE: 'false', OPERATOR_INSECURE_DEV_COOKIES: 'true' }).secure, false);
+  assert.throws(() => readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://example.test' }));
+  assert.throws(() => readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000/' }));
+  assert.throws(() => readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000', OPERATOR_COOKIE_SECURE: 'false' }));
+  assert.equal(readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000', OPERATOR_COOKIE_NAME: 'koneva_op_dev', OPERATOR_COOKIE_SECURE: 'false', OPERATOR_INSECURE_DEV_COOKIES: 'true' }).secure, false);
 });
 test('payload hash canonicalization ignores key order but preserves actual payload changes', () => {
   assert.equal(canonicalJson({ a: 1, b: { x: 2, y: 'a' } }), canonicalJson({ b: { y: 'a', x: 2 }, a: 1 }));

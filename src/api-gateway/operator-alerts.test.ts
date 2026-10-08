@@ -27,7 +27,7 @@ test('OTP alerts in the Operator Panel API (disposable database only; email stay
     catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
   const origin = 'http://localhost:13000';
-  const config = { enabled: true, origin, cookieName: 'koneva_op_test', secure: false, mfaKey: Buffer.from(process.env['OPERATOR_MFA_ENC_KEY']!, 'base64'), requestsPerMinute: 100_000 };
+  const config = { enabled: true, origin, cookieName: 'koneva_op_test', secure: false, requestsPerMinute: 100_000 };
   const app = express();
   app.use('/operator', createOperatorRouter(pool, config));
   const server = app.listen(0, '127.0.0.1');

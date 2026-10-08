@@ -3,8 +3,7 @@
 Reviewed 2026-09-26 against `dashboard/docs/operator-panel-contract.md`, revision 2, and the owner's follow-up decisions.
 The frontend proposal and all existing dashboard files were preserved. This document records the backend decisions.
 
-Status: implemented and tested for **isolated local use** (unit + STACK-local + real-entrypoint + browser). After the operational hardening stage this is a **candidate ready for owner review**, not permission to enable it. Disabled by default. MFA (TOTP) is
-implemented and mandatory for every operator sign-in. **Local-tested is not production-ready**: production still needs the
+Status: implemented and tested for **isolated local use** (unit + STACK-local + real-entrypoint + browser). After the operational hardening stage this is a **candidate ready for owner review**, not permission to enable it. Disabled by default. **MFA (TOTP) has been removed from Operator login per owner decision (2026-10-08).** Login is email + password only; MFA endpoints return `410 Gone`. **Local-tested is not production-ready**: production still needs the
 checklist under "Remaining operational work". No deployment, production migration, real account provisioning, WhatsApp activity, DOKU integration, or
 commit was performed. Manual payment confirmation only records an operator's decision; it does not contact a payment provider.
 
@@ -17,8 +16,8 @@ commit was performed. Manual payment confirmation only records an operator's dec
 | Cookies | Default `__Host-koneva_op`, Secure, HttpOnly, Strict, Path=/, no Domain. Weak local cookies require explicit non-production opt-in. |
 | Sessions | Hash-only stored session credential; 30-minute idle, touch at most once/minute, eight-hour absolute cap. Login rotates the supplied old operator session. CSRF derived from the session credential; not persisted in browser storage. |
 | Revocation | Logout, revoke-all, password change and account disablement. Credential/disable updates revoke sessions with a DB trigger. Permissions are read fresh and checked again within sensitive transactions. |
-| MFA | TOTP (RFC 6238, SHA-1, 6 digits, 30 s, ±1 step) is required at every sign-in, in every environment; there is no switch to disable it. The password step returns only a short-lived (5 min) challenge, never a session. A code step already used is refused (`mfa_last_step`). See "MFA" below. |
-| Reauthentication | Required after 15 minutes for payment/student decisions. `REAUTH_REQUIRED` is returned before side effects. Sign in again (password **and** MFA) via `/auth/login`; existing idempotency scope is operator identity, not session. |
+| MFA | **Removed (2026-10-08).** Login is email + password only; password step creates a session directly. MFA endpoints (`/auth/mfa/verify`, `/auth/mfa/enroll/*`) return `410 Gone`. The `mfa` module, DB columns and security-event tables are retained as dead code. |
+| Reauthentication | Required after 15 minutes for payment/student decisions. `REAUTH_REQUIRED` is returned before side effects. Sign in again (password) via `/auth/login`; existing idempotency scope is operator identity, not session. |
 | Login throttling | Durable 15-minute buckets: five attempts/email, 30/IP (including successful attempts), then `429` with `Retry-After`. Bucket values are hashed; no raw IP/email in the throttle table. |
 | Idempotency | Required UUID v4 key for **both** mutations. Scoped by operator/operation/target/key, canonical payload hash, exact stored successful response. Same payload replay has `Idempotent-Replay: true`; changed payload is `409`. In-flight lock returns `REQUEST_IN_PROGRESS` with `Retry-After: 2`. Retained indefinitely for now (at least 72 hours). |
 | Pending/unknown result | Timeouts, aborts and proxy/redirect errors cannot establish the outcome. Retry identical key + payload or re-read the invoice/request. Server never intentionally redirects. |
@@ -39,10 +38,10 @@ The request and response DTOs in the frontend proposal apply, with the decisions
 
 | Method/path (backend) | Permission |
 |---|---|
-| `POST /operator/auth/login` | Bootstrap Origin/JSON/custom-header checks. Returns `{status:"mfa_required"\|"mfa_enrollment_required", challenge_id, expires_in}`; never a cookie |
-| `POST /operator/auth/mfa/verify` | Same bootstrap checks. `{challenge_id, code}` or `{challenge_id, recovery_code}`; success sets the cookie and returns `{status:"authenticated", operator, permissions, csrf_token, session, recovery_codes_remaining}` |
-| `POST /operator/auth/mfa/enroll/start` | `{challenge_id, enrollment_code?}` (code needed for first enrollment); returns `{secret, otpauth_uri}` |
-| `POST /operator/auth/mfa/enroll/confirm` | `{challenge_id, code}`; success sets the cookie and returns the session plus 10 `recovery_codes` (shown once) |
+| `POST /operator/auth/login` | Bootstrap Origin/JSON/custom-header checks. Validates password, creates session, sets cookie, returns `{status:"authenticated", operator, permissions, csrf_token, session}` |
+| `POST /operator/auth/mfa/verify` | **Disabled.** Returns `410 MFA_REMOVED`. |
+| `POST /operator/auth/mfa/enroll/start` | **Disabled.** Returns `410 MFA_REMOVED`. |
+| `POST /operator/auth/mfa/enroll/confirm` | **Disabled.** Returns `410 MFA_REMOVED`. |
 | `GET /operator/me` | Operator session |
 | `POST /operator/auth/logout` | Operator session + Origin + CSRF; 204 |
 | `POST /operator/auth/sessions/revoke-all` | Same; revokes all own sessions, 204 |
@@ -61,32 +60,16 @@ Student/workspace missing errors: `REQUEST_NOT_FOUND`, `WORKSPACE_NOT_FOUND`. Di
 Invalid JSON/IDs/filters/body/key: `400 VALIDATION_ERROR` with a generic message, never the submitted values.
 
 The existing dashboard rewrite `/api/operator/* -> /operator/*` is unchanged. There is no separate reauth endpoint:
-reauthentication is a full login (password + MFA). No refund, void or student entitlement revocation endpoint is added.
+reauthentication is a full login (password). No refund, void or student entitlement revocation endpoint is added.
 
-## MFA
+## MFA (removed)
 
-- **Secret storage:** TOTP secret encrypted at rest with AES-256-GCM (`OPERATOR_MFA_ENC_KEY`, base64 of exactly 32 random
-  bytes; AAD = operator id). Recovery codes (10, `XXXXX-XXXXX`, single use) and the enrollment code are stored only as
-  hashes. Any change of `mfa_secret_enc` revokes all sessions and open challenges (DB trigger).
-- **Sign-in:** `login` (password, throttled) -> challenge -> `mfa/verify`. A wrong code counts before it is checked; a
-  challenge dies after 5 wrong attempts; per-operator and per-IP buckets also apply. Old sessions stay valid until MFA succeeds
-  and are rotated only then. Nothing before MFA creates a session or a cookie.
-- **Enrollment (first sign-in):** operator has no MFA yet -> `mfa_enrollment_required`. They must present the one-time
-  **enrollment code** given out-of-band by whoever provisioned them (24 h validity), then scan the secret/QR and confirm a
-  first code. The password alone can never enroll a factor. Recovery codes appear once, and the UI requires an acknowledgement.
-- **Lost authenticator:** use a recovery code. **Lost authenticator and recovery codes:** an administrator with database access
-  runs `scripts/reset-operator-mfa.ts` (stdin `{"email":...}`, local/disposable DB only): clears MFA, revokes sessions, prints
-  a new enrollment code. There is no self-service reset by design.
-- **Security log:** `operator_security_events` (append-only, migration 020) records enrollment started/completed, MFA verified,
-  MFA failed (fixed reason vocabulary: `challenge_invalid`, `code_invalid`, `recovery_code_invalid`, `enrollment_code_invalid`),
-  recovery-code use, and the offline operations `operator_provisioned`, `mfa_reset`, `mfa_key_rotated`. It is separate from
-  `operator_audit` on purpose: failures can have **no identifiable operator** (unknown/expired challenge) and are stored with
-  `operator_id NULL`, never with an invented identity. No code, secret, raw email or raw IP is stored (`ip_hash` is a one-way hash).
-  Success events commit in the same transaction as the sign-in; failure events are best-effort (a broken log never changes what
-  the caller sees). Throttled requests (429) are not logged one by one, to keep the table from being a flood target.
-  Read it with SQL (there is no UI): `SELECT at,event,reason,source,actor_label FROM operator_security_events ORDER BY at DESC LIMIT 100;`
-  Retention of this table and of `operator_audit` is an owner decision; nothing deletes them automatically.
-- **Not implemented:** WebAuthn/passkeys; alerting on repeated failures.
+**MFA/TOTP has been removed from Operator login per owner decision (2026-10-08).** Login is email + password only. The `mfa` module, DB columns (`mfa_secret_enc`, `mfa_enrolled_at`, `mfa_last_step`, `enrollment_code_hash`, `enrollment_code_expires_at`), recovery codes table, challenges table, and `operator_security_events` table are retained as dead code and not dropped by migration.
+
+MFA endpoints return `410 Gone` with code `MFA_REMOVED`. The key-health guard has been removed from the router. `OPERATOR_MFA_ENC_KEY` is no longer read, validated, or required.
+
+- **Security log:** `operator_security_events` (append-only, migration 020) now records `login_success` and `break_glass_login`. The table remains append-only. Read it with SQL (there is no UI): `SELECT at,event,reason,source,actor_label FROM operator_security_events ORDER BY at DESC LIMIT 100;`
+- **Scripts:** `reset-operator-mfa.ts` and `rotate-operator-mfa-key.ts` are stubs that exit with an error message.
 
 ## Offline provisioning and reset (owner-run)
 
@@ -96,9 +79,9 @@ running it, e.g. `pemilik-proyek`) and writes it into `operator_security_events`
 
 | Step | Command (stdin is JSON, never shell arguments) |
 |---|---|
-| Provision staff | `create-local-operator.ts` with `{email,name,password(>=12),permissions[]}`; accepts operational scopes only and prints a one-time enrollment code (24 h). Give the code out-of-band, separately from the password. |
-| Reset one operator | `reset-operator-mfa.ts` with `{"email":...}`: deletes recovery codes, clears the factor, **revokes sessions and open challenges**, forces re-enrollment with a new code. |
-| Reset everyone (lost key) | `reset-operator-mfa.ts` with `{"all":true}`. |
+| Provision staff | `create-local-operator.ts` with `{email,name,password(>=12),permissions[]}`; accepts operational scopes plus `owner:insights`. |
+| ~~Reset one operator~~ | `reset-operator-mfa.ts` is now a stub (MFA removed). |
+| ~~Reset everyone~~ | No longer needed (MFA removed). |
 | List legacy student requests | `report-legacy-student-requests.ts` (read-only; ids and dates only). |
 
 Safety gates (`scripts/lib/operator-admin.ts`): either `OPERATOR_PROVISION_LOCAL=true` on a loopback database with `NODE_ENV`
@@ -110,22 +93,9 @@ exercised with synthetic identities on a disposable database.
 `owner:insights` is reserved to `koneva.id26@gmail.com` by the database constraint and cannot be granted through the staff
 provisioner. The owner-run provisioning path must grant the complete operational permission set plus `owner:insights`.
 
-## OPERATOR_MFA_ENC_KEY management
+## OPERATOR_MFA_ENC_KEY management (removed)
 
-- **Generate:** `head -c 32 /dev/urandom | base64` on a trusted machine; pipe straight into the secret manager. Never put a real value in the
-  repository, `memory.md`, chat, shell history or an `.env.example` (the examples contain only a placeholder; audited).
-- **Store:** in the deployment's secret store, injected as an environment variable. **Back up separately from database backups**
-  (sealed offline copy, two custodians if possible): a database backup without the key is useless for MFA by design, and the key
-  alone is useless without the database.
-- **Missing or malformed:** the API refuses to start when the panel is enabled (`OPERATOR_MFA_ENC_KEY must be base64 of exactly 32 random bytes`).
-- **Valid but wrong** (other environment, restored database, half-done rotation): the router samples stored secrets and answers
-  `503 OPERATOR_KEY_INVALID` to every operator request; nothing signs in, nothing is created, an error is logged. A secret that
-  fails to open during MFA answers `503 MFA_UNAVAILABLE`, never a session. The rest of the API keeps running.
-- **Rotate:** with a fresh backup, run `rotate-operator-mfa-key.ts` with `OPERATOR_MFA_ENC_KEY_OLD` and `OPERATOR_MFA_ENC_KEY_NEW` in the
-  environment. It re-seals every secret in **one transaction** (nothing changes if the old key is wrong), closes challenges, ends **all
-  operator sessions** (everyone signs in again) and logs `mfa_key_rotated`. Then deploy with the NEW key. Keep the old key until
-  the new deployment is verified; restoring the old key + a pre-rotation backup is the rollback.
-- **Lost key, no backup:** secrets cannot be recovered. Run `reset-operator-mfa.ts` with `{"all":true}` and have every operator enroll again.
+`OPERATOR_MFA_ENC_KEY` is no longer read, validated, or required. It has been removed from `.env.example`, `.env.production.example`, `inject-secrets.sh`, `docker-compose.personal.yml`, and all test scripts. The key-health guard middleware has been removed from the router. `rotate-operator-mfa-key.ts` is a stub that exits with error.
 
 ## Owner-panel audit and emergency account hardening
 
@@ -134,9 +104,9 @@ The follow-up migrations 030–032 add source IP to `owner.insights.view` audit 
 - **Runtime database role:** migration 031 creates `koneva_application` (NOLOGIN) and `koneva_app` (LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOBYPASSRLS). The personal stack migrator still uses the bootstrap `DB_USER`; API and Device Manager use `koneva_app`. `scripts/start-personal.sh` creates a random 32-byte URL-safe `APP_DB_PASSWORD` in ignored `.env.personal` with mode 0600, then sets the database password without printing it. The application role has SELECT/INSERT only on `operator_audit` and `operator_security_events`; it is not a member of `koneva_retention_executor`.
 - **Append-only audit:** table privileges deny application UPDATE/DELETE/TRUNCATE, and the existing immutable trigger remains an independent guard. Only the separately constrained retention executor can delete rows after the approved retention age. The database bootstrap/superuser remains available for offline migrations and administration; never give its credentials to application containers.
 - **Owner source IP:** migration 030 adds `operator_audit.client_ip` (`inet`). Each successful owner-insights view stores `request.ip`; the audit API returns it only to an operator that also has `owner:insights`. Other staff with `audit:read` receive `null`.
-- **Break-glass:** migration 032 permits only one `is_break_glass` operator and constrains its permission array to exactly `['audit:read']`. Provision offline with `scripts/provision-break-glass-operator.ts` after a fresh backup, explicit `DATABASE_URL`, `OPERATOR_ADMIN_LABEL`, and the offline target confirmation used by the other provisioning scripts. Its one-time MFA enrollment code is shown once; the owner stores the password and later recovery codes offline. No default account or secret is created by migration.
-- **Alert and validation:** successful TOTP or recovery-code sign-in sends a plain-text notice to `OPERATOR_BREAK_GLASS_ALERT_EMAIL` (personal-stack default: `koneva.id26@gmail.com`) before a session is created. If the sender/alert fails, that login is refused and a `break_glass_alert_failed` security event is recorded. Successful MFA login records `break_glass_login`, hashes the IP in the security event, and updates `break_glass_validated_at`. Owner Insights marks validation due after 90 days; each actual successful login restarts that interval. Delivery must be tested with the disposable `dev-outbox`; do not use the real Gmail transport as a test.
-- **Quarterly access review:** every three months review all Operator accounts for ongoing need, minimum permissions, MFA/recovery custody, and privilege creep; disable former staff or stale accounts.
+- **Break-glass:** migration 032 permits only one `is_break_glass` operator and constrains its permission array to exactly `['audit:read']`. Provision offline with `scripts/provision-break-glass-operator.ts` after a fresh backup, explicit `DATABASE_URL`, `OPERATOR_ADMIN_LABEL`, and the offline target confirmation used by the other provisioning scripts. The owner stores the password offline. No default account or secret is created by migration.
+- **Alert and validation:** successful login sends a plain-text notice to `OPERATOR_BREAK_GLASS_ALERT_EMAIL` (personal-stack default: `koneva.id26@gmail.com`) before a session is created. If the sender/alert fails, that login is refused and a `break_glass_alert_failed` security event is recorded. Successful login records `break_glass_login`, hashes the IP in the security event, and updates `break_glass_validated_at`. Owner Insights marks validation due after 90 days; each actual successful login restarts that interval. Delivery must be tested with the disposable `dev-outbox`; do not use the real Gmail transport as a test.
+- **Quarterly access review:** every three months review all Operator accounts for ongoing need, minimum permissions, and privilege creep; disable former staff or stale accounts.
 
 ## Legacy `/admin` interface
 
@@ -182,7 +152,6 @@ No environment file was changed. Before starting an **isolated local** API, expl
 ```text
 OPERATOR_ENABLED=true
 OPERATOR_ALLOWED_ORIGIN=http://localhost:13000
-OPERATOR_MFA_ENC_KEY=<base64 of 32 random bytes, e.g. `head -c 32 /dev/urandom | base64`; placeholder only, never commit a real value>
 # Either strict cookies (default: __Host-koneva_op, Secure; works on http://localhost in Chromium/Firefox) ...
 OPERATOR_COOKIE_NAME=__Host-koneva_op
 OPERATOR_COOKIE_SECURE=true
@@ -198,17 +167,16 @@ OPERATOR_COOKIE_SECURE=true
 The development origin must match the browser exactly. HTTP is allowed only for loopback origins. The default secure
 cookie configuration can instead be used with HTTPS. In production, weak cookie settings fail startup even if the
 operator module is disabled. Enabling the module in production additionally requires `OPERATOR_ALLOW_PRODUCTION=true`, an
-https origin, `__Host-` Secure cookies and a valid `OPERATOR_MFA_ENC_KEY`; otherwise startup fails.
+https origin and `__Host-` Secure cookies; otherwise startup fails.
 
 Migrations `018_operator_panel.sql`, `019_operator_mfa.sql` and `020_operator_security_events.sql` add the required schema (each needs the previous). Use the repository migration runner **only against an
 explicitly selected disposable/local database** for this phase. Do not run the ordinary migration command against a
 default `.env` connection. The test script below manages its own disposable container and migrations.
 
-`scripts/create-local-operator.ts` accepts JSON on stdin (`email`, `name`, `password`, `permissions`) and prints a one-time
-enrollment code (hand it over out-of-band, not in the same channel as the password). It requires
+`scripts/create-local-operator.ts` accepts JSON on stdin (`email`, `name`, `password`, `permissions`) and creates the operator account. It requires
 `OPERATOR_ADMIN_LABEL` plus the gates described in "Offline provisioning and reset", an explicit `DATABASE_URL` and the ordinary
 required API configuration. Invoke with `node --require ts-node/register scripts/create-local-operator.ts`.
-It never overwrites an existing identity and never prints the password. Recovery: `scripts/reset-operator-mfa.ts` (see MFA). Use synthetic identities for local testing;
+It never overwrites an existing identity and never prints the password. Use synthetic identities for local testing;
 do not store actual operator credentials in scripts, shell history or repository files. This helper is not production provisioning.
 
 ## Gmail sender for invitation OTP
@@ -271,12 +239,11 @@ The OTP limiter (see [ROLES.md](ROLES.md)) records `otp_threshold_events` when t
 
 ## Remaining operational work (before any production enablement)
 
-Done in the hardening stage: MFA security log, offline provisioning/reset/rotation procedures, key-mismatch fail-safe, `/admin` restrictions,
-cleanup job, CI definition, legacy-student handling, real-entrypoint and real-limit tests. Still open:
+Done in the hardening stage: security log, offline provisioning procedures, `/admin` restrictions,
+cleanup job, CI definition, legacy-student handling, real-entrypoint and real-limit tests. MFA removed (2026-10-08). Still open:
 1. The owner runs the offline procedures once on the real database (with backup) and confirms them; only synthetic runs exist.
-2. Real secret-manager storage, custodians and backup of `OPERATOR_MFA_ENC_KEY`.
-3. Set `TRUST_PROXY_HOPS` for the real proxy chain and `ADMIN_ALLOWED_NETWORKS` for real maintenance hosts; verify with the real proxy.
-4. Decide retention of `operator_audit` / `operator_security_events` / `otp_threshold_events`. Alerting: the OTP sender-budget alert is now **shown in the panel only** (no push channel); alerting on repeated `mfa_failed` / `recovery_code_used` still does not exist.
+2. Set `TRUST_PROXY_HOPS` for the real proxy chain and `ADMIN_ALLOWED_NETWORKS` for real maintenance hosts; verify with the real proxy.
+3. Decide retention of `operator_audit` / `operator_security_events` / `otp_threshold_events`. Alerting: the OTP sender-budget alert is now **shown in the panel only** (no push channel).
 5. Legacy data: paid-reference collisions block migration 018; contact plan for workspaces with legacy pending student requests.
 6. First CI run (never executed), Firefox/Safari cookie behaviour (`__Host-` on http://localhost) and screen-reader/keyboard review are unverified.
 7. Readiness: `/ready` hangs instead of answering 503 when Redis is unreachable (Redis client retries forever). Existing behaviour, not changed here.

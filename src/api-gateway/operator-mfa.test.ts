@@ -58,15 +58,11 @@ test('otpauth URI carries issuer, account and the standard parameters', () => {
   assert.match(uri, /^otpauth:\/\/totp\/KONEVA%20Operator%3Aops%40example\.test\?secret=ABCDEFGH&issuer=KONEVA%20Operator&algorithm=SHA1&digits=6&period=30$/);
 });
 
-test('configuration: MFA key is mandatory when enabled, and production stays gated', () => {
-  const key = randomBytes(32).toString('base64');
+test('configuration: MFA key is no longer required, production stays gated', () => {
   const local = { OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000', OPERATOR_COOKIE_NAME: 'koneva_op_dev', OPERATOR_COOKIE_SECURE: 'false', OPERATOR_INSECURE_DEV_COOKIES: 'true' };
-  assert.throws(() => readOperatorConfig(local), /OPERATOR_MFA_ENC_KEY/);
-  assert.throws(() => readOperatorConfig({ ...local, OPERATOR_MFA_ENC_KEY: 'short' }), /OPERATOR_MFA_ENC_KEY/);
-  assert.throws(() => readOperatorConfig({ ...local, OPERATOR_MFA_ENC_KEY: randomBytes(16).toString('base64') }), /32/);
-  assert.equal(readOperatorConfig({ ...local, OPERATOR_MFA_ENC_KEY: key }).mfaKey?.length, 32);
-  assert.equal(readOperatorConfig({}).mfaKey, null, 'a disabled module needs no key');
-  const production = { NODE_ENV: 'production', OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'https://ops.example.test', OPERATOR_MFA_ENC_KEY: key };
+  assert.equal(readOperatorConfig(local).enabled, true, 'no MFA key needed');
+  assert.equal(readOperatorConfig({}).enabled, false, 'a disabled module is fine');
+  const production = { NODE_ENV: 'production', OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'https://ops.example.test' };
   assert.throws(() => readOperatorConfig(production), /OPERATOR_ALLOW_PRODUCTION/);
   assert.throws(() => readOperatorConfig({ ...production, OPERATOR_ALLOW_PRODUCTION: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000' }));
   assert.throws(() => readOperatorConfig({ ...production, OPERATOR_ALLOW_PRODUCTION: 'true', OPERATOR_INSECURE_DEV_COOKIES: 'true' }));

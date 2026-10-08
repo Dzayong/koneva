@@ -5,22 +5,16 @@ import bcrypt from 'bcryptjs';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import type { OperatorConfig } from './config';
-import { authenticate, checkCsrf, checkOrigin, clearSessionCookie, confirmEnrollment, login, me, reserveLoginAttempt, sessionToken, startEnrollment, verifyMfa } from './auth';
+import { authenticate, checkCsrf, checkOrigin, clearSessionCookie, login, me, reserveLoginAttempt, sessionToken } from './auth';
 import { operatorTransaction, OperatorError, type Actor } from './core';
 import { confirmPayment, decideStudent } from './mutations';
 import { otpAlerts } from './alerts';
 import { ownerInsights } from './insights';
-import { createKeyGuard } from './key-health';
 import { invoiceDetail, listAudit, listInvoices, listStudents, listWorkspaces, studentDetail, workspaceDetail } from './reads';
 
 const uuid = z.string().uuid().transform((v) => v.toLowerCase());
 const keySchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i).transform((v) => v.toLowerCase());
 const password = z.string().min(1).max(128).refine((v) => Buffer.byteLength(v, 'utf8') <= 72);
-const challengeId = z.string().regex(/^[a-f0-9]{64}$/);
-const verifySchema = z.object({ challenge_id: challengeId, code: z.string().regex(/^\d{6}$/).optional(), recovery_code: z.string().min(8).max(32).optional() }).strict()
-  .refine((v) => Number(v.code !== undefined) + Number(v.recovery_code !== undefined) === 1, 'exactly one of code or recovery_code');
-const enrollStartSchema = z.object({ challenge_id: challengeId, enrollment_code: z.string().min(8).max(32).optional() }).strict();
-const enrollConfirmSchema = z.object({ challenge_id: challengeId, code: z.string().regex(/^\d{6}$/) }).strict();
 const loginSchema = z.object({ email: z.string().trim().toLowerCase().email().max(255), password }).strict();
 const pageSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25), offset: z.coerce.number().int().min(0).max(1_000_000).default(0), q: z.string().max(100).optional() }).strict();
 const invoiceFilters = pageSchema.extend({ status: z.enum(['unpaid','paid','void']).optional() });
@@ -43,7 +37,6 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
     if (!config.enabled) { response.status(404).json({ success: false, error: { code: 'OPERATOR_DISABLED', message: 'Panel operator belum diaktifkan.' } }); return; }
     next();
   });
-  router.use(createKeyGuard(db, config));
   router.use(rateLimit({ windowMs: 60_000, limit: config.requestsPerMinute ?? 120, standardHeaders: 'draft-8', legacyHeaders: false,
     handler: (_req, res) => res.status(429).json({ success: false, error: { code: 'RATE_LIMITED', message: 'Terlalu banyak permintaan.' } }) }));
   router.use((request, _response, next) => {
@@ -51,8 +44,6 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
     next();
   });
   router.use(express.json({ limit: '16kb', strict: true }));
-  // Pre-session steps: Origin is already enforced above; these also need JSON and the custom header. None of them
-  // creates a session until MFA has succeeded.
   const bootstrap = (request: express.Request): void => {
     if (!request.is('application/json') || request.get('X-Requested-With') !== 'koneva-operator') {
       throw new OperatorError(400, 'VALIDATION_ERROR', 'Login memerlukan JSON dan header operator.');
@@ -62,18 +53,12 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
     bootstrap(request);
     response.json({ success: true, data: await login(db, config, request, response, loginSchema.parse(request.body)) });
   });
-  router.post('/auth/mfa/verify', async (request, response) => {
-    bootstrap(request);
-    response.json({ success: true, data: await verifyMfa(db, config, request, response, verifySchema.parse(request.body)) });
-  });
-  router.post('/auth/mfa/enroll/start', async (request, response) => {
-    bootstrap(request);
-    response.json({ success: true, data: await startEnrollment(db, config, request, enrollStartSchema.parse(request.body)) });
-  });
-  router.post('/auth/mfa/enroll/confirm', async (request, response) => {
-    bootstrap(request);
-    response.json({ success: true, data: await confirmEnrollment(db, config, request, response, enrollConfirmSchema.parse(request.body)) });
-  });
+  const mfaDisabled: express.RequestHandler = (_request, response) => {
+    response.status(410).json({ success: false, error: { code: 'MFA_REMOVED', message: 'Verifikasi dua langkah sudah dihapus. Gunakan endpoint /auth/login.' } });
+  };
+  router.post('/auth/mfa/verify', mfaDisabled);
+  router.post('/auth/mfa/enroll/start', mfaDisabled);
+  router.post('/auth/mfa/enroll/confirm', mfaDisabled);
   router.use(async (request, response, next) => {
     const token = sessionToken(request, config);
     const actor = await authenticate(db, token);

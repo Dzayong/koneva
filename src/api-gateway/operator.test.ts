@@ -11,8 +11,7 @@ import pool from '../shared/database/connection';
 import { createOperatorRouter } from './operator/router';
 import { csrfFor } from './operator/auth';
 import { hash } from './operator/core';
-import { base32Decode, codeHash, encryptSecret, newEnrollmentCode, stepAt, totp } from './operator/mfa';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { requestStudentVerification, sweepStudentVerificationDeadlines } from './services/billing.service';
 import adminRoutes from './routes/admin.routes';
 import { adminAuth } from './middleware/auth';
@@ -22,8 +21,7 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
   const url = new URL(process.env['DATABASE_URL']!);
   assert.ok(['127.0.0.1','localhost'].includes(url.hostname) && url.pathname === '/operator_test', 'Refusing non-test database');
   const origin = 'http://localhost:13000';
-  const mfaKey = process.env['OPERATOR_MFA_ENC_KEY'] ? Buffer.from(process.env['OPERATOR_MFA_ENC_KEY'], 'base64') : randomBytes(32); // one fixed key per run: the guard compares against every stored secret
-  const config = { enabled: true, origin, cookieName: 'koneva_op_test', secure: false, mfaKey, requestsPerMinute: 100_000 };
+  const config = { enabled: true, origin, cookieName: 'koneva_op_test', secure: false, requestsPerMinute: 100_000 };
   await pool.query('CREATE TABLE IF NOT EXISTS _migrations (name text PRIMARY KEY)');
   const executed = new Set((await pool.query<{ name: string }>('SELECT name FROM _migrations')).rows.map((r) => r.name));
   const dir = path.join(__dirname, '../../migrations');
@@ -53,21 +51,12 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
   const ownerPermissions = [...allPermissions, 'owner:insights'];
   const testPassword = 'synthetic-test-password-26';
   const passwordHash = await bcrypt.hash(testPassword, 12);
-  async function operator(permissions = allPermissions, options: { mfa?: boolean } = {}, emailOverride?: string) {
+  async function operator(permissions = allPermissions, emailOverride?: string) {
     const id = randomUUID(), token = randomBytes(32).toString('hex'), email = emailOverride ?? `${id}@example.test`;
-    const secret = randomBytes(20);
-    // The secret must exist before the session: changing it revokes sessions by design.
-    await pool.query('INSERT INTO operators(id,email,name,password_hash,permissions,mfa_secret_enc,mfa_enrolled_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-      [id,email,'Operator Uji',passwordHash,permissions, options.mfa ? encryptSecret(mfaKey, secret, id) : null, options.mfa ? new Date() : null]);
+    await pool.query('INSERT INTO operators(id,email,name,password_hash,permissions) VALUES ($1,$2,$3,$4,$5)',
+      [id,email,'Operator Uji',passwordHash,permissions]);
     await pool.query('INSERT INTO operator_sessions(token_hash,operator_id) VALUES ($1,$2)', [hash(token),id]);
-    return { id,email,token,secret,cookie: `${config.cookieName}=${token}`,csrf: csrfFor(token) };
-  }
-  /** A freshly provisioned operator: password and one-time enrollment code, no MFA yet, no session. */
-  async function provision() {
-    const id = randomUUID(), email = `${id}@example.test`, code = newEnrollmentCode();
-    await pool.query(`INSERT INTO operators(id,email,name,password_hash,permissions,enrollment_code_hash,enrollment_code_expires_at)
-      VALUES ($1,$2,'Operator Baru',$3,$4,$5, now()+interval '24 hours')`, [id,email,passwordHash,allPermissions,codeHash(code)]);
-    return { id,email,code };
+    return { id,email,token,cookie: `${config.cookieName}=${token}`,csrf: csrfFor(token) };
   }
   const op = await operator(), other = await operator();
   await t.test('the runtime privilege role may insert audit but cannot alter/delete it and is not superuser', async () => {
@@ -154,15 +143,9 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     const bad = await fetch(base+'/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json','X-Requested-With':'koneva-operator'},body:'{"note":"PRIVATE'});
     assert.equal(bad.status,400); assert.ok(!(await bad.text()).includes('PRIVATE'));
   });
-  await t.test('password step creates no session; MFA then rotates the old session and returns HttpOnly Strict cookie plus in-memory CSRF', async () => {
-    const account = await operator(allPermissions, { mfa: true });
-    const first = await call('/auth/login',{session:account,method:'POST',body:{email:account.email,password:testPassword}});
-    assert.equal(first.status,200,first.text); assert.equal(first.body.data.status,'mfa_required');
-    assert.equal(first.headers.get('set-cookie'),null,'no cookie before MFA');
-    assert.equal(first.body.data.csrf_token,undefined); assert.match(first.body.data.challenge_id,/^[a-f0-9]{64}$/);
-    assert.equal((await call('/me',{session:account})).status,200,'old session stays valid until MFA succeeds');
-    assertCode(await call('/me'),401,'UNAUTHENTICATED');
-    const result = await call('/auth/mfa/verify',{session:account,method:'POST',body:{challenge_id:first.body.data.challenge_id,code:totp(account.secret,stepAt(Date.now()))}});
+  await t.test('login rotates old session and returns HttpOnly Strict cookie plus in-memory CSRF', async () => {
+    const account = await operator();
+    const result = await call('/auth/login',{session:account,method:'POST',body:{email:account.email,password:testPassword}});
     assert.equal(result.status,200,result.text); assert.equal(result.body.data.status,'authenticated');
     assert.match(result.headers.get('set-cookie')!,/HttpOnly/); assert.match(result.headers.get('set-cookie')!,/SameSite=Strict/);
     assert.match(result.headers.get('set-cookie')!,/Path=\//); assert.ok(!result.headers.get('set-cookie')!.includes('wa_gateway_session'));
@@ -333,7 +316,7 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     assert.equal((await call('/insights', { session: denied })).status, 403, 'staff without the owner permission cannot load insights');
     assert.equal(Number((await pool.query("SELECT count(*)::int AS n FROM operator_audit WHERE action='owner.insights.view'")).rows[0]!.n), before, 'denied access does not create a successful-view audit row');
 
-    const owner = await operator(ownerPermissions, {}, 'koneva.id26@gmail.com');
+    const owner = await operator(ownerPermissions, 'koneva.id26@gmail.com');
     const ownerRow = await pool.query<{ permissions: string[] }>('SELECT permissions FROM operators WHERE id=$1', [owner.id]);
     assert.deepEqual(new Set(ownerRow.rows[0]?.permissions), new Set(ownerPermissions), 'owner receives the full operational set plus insights');
     await assert.rejects(
@@ -374,12 +357,12 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     process.env['DEV_EMAIL_OUTBOX_FILE'] = outbox;
     process.env['OPERATOR_BREAK_GLASS_ALERT_EMAIL'] = 'owner@example.test';
     try {
-      const account = await operator(['audit:read'], { mfa: true });
-      await pool.query('UPDATE operators SET is_break_glass=true WHERE id=$1', [account.id]);
-      const started = await call('/auth/login', { method: 'POST', body: { email: account.email, password: testPassword } });
-      assert.equal(started.body.data.status, 'mfa_required');
-      const result = await call('/auth/mfa/verify', { method: 'POST', body: { challenge_id: started.body.data.challenge_id, code: totp(account.secret, stepAt(Date.now())) } });
+      const id = randomUUID(), email = `${id}@example.test`;
+      await pool.query("INSERT INTO operators(id,email,name,password_hash,permissions,is_break_glass) VALUES ($1,$2,'Operator Darurat',$3,$4,true)",
+        [id, email, passwordHash, ['audit:read']]);
+      const result = await call('/auth/login', { method: 'POST', body: { email, password: testPassword } });
       assert.equal(result.status, 200, result.text);
+      assert.equal(result.body.data.status, 'authenticated');
       assert.deepEqual(result.body.data.permissions, ['audit:read']);
       const notification = await fs.readFile(outbox, 'utf8');
       assert.equal(notification.split('\n').filter(Boolean).length, 1);
@@ -388,7 +371,7 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
       const state = (await pool.query<{ break_glass_validated_at: Date | null; event_count: number }>(
         `SELECT o.break_glass_validated_at,
           (SELECT count(*)::int FROM operator_security_events WHERE operator_id=o.id AND event='break_glass_login') AS event_count
-         FROM operators o WHERE o.id=$1`, [account.id])).rows[0]!;
+         FROM operators o WHERE o.id=$1`, [id])).rows[0]!;
       assert.ok(state.break_glass_validated_at);
       assert.equal(state.event_count, 1);
     } finally {
@@ -448,103 +431,11 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     const limited=await call('/auth/login',{method:'POST',body:{email,password:'synthetic-wrong'}});
     assertCode(limited,429,'RATE_LIMITED');assert.ok(Number(limited.headers.get('retry-after'))>0);
   });
-  const resetLimits = () => pool.query('DELETE FROM operator_login_attempts');
-  await t.test('enrollment needs the out-of-band code; secrets are encrypted; recovery codes are issued once and stored hashed', async () => {
-    await resetLimits();
-    const p = await provision();
-    const login = await call('/auth/login',{method:'POST',body:{email:p.email,password:testPassword}});
-    assert.equal(login.body.data.status,'mfa_enrollment_required'); assert.equal(login.headers.get('set-cookie'),null);
-    const challenge = login.body.data.challenge_id;
-    assertCode(await call('/auth/mfa/enroll/start',{method:'POST',body:{challenge_id:challenge,enrollment_code:'AAAAA-BBBBB-CCCCC'}}),401,'ENROLLMENT_CODE_INVALID');
-    const start = await call('/auth/mfa/enroll/start',{method:'POST',body:{challenge_id:challenge,enrollment_code:p.code.toLowerCase()}});
-    assert.equal(start.status,200,start.text); assert.match(start.body.data.secret,/^[A-Z2-7]{32}$/); assert.match(start.body.data.otpauth_uri,/^otpauth:\/\/totp\//);
-    const pending = (await pool.query('SELECT pending_secret_enc FROM operator_challenges WHERE token_hash=$1',[hash(challenge)])).rows[0].pending_secret_enc as string;
-    assert.ok(!pending.includes(start.body.data.secret),'pending secret must be encrypted');
-    const good = totp(base32Decode(start.body.data.secret),stepAt(Date.now()));
-    const wrong = `${good.slice(0,5)}${(Number(good[5])+1)%10}`;
-    assertCode(await call('/auth/mfa/enroll/confirm',{method:'POST',body:{challenge_id:challenge,code:wrong}}),401,'MFA_INVALID');
-    assertCode(await call('/me'),401,'UNAUTHENTICATED');
-    const done = await call('/auth/mfa/enroll/confirm',{method:'POST',body:{challenge_id:challenge,code:good}});
-    assert.equal(done.status,200,done.text); assert.equal(done.body.data.status,'authenticated'); assert.equal(done.body.data.recovery_codes.length,10);
-    assert.match(done.headers.get('set-cookie')!,/HttpOnly/);
-    const stored = (await pool.query('SELECT mfa_secret_enc, enrollment_code_hash FROM operators WHERE id=$1',[p.id])).rows[0];
-    assert.ok(stored.mfa_secret_enc && !stored.mfa_secret_enc.includes(start.body.data.secret)); assert.equal(stored.enrollment_code_hash,null);
-    const hashes = (await pool.query('SELECT code_hash FROM operator_recovery_codes WHERE operator_id=$1',[p.id])).rows.map((r) => r.code_hash as string);
-    assert.equal(hashes.length,10); for (const code of done.body.data.recovery_codes as string[]) { assert.ok(hashes.includes(codeHash(code))); assert.ok(!hashes.includes(code)); }
-    assertCode(await call('/auth/mfa/enroll/confirm',{method:'POST',body:{challenge_id:challenge,code:good}}),401,'MFA_CHALLENGE_INVALID');
-    const session = { cookie: done.headers.get('set-cookie')!.split(';')[0]!, csrf: done.body.data.csrf_token };
-    assert.equal((await call('/me',{session})).status,200);
-    // An enrolled operator can no longer use the enrollment path.
-    const again = await call('/auth/login',{method:'POST',body:{email:p.email,password:testPassword}});
-    assert.equal(again.body.data.status,'mfa_required');
-    assertCode(await call('/auth/mfa/enroll/start',{method:'POST',body:{challenge_id:again.body.data.challenge_id,enrollment_code:p.code}}),401,'MFA_CHALLENGE_INVALID');
-  });
-  await t.test('a TOTP code works once (replay), wrong guesses exhaust the challenge, challenges are single-use and expire', async () => {
-    await resetLimits();
-    const a = await operator(allPermissions,{mfa:true});
-    // Password attempts are limited per email (5/15 min), so clear the bucket to be able to start many challenges here.
-    const begin = async () => { await resetLimits(); return (await call('/auth/login',{method:'POST',body:{email:a.email,password:testPassword}})).body.data.challenge_id as string; };
-    const verify = (challenge: string, code: string) => call('/auth/mfa/verify',{method:'POST',body:{challenge_id:challenge,code}});
-    const step = stepAt(Date.now());
-    const first = await verify(await begin(),totp(a.secret,step));
-    assert.equal(first.status,200,first.text);
-    assertCode(await verify(await begin(),totp(a.secret,step)),401,'MFA_INVALID');            // same code again = replay
-    assertCode(await verify(await begin(),totp(a.secret,step-1)),401,'MFA_INVALID');          // older step is not newer than the last accepted one
-    assert.equal((await verify(await begin(),totp(a.secret,step+1))).status,200);             // a strictly newer step is fine
-    const doomed = await begin();
-    for (let n=0;n<5;n++) assertCode(await verify(doomed,'000000'.replace('0',String(n))),401,'MFA_INVALID');
-    assertCode(await verify(doomed,totp(a.secret,step+1)),401,'MFA_CHALLENGE_INVALID');       // exhausted: even a right code is refused
-    const spent = await begin(); await pool.query("UPDATE operator_challenges SET consumed_at=now() WHERE token_hash=$1",[hash(spent)]);
-    assertCode(await verify(spent,totp(a.secret,step+1)),401,'MFA_CHALLENGE_INVALID');
-    const old = await begin(); await pool.query("UPDATE operator_challenges SET expires_at=now()-interval '1 second' WHERE token_hash=$1",[hash(old)]);
-    assertCode(await verify(old,totp(a.secret,step+1)),401,'MFA_CHALLENGE_INVALID');
-    const older = await begin(); const newer = await begin();                                   // a new login closes the older challenge
-    assertCode(await verify(older,'123456'),401,'MFA_CHALLENGE_INVALID'); // superseded by the newer login
-    assertCode(await verify(newer,'123456'),401,'MFA_INVALID');
-    for (const headers of [{Origin:'https://evil.example'},{'X-Requested-With':''}]) assert.notEqual((await call('/auth/mfa/verify',{method:'POST',body:{challenge_id:'a'.repeat(64),code:'123456'},headers})).status,200);
-    assertCode(await call('/auth/mfa/verify',{method:'POST',body:{challenge_id:'a'.repeat(64),code:'123456',recovery_code:'AAAAA-BBBBB'}}),400,'VALIDATION_ERROR');
-  });
-  await t.test('MFA attempts are also limited per operator across challenges, with Retry-After', async () => {
-    await resetLimits();
-    const a = await operator(allPermissions,{mfa:true});
-    let last: Awaited<ReturnType<typeof call>> | undefined;
-    for (let n = 0; n < 11; n++) {
-      const login = await call('/auth/login',{method:'POST',body:{email:a.email,password:testPassword}});
-      assert.equal(login.status,200,`login ${n}: ${login.text}`);
-      // Keep the password bucket out of the way; only the MFA bucket is under test.
-      await pool.query("DELETE FROM operator_login_attempts WHERE bucket = $1 OR bucket = $2", [hash(`email:${a.email}`), hash('ip:127.0.0.1')]);
-      last = await call('/auth/mfa/verify',{method:'POST',body:{challenge_id:login.body.data.challenge_id,code:'000000'}});
-      if (n < 10) assertCode(last,401,'MFA_INVALID');
+  await t.test('MFA endpoints return 410 Gone', async () => {
+    for (const route of ['/auth/mfa/verify', '/auth/mfa/enroll/start', '/auth/mfa/enroll/confirm']) {
+      const result = await call(route, { session: op, method: 'POST', body: {} });
+      assert.equal(result.status, 410, `${route}: ${result.text}`);
+      assert.equal(result.body.error.code, 'MFA_REMOVED');
     }
-    assertCode(last!,429,'RATE_LIMITED'); assert.ok(Number(last!.headers.get('retry-after')) > 0);
-  });
-  await t.test('recovery codes work exactly once and report how many remain', async () => {
-    await resetLimits();
-    const p = await provision();
-    const login = await call('/auth/login',{method:'POST',body:{email:p.email,password:testPassword}});
-    const start = await call('/auth/mfa/enroll/start',{method:'POST',body:{challenge_id:login.body.data.challenge_id,enrollment_code:p.code}});
-    const done = await call('/auth/mfa/enroll/confirm',{method:'POST',body:{challenge_id:login.body.data.challenge_id,code:totp(base32Decode(start.body.data.secret),stepAt(Date.now()))}});
-    const [first,second] = done.body.data.recovery_codes as string[];
-    const begin = async () => { const r = await call('/auth/login',{method:'POST',body:{email:p.email,password:testPassword}}); assert.equal(r.status,200,r.text); return r.body.data.challenge_id as string; };
-    const used = await call('/auth/mfa/verify',{method:'POST',body:{challenge_id:await begin(),recovery_code:first!.toLowerCase()}});
-    assert.equal(used.status,200,used.text); assert.equal(used.body.data.recovery_codes_remaining,9);
-    assertCode(await call('/auth/mfa/verify',{method:'POST',body:{challenge_id:await begin(),recovery_code:first!}}),401,'MFA_INVALID');
-    assert.equal((await call('/auth/mfa/verify',{method:'POST',body:{challenge_id:await begin(),recovery_code:second!}})).body.data.recovery_codes_remaining,8);
-  });
-  await t.test('offline MFA reset revokes sessions, clears the factor and demands re-enrollment with a new code', async () => {
-    await resetLimits();
-    const a = await operator(allPermissions,{mfa:true});
-    await pool.query('INSERT INTO operator_recovery_codes(operator_id,code_hash) VALUES ($1,$2)',[a.id,codeHash('AAAAA-BBBBB')]);
-    const output = await new Promise<string>((resolve, reject) => {
-      const child = execFile(process.execPath,['--require','ts-node/register','scripts/reset-operator-mfa.ts'],{ cwd: path.join(__dirname,'../..'), env: { ...process.env, NODE_ENV:'test', OPERATOR_PROVISION_LOCAL:'true', OPERATOR_ADMIN_LABEL:'pemilik-proyek-uji' } }, (error, stdout) => error ? reject(error) : resolve(stdout));
-      child.stdin!.end(JSON.stringify({ email: a.email }));
-    });
-    const code = /: ([2-9A-Z-]+)\s*$/.exec(output)?.[1];
-    assert.ok(code,'prints a new enrollment code'); assert.ok(!output.includes(testPassword));
-    assertCode(await call('/me',{session:a}),401,'SESSION_EXPIRED');
-    const row = (await pool.query('SELECT mfa_secret_enc,mfa_enrolled_at,enrollment_code_hash FROM operators WHERE id=$1',[a.id])).rows[0];
-    assert.equal(row.mfa_secret_enc,null); assert.equal(row.mfa_enrolled_at,null); assert.equal(row.enrollment_code_hash,codeHash(code!));
-    assert.equal((await pool.query('SELECT count(*)::int AS n FROM operator_recovery_codes WHERE operator_id=$1',[a.id])).rows[0].n,0);
-    assert.equal((await call('/auth/login',{method:'POST',body:{email:a.email,password:testPassword}})).body.data.status,'mfa_enrollment_required');
   });
 });

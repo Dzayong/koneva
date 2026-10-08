@@ -5,8 +5,8 @@ import { AuthFlowPanel } from "@/components/operator/auth-flow-panel";
 import { useOperatorSession } from "@/hooks/use-operator";
 
 /**
- * REAUTH_REQUIRED is answered before any effect, so nothing was changed. Signing in again (password + MFA) refreshes the
- * session; the caller then resubmits the SAME payload with the SAME idempotency key.
+ * REAUTH_REQUIRED is answered before any effect, so nothing was changed. Signing in again refreshes the session;
+ * the caller then resubmits the SAME payload with the SAME idempotency key.
  */
 export function ReauthPrompt({ onSignedIn }: { onSignedIn: () => void }) {
   const email = useOperatorSession().data?.operator.email;

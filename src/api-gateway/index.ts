@@ -28,6 +28,7 @@ import { purgeOldCommands } from './services/command.service';
 import deviceContentRoutes from './routes/device-content.routes';
 import billingRoutes from './routes/billing.routes';
 import publicRoutes from './routes/public.routes';
+import dokuWebhookRoutes from './routes/doku-webhook.routes';
 import { drainStudentEmailOutbox, sweepStudentVerificationDeadlines, sweepSubscriptions } from './services/billing.service';
 import { sweepQuotaHolds } from './services/message.service';
 import { auditTrail } from './middleware/audit';
@@ -54,7 +55,9 @@ app.use(cors(config.env === 'production' ? {
   origin: process.env.CORS_ORIGIN?.split(',').map(s => s.trim()) ?? false,
   credentials: true,
 } : {}));
-app.use(express.json({ limit: '1mb' }));
+// `verify` only stashes the raw bytes (req.rawBody); it does not change parsing. Needed to check an
+// inbound webhook signature (DOKU), which is computed over the exact bytes sent, not a re-serialised body.
+app.use(express.json({ limit: '1mb', verify: (request, _response, buf) => { (request as express.Request).rawBody = buf; } }));
 app.use(rateLimit({
   windowMs: 60_000,
   limit: 120,
@@ -89,6 +92,7 @@ app.get('/ready', async (_request, response) => {
 });
 app.use('/auth', authRoutes);
 app.use('/public', publicRoutes);
+app.use(dokuWebhookRoutes);
 app.use('/api/v1', tenantAuth, authorize, auditTrail, messageRoutes, deviceRoutes, tenantRoutes,
   contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, deviceContentRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes, billingRoutes);
 app.use('/admin', adminNetworkGuard(), adminAuth, adminRoutes);

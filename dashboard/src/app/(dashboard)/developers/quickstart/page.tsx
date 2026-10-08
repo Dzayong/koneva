@@ -6,6 +6,14 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Copy, KeyRound, Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -96,6 +104,7 @@ export default function QuickstartPage() {
   const [created, setCreated] = useState<CreatedApiKey | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const selected = deviceKey || online[0]?.device_key || "";
   const health = useDeviceHealth(selected);
@@ -137,6 +146,15 @@ export default function QuickstartPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <section aria-labelledby="langkah-kirim" className="space-y-4 rounded-lg border bg-card p-5">
           <h3 id="langkah-kirim" className="text-heading text-lg">1. Kirim pesan tes</h3>
+          <div className="space-y-1.5 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground">Device baru? Urutan yang benar:</p>
+            <p>1. Pindai QR di halaman Device sampai statusnya <strong>online</strong>.</p>
+            <p>2. Minta penerima uji kirim <strong>MULAI</strong> atau <strong>START</strong> ke nomor ini dari WhatsApp mereka sendiri.</p>
+            <p>3. Baru kirim di bawah — tanpa langkah 2, pesan promosi ditolak (bukan bug).</p>
+          </div>
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+            <strong>Perhatian:</strong> tombol di bawah mengirim pesan WhatsApp sungguhan ke nomor yang Anda tulis. Bukan simulasi.
+          </div>
           {warming && (
             <p role="note" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
               Nomor ini masih di hari ke-{health.data?.warmup_day} masa pemanasan. Sampai hari ke-3, nomor hanya boleh membalas orang yang menghubunginya dalam 24 jam terakhir.
@@ -148,7 +166,7 @@ export default function QuickstartPage() {
               Belum ada device yang online. <Link href="/devices" className="font-medium text-primary underline underline-offset-4">Sambungkan device</Link> dulu, lalu kembali ke sini.
             </div>
           ) : (
-            <form onSubmit={(e) => { e.preventDefault(); if (validTo) send.mutate(); }} className="space-y-4">
+            <form onSubmit={(e) => { e.preventDefault(); if (validTo) setConfirmOpen(true); }} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="qs-device">Kirim dari device</Label>
                 <Select value={selected} onValueChange={setDeviceKey}>
@@ -166,8 +184,11 @@ export default function QuickstartPage() {
                 <Textarea id="qs-text" rows={3} maxLength={4096} value={text} onChange={(e) => setText(e.target.value)} />
               </div>
               <Button type="submit" disabled={!can("messages:send") || !validTo || !text.trim() || send.isPending}>
-                {send.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Mengirim…</> : <><Send className="mr-2 h-4 w-4" />Kirim pesan tes</>}
+                {send.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Mengirim…</> : <><Send className="mr-2 h-4 w-4" />Tinjau dan kirim</>}
               </Button>
+              {!can("messages:send") && (
+                <p className="text-xs text-destructive">Peran Anda tidak punya izin mengirim pesan (<code>messages:send</code>). Minta Owner workspace ini.</p>
+              )}
             </form>
           )}
           {send.data && <div className="border-t pt-4"><Result id={send.data.message_id} /></div>}
@@ -202,6 +223,28 @@ export default function QuickstartPage() {
           <p className="text-xs text-muted-foreground">Untuk OTP, tambahkan <code>&quot;priority&quot;: &quot;urgent&quot;</code> pada isi permintaan supaya pesan dikirim tanpa jeda.</p>
         </section>
       </div>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Konfirmasi kirim pesan WhatsApp sungguhan</DialogTitle>
+            <DialogDescription>Periksa sekali lagi — ini mengirim pesan nyata, bukan simulasi, dan tidak bisa dibatalkan setelah terkirim.</DialogDescription>
+          </DialogHeader>
+          <dl className="space-y-2 text-sm">
+            <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Device</dt><dd>{selected}</dd></div>
+            <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Ke</dt><dd>{digits}</dd></div>
+            <dt className="text-muted-foreground">Pesan</dt>
+            <dd className="rounded-md border bg-muted/40 p-2 whitespace-pre-wrap">{text}</dd>
+          </dl>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={send.isPending}>Batal</Button>
+            <Button onClick={() => { setConfirmOpen(false); send.mutate(); }} disabled={send.isPending}>
+              {send.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+              Ya, kirim sekarang
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <CreateKeyDialog open={createOpen} onOpenChange={setCreateOpen} initialPreset="send" initialName="Kirim pesan" onCreated={(key) => { setCreated(key); setRevealed(true); }} />
       {created && revealed && (

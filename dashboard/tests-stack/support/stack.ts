@@ -1,4 +1,4 @@
-import { createCipheriv, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Pool } from "pg";
 import { expect, type Page } from "@playwright/test";
@@ -20,52 +20,14 @@ export const CTL_URL = `http://127.0.0.1:${CTL}`;
 export const COOKIE = "__Host-koneva_op";
 export const PASSWORD = "synthetic-test-password-26";
 export const ALL = ["payments:read", "payments:confirm", "students:read", "students:decide", "workspaces:read", "audit:read"];
-const mfaKey = Buffer.from(process.env["OPERATOR_MFA_ENC_KEY"] ?? "", "base64");
-
-// Independent RFC 6238 implementation: if it disagrees with the backend, the login below fails.
-const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-export const base32Decode = (text: string): Buffer => {
-  let bits = 0, value = 0; const out: number[] = [];
-  for (const c of text.replace(/[\s=]/g, "").toUpperCase()) { value = (value << 5) | B32.indexOf(c); bits += 5; if (bits >= 8) { out.push((value >>> (bits - 8)) & 255); bits -= 8; } }
-  return Buffer.from(out);
-};
-export const stepNow = (offset = 0) => Math.floor(Date.now() / 30_000) + offset;
-export function totp(secret: Buffer, step: number): string {
-  const counter = Buffer.alloc(8); counter.writeBigUInt64BE(BigInt(step));
-  const mac = createHmac("sha1", secret).update(counter).digest();
-  const o = mac[mac.length - 1]! & 15;
-  const n = ((mac[o]! & 0x7f) << 24) | (mac[o + 1]! << 16) | (mac[o + 2]! << 8) | mac[o + 3]!;
-  return String(n % 1_000_000).padStart(6, "0");
-}
-function encrypt(plain: Buffer, operatorId: string): string {
-  const iv = randomBytes(12); const c = createCipheriv("aes-256-gcm", mfaKey, iv); c.setAAD(Buffer.from(operatorId));
-  const ct = Buffer.concat([c.update(plain), c.final()]);
-  return ["v1", iv.toString("base64url"), c.getAuthTag().toString("base64url"), ct.toString("base64url")].join(".");
-}
-
-export interface Op { id: string; email: string; secret: Buffer; used: number; enrollmentCode?: string }
+export interface Op { id: string; email: string }
 const passwordHash = bcrypt.hashSync(PASSWORD, 10);
-export async function createOperator(permissions = ALL, options: { mfa?: boolean; enrollmentCode?: string } = {}): Promise<Op> {
-  const id = randomUUID(), email = `${id}@example.test`, secret = randomBytes(20), mfa = options.mfa ?? true;
+export async function createOperator(permissions = ALL): Promise<Op> {
+  const id = randomUUID(), email = `${id}@example.test`;
   await db.query(
-    `INSERT INTO operators(id,email,name,password_hash,permissions,mfa_secret_enc,mfa_enrolled_at,enrollment_code_hash,enrollment_code_expires_at)
-     VALUES ($1,$2,'Operator Uji',$3,$4,$5,$6,$7,$8)`,
-    [id, email, passwordHash, permissions, mfa ? encrypt(secret, id) : null, mfa ? new Date() : null,
-      options.enrollmentCode ? createHmacHash(options.enrollmentCode) : null, options.enrollmentCode ? new Date(Date.now() + 3_600_000) : null]);
-  const op: Op = { id, email, secret, used: 0 };
-  if (options.enrollmentCode) op.enrollmentCode = options.enrollmentCode;
-  return op;
-}
-// codeHash() of the backend: sha256 of a fixed prefix plus the normalised code.
-import { createHash } from "node:crypto";
-function createHmacHash(code: string): string { return createHash("sha256").update(`koneva-operator-code-v1:${code.toUpperCase().replace(/[^A-Z0-9]/g, "")}`).digest("hex"); }
-
-/** A code the server has not seen yet: steps only move forward; waits for the next window when the +1 slack is used up. */
-export async function nextCode(op: Op): Promise<string> {
-  const wanted = Math.max(stepNow(), op.used + 1);
-  if (wanted > stepNow(1)) await new Promise((r) => setTimeout(r, (wanted - stepNow(1)) * 30_000 - (Date.now() % 30_000) + 200));
-  op.used = wanted;
-  return totp(op.secret, wanted);
+    'INSERT INTO operators(id,email,name,password_hash,permissions) VALUES ($1,$2,$3,$4,$5)',
+    [id, email, 'Operator Uji', passwordHash, permissions]);
+  return { id, email };
 }
 
 /** Login buckets are per IP and every test comes from 127.0.0.1; the throttling itself is tested in auth.spec.ts. */
@@ -76,9 +38,7 @@ export async function signInBrowser(page: Page, op: Op, options: { password?: st
   await page.goto("/operator/login");
   await page.getByLabel("Email").fill(op.email);
   await page.getByLabel("Kata sandi").fill(options.password ?? PASSWORD);
-  await page.getByRole("button", { name: "Lanjut" }).click();
-  await page.getByLabel("Kode verifikasi").fill(await nextCode(op));
-  await page.getByRole("button", { name: "Verifikasi" }).click();
+  await page.getByRole("button", { name: "Masuk" }).click();
   await expect(page).toHaveURL(/\/operator$/);
 }
 
@@ -97,11 +57,9 @@ export async function call(route: string, o: { base?: string; session?: ApiSessi
 }
 export async function apiSignIn(op: Op): Promise<ApiSession> {
   await resetLimits();
-  const a = await call("/auth/login", { method: "POST", body: { email: op.email, password: PASSWORD } });
-  expect(a.status, a.text).toBe(200);
-  const b = await call("/auth/mfa/verify", { method: "POST", body: { challenge_id: a.body.data.challenge_id, code: await nextCode(op) } });
-  expect(b.status, b.text).toBe(200);
-  return { cookie: b.headers.get("set-cookie")!.split(";")[0]!, csrf: b.body.data.csrf_token };
+  const r = await call("/auth/login", { method: "POST", body: { email: op.email, password: PASSWORD } });
+  expect(r.status, r.text).toBe(200);
+  return { cookie: r.headers.get("set-cookie")!.split(";")[0]!, csrf: r.body.data.csrf_token };
 }
 
 export async function fault(mode: "drop" | "html502" | "redirect" | "none") {

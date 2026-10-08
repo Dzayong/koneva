@@ -88,6 +88,9 @@ declare global {
       actor?: Actor;
       isAdmin?: boolean;
       validated?: { body?: unknown; query?: unknown; params?: unknown };
+      /** Raw request body bytes, captured by express.json()'s `verify` hook — needed to check an inbound
+       * webhook signature (e.g. DOKU's), since a parsed-then-re-serialised body would not match it. */
+      rawBody?: Buffer;
     }
   }
 }

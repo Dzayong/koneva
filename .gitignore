@@ -6,6 +6,9 @@ dist/
 .env.personal.*
 !.env.personal.example
 data/personal/
+scripts/.retention-sandbox-state/
+.env.doku-sandbox
+scripts/.doku-sandbox-state/
 docker/nginx/generated/
 docker/nginx/ssl/
 docker/nginx/www/

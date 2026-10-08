@@ -29,6 +29,9 @@ const environmentSchema = z.object({
   SIGNUP_ENABLED: z.string().optional(),
   PAYMENT_INSTRUCTIONS: z.string().optional(),
   OPERATOR_CONTACT: z.string().optional(),
+  DOKU_CLIENT_ID: z.string().optional(),
+  DOKU_SHARED_KEY: z.string().optional(),
+  APP_PUBLIC_URL: z.string().url().optional(),
 });
 
 const environment = environmentSchema.parse(process.env);
@@ -69,6 +72,15 @@ const config = {
     paymentInstructions: environment.PAYMENT_INSTRUCTIONS ?? 'Instruksi pembayaran belum diatur. Hubungi penyedia layanan.',
     operatorContact: environment.OPERATOR_CONTACT ?? null,
   },
+  // Sandbox only, by design (docs/DOKU_INTEGRATION_SPEC.md) — switching to the production DOKU base URL is a
+  // deliberate later change, not an env toggle, so this integration can never accidentally go live.
+  doku: {
+    baseUrl: 'https://api-sandbox.doku.com',
+    clientId: environment.DOKU_CLIENT_ID ?? null,
+    sharedKey: environment.DOKU_SHARED_KEY ?? null,
+    configured: Boolean(environment.DOKU_CLIENT_ID && environment.DOKU_SHARED_KEY),
+  },
+  appPublicUrl: environment.APP_PUBLIC_URL ?? null,
   sessionPath: environment.SESSION_PATH,
   sessionHostPath: environment.SESSION_HOST_PATH,
   limits: {

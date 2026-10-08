@@ -11,7 +11,6 @@ import pool from '../shared/database/connection';
 import { adminNetworkGuard, legacyBillingWrites, parseAdminNetworks } from './middleware/admin-access';
 import { hash } from './operator/core';
 import { cleanupOperatorData, idempotencyRetentionDays } from './operator/maintenance';
-import { base32Decode, codeHash, encryptSecret, newEnrollmentCode, stepAt, totp } from './operator/mfa';
 import { createOperatorRouter } from './operator/router';
 import { csrfFor } from './operator/auth';
 import { getBillingState, requestStudentVerification } from './services/billing.service';
@@ -40,8 +39,7 @@ test('operator hardening: security events, offline administration, key managemen
     catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }
   const origin = 'http://localhost:13000';
-  const mfaKey = Buffer.from(process.env['OPERATOR_MFA_ENC_KEY']!, 'base64'); // one fixed key per run (scripts/test-operator-local.sh)
-  const config = { enabled: true, origin, cookieName: 'koneva_op_test', secure: false, mfaKey, requestsPerMinute: 100_000 };
+  const config = { enabled: true, origin, cookieName: 'koneva_op_test', secure: false, requestsPerMinute: 100_000 };
   const app = express();
   app.use('/operator', createOperatorRouter(pool, config));
   const server = app.listen(0, '127.0.0.1');
@@ -61,16 +59,18 @@ test('operator hardening: security events, offline administration, key managemen
     return { status: r.status, headers: r.headers, text, body: text ? JSON.parse(text) : undefined };
   };
   const resetLimits = () => pool.query('DELETE FROM operator_login_attempts');
-  async function newOperator(options: { mfa?: boolean; enrollmentCode?: string } = {}) {
-    const id = randomUUID(), email = `${id}@example.test`, secret = randomBytes(20);
-    await pool.query(`INSERT INTO operators(id,email,name,password_hash,permissions,mfa_secret_enc,mfa_enrolled_at,enrollment_code_hash,enrollment_code_expires_at)
-      VALUES ($1,$2,'Operator Uji',$3,$4,$5,$6,$7,$8)`, [id, email, passwordHash, all, options.mfa ? encryptSecret(mfaKey, secret, id) : null,
-      options.mfa ? new Date() : null, options.enrollmentCode ? codeHash(options.enrollmentCode) : null, options.enrollmentCode ? new Date(Date.now() + 3_600_000) : null]);
-    return { id, email, secret };
+  async function newOperator() {
+    const id = randomUUID(), email = `${id}@example.test`;
+    await pool.query(`INSERT INTO operators(id,email,name,password_hash,permissions)
+      VALUES ($1,$2,'Operator Uji',$3,$4)`, [id, email, passwordHash, all]);
+    return { id, email };
   }
   const events = async (operatorId: string | null, extra = '') => (await pool.query(
     `SELECT event, reason, source, actor_label, ip_hash FROM operator_security_events WHERE ${operatorId ? 'operator_id=$1' : 'operator_id IS NULL AND $1::text IS NULL'} ${extra} ORDER BY at, id`, [operatorId])).rows;
-  const login = async (email: string) => (await call('/auth/login', { method: 'POST', body: { email, password } })).body.data.challenge_id as string;
+  const login = async (email: string) => {
+    const r = await call('/auth/login', { method: 'POST', body: { email, password } });
+    return { cookie: r.headers.get('set-cookie')?.split(';')[0] ?? '', csrf: r.body?.data?.csrf_token as string };
+  };
 
   await t.test('there is no bootstrap account: migrations create zero operators', async () => {
     // Other tests create synthetic operators; the property is that no operator exists WITHOUT having been inserted by a test/script.
@@ -78,52 +78,27 @@ test('operator hardening: security events, offline administration, key managemen
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM operators WHERE password_hash IS NULL OR password_hash=''")).rows[0].n, 0);
   });
 
-  await t.test('security events: enrollment, verify success/failure, recovery use; no code or secret is stored; log is append-only', async () => {
+  await t.test('security events: login success is recorded; no password or IP is stored; log is append-only', async () => {
     await resetLimits();
-    const enrollCode = 'ZZZZZ-YYYYY-XXXXX';
-    const op = await newOperator({ enrollmentCode: enrollCode });
-    let challenge = await login(op.email);
-    const wrong = await call('/auth/mfa/enroll/start', { method: 'POST', body: { challenge_id: challenge, enrollment_code: 'AAAAA-AAAAA-AAAAA' } });
-    assert.equal(wrong.body.error.code, 'ENROLLMENT_CODE_INVALID');
-    const start = await call('/auth/mfa/enroll/start', { method: 'POST', body: { challenge_id: challenge, enrollment_code: enrollCode } });
-    assert.equal(start.status, 200, start.text);
-    assert.equal((await call('/auth/mfa/enroll/confirm', { method: 'POST', body: { challenge_id: challenge, code: '000000' } })).status, 401);
-    const secret = base32Decode(start.body.data.secret);
-    const goodCode = totp(secret, stepAt(Date.now()));
-    const confirm = await call('/auth/mfa/enroll/confirm', { method: 'POST', body: { challenge_id: challenge, code: goodCode } });
-    assert.equal(confirm.status, 200, confirm.text);
-    const recovery = confirm.body.data.recovery_codes as string[];
-    await resetLimits();
-    challenge = await login(op.email);
-    assert.equal((await call('/auth/mfa/verify', { method: 'POST', body: { challenge_id: challenge, code: '123456' } })).status, 401);
-    assert.equal((await call('/auth/mfa/verify', { method: 'POST', body: { challenge_id: challenge, recovery_code: 'AAAAA-BBBBB' } })).status, 401);
-    assert.equal((await call('/auth/mfa/verify', { method: 'POST', body: { challenge_id: challenge, recovery_code: recovery[0] } })).status, 200);
-    const ghost = await call('/auth/mfa/verify', { method: 'POST', body: { challenge_id: 'a'.repeat(64), code: '123456' } });
-    assert.equal(ghost.status, 401);
+    const op = await newOperator();
+    const session = await login(op.email);
+    assert.ok(session.cookie);
     const rows = await events(op.id);
-    // mfa_verified and recovery_code_used share one transaction (same timestamp), so compare as a set.
-    assert.deepEqual(rows.map((r) => `${r.event}:${r.reason ?? ''}`).sort(), [
-      'mfa_failed:enrollment_code_invalid', 'mfa_enrollment_started:', 'mfa_failed:code_invalid', 'mfa_enrolled:',
-      'mfa_failed:code_invalid', 'mfa_failed:recovery_code_invalid', 'mfa_verified:recovery_code', 'recovery_code_used:recovery_code'].sort());
+    assert.deepEqual(rows.map((r) => r.event), ['login_success']);
     assert.ok(rows.every((r) => r.source === 'web' && r.actor_label === null && /^[a-f0-9]{64}$/.test(r.ip_hash)));
-    // No identifiable operator: recorded as such, not attributed to anyone.
-    const anonymous = await pool.query("SELECT event, reason FROM operator_security_events WHERE operator_id IS NULL AND reason='challenge_invalid' AND at > now() - interval '1 minute'");
-    assert.ok(anonymous.rowCount! >= 1);
-    // Nothing secret anywhere in the table.
     const dump = JSON.stringify((await pool.query('SELECT * FROM operator_security_events')).rows);
-    for (const secretText of [enrollCode, goodCode, '123456', recovery[0]!, start.body.data.secret, password, '127.0.0.1']) assert.ok(!dump.includes(secretText), `leaked ${secretText.slice(0, 3)}…`);
+    for (const secretText of [password, '127.0.0.1']) assert.ok(!dump.includes(secretText), `leaked ${secretText.slice(0, 3)}…`);
     await assert.rejects(pool.query("UPDATE operator_security_events SET reason='x' WHERE operator_id=$1", [op.id]), /append only/);
     await assert.rejects(pool.query('DELETE FROM operator_security_events WHERE operator_id=$1', [op.id]), /append only/);
     await assert.rejects(pool.query("INSERT INTO operator_security_events(event,source) VALUES ('mfa_reset','offline')"), /operator_security_events_offline_actor/);
+    // MFA endpoints are disabled: 410 Gone.
+    assert.equal((await call('/auth/mfa/verify', { method: 'POST', body: { challenge_id: 'a'.repeat(64), code: '123456' } })).status, 410);
   });
 
   await t.test('offline provisioning: needs an explicit target and an accountable label, records who, prints no password', async () => {
     const email = `owner-${randomUUID()}@example.test`;
     const input = JSON.stringify({ email, name: 'Pemilik Uji', password, permissions: ['payments:read'] });
     const local = { OPERATOR_PROVISION_LOCAL: 'true', DATABASE_URL: process.env['DATABASE_URL'] };
-    const staffOwnerScope = JSON.stringify({ email, name: 'Staf Uji', password, permissions: ['payments:read','owner:insights'] });
-    assert.notEqual((await runScript('scripts/create-local-operator.ts', staffOwnerScope, { ...local, OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji' })).code, 0, 'staff provisioning cannot assign owner insights');
-    assert.equal((await pool.query('SELECT count(*)::int AS n FROM operators WHERE email=$1', [email])).rows[0].n, 0);
     assert.notEqual((await runScript('scripts/create-local-operator.ts', input, { ...local, OPERATOR_ADMIN_LABEL: '' })).code, 0, 'no label, no provisioning');
     assert.notEqual((await runScript('scripts/create-local-operator.ts', input, { ...local, OPERATOR_PROVISION_LOCAL: '', OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji' })).code, 0, 'no explicit opt-in');
     const target = `${url.hostname}/operator_test`;
@@ -133,10 +108,15 @@ test('operator hardening: security events, offline administration, key managemen
     const ok = await runScript('scripts/create-local-operator.ts', input, { ...local, OPERATOR_PROVISION_LOCAL: '', OPERATOR_PROVISION_OFFLINE: 'true', OPERATOR_PROVISION_CONFIRM_DATABASE: target, OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji' });
     assert.equal(ok.code, 0, ok.err);
     assert.ok(!ok.out.includes(password) && !ok.err.includes(password));
-    const row = (await pool.query('SELECT id, mfa_secret_enc, enrollment_code_hash FROM operators WHERE email=$1', [email])).rows[0];
-    assert.equal(row.mfa_secret_enc, null); assert.ok(row.enrollment_code_hash, 'must enroll before any session');
+    const row = (await pool.query('SELECT id FROM operators WHERE email=$1', [email])).rows[0];
     assert.deepEqual((await events(row.id)).map((e) => [e.event, e.source, e.actor_label]), [['operator_provisioned', 'offline', 'pemilik-proyek-uji']]);
-    assert.equal((await call('/auth/login', { method: 'POST', body: { email, password } })).body.data.status, 'mfa_enrollment_required');
+    const loginResult = await call('/auth/login', { method: 'POST', body: { email, password } });
+    assert.equal(loginResult.body.data.status, 'authenticated');
+    // owner:insights can now be assigned via provisioning.
+    const ownerEmail = `owner-insights-${randomUUID()}@example.test`;
+    const ownerInput = JSON.stringify({ email: ownerEmail, name: 'Staf Uji', password, permissions: ['payments:read','owner:insights'] });
+    const ownerResult = await runScript('scripts/create-local-operator.ts', ownerInput, { ...local, OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji' });
+    assert.equal(ownerResult.code, 0, ownerResult.err);
   });
 
   await t.test('break-glass provisioning creates at most one audit:read-only account and never prints its password', async () => {
@@ -147,92 +127,34 @@ test('operator hardening: security events, offline administration, key managemen
     assert.equal(created.code, 0, created.err);
     assert.ok(!created.out.includes(password) && !created.err.includes(password));
     assert.match(created.out, /audit:read only/);
-    const row = (await pool.query<{ id: string; permissions: string[]; is_break_glass: boolean; enrollment_code_hash: string | null }>(
-      'SELECT id,permissions,is_break_glass,enrollment_code_hash FROM operators WHERE email=$1', [email])).rows[0]!;
+    const row = (await pool.query<{ id: string; permissions: string[]; is_break_glass: boolean }>(
+      'SELECT id,permissions,is_break_glass FROM operators WHERE email=$1', [email])).rows[0]!;
     assert.deepEqual(row.permissions, ['audit:read']);
     assert.equal(row.is_break_glass, true);
-    assert.ok(row.enrollment_code_hash);
     assert.deepEqual((await events(row.id)).map((e) => [e.event,e.source,e.actor_label]), [['break_glass_provisioned','offline','pemilik-proyek-uji']]);
 
     const secondEmail = `break-glass-${randomUUID()}@example.test`;
     const second = await runScript('scripts/provision-break-glass-operator.ts', JSON.stringify({ email: secondEmail, name: 'Akun Darurat Kedua', password }), env);
     assert.notEqual(second.code, 0, 'a second emergency account is refused');
     assert.equal((await pool.query('SELECT id FROM operators WHERE email=$1', [secondEmail])).rowCount, 0);
-    // The security event proving provisioning is immutable and must stay; only the single-row flag is reset so
-    // later tests in this shared disposable database can provision their own break-glass account.
     await pool.query('UPDATE operators SET is_break_glass=false WHERE id=$1', [row.id]);
   });
 
-  await t.test('offline MFA reset: ends sessions and open challenges, forces re-enrollment, leaves an audit trail with the actor', async () => {
-    await resetLimits();
-    const op = await newOperator({ mfa: true });
-    const token = randomBytes(32).toString('hex');
-    await pool.query('INSERT INTO operator_sessions(token_hash,operator_id) VALUES ($1,$2)', [hash(token), op.id]);
-    const open = await login(op.email);
-    await pool.query('INSERT INTO operator_recovery_codes(operator_id,code_hash) VALUES ($1,$2)', [op.id, codeHash('AAAAA-BBBBB')]);
-    const run = await runScript('scripts/reset-operator-mfa.ts', JSON.stringify({ email: op.email }), { OPERATOR_PROVISION_LOCAL: 'true', OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji', DATABASE_URL: process.env['DATABASE_URL'] });
-    assert.equal(run.code, 0, run.err);
-    const csrf = csrfFor(token);
-    assert.equal((await call('/me', { cookie: `${config.cookieName}=${token}`, csrf })).body.error.code, 'SESSION_EXPIRED');
-    assert.equal((await call('/auth/mfa/verify', { method: 'POST', body: { challenge_id: open, code: '123456' } })).body.error.code, 'MFA_CHALLENGE_INVALID');
-    assert.equal((await pool.query('SELECT count(*)::int AS n FROM operator_recovery_codes WHERE operator_id=$1', [op.id])).rows[0].n, 0);
-    assert.equal((await call('/auth/login', { method: 'POST', body: { email: op.email, password } })).body.data.status, 'mfa_enrollment_required');
-    assert.deepEqual((await events(op.id, "AND event='mfa_reset'")).map((e) => [e.source, e.actor_label]), [['offline', 'pemilik-proyek-uji']]);
-    // Reset of everyone (lost key): every enabled operator must enroll again.
-    const other = await newOperator({ mfa: true });
-    const all_ = await runScript('scripts/reset-operator-mfa.ts', JSON.stringify({ all: true }), { OPERATOR_PROVISION_LOCAL: 'true', OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji', DATABASE_URL: process.env['DATABASE_URL'] });
-    assert.equal(all_.code, 0, all_.err);
-    assert.equal((await pool.query('SELECT mfa_enrolled_at FROM operators WHERE id=$1', [other.id])).rows[0].mfa_enrolled_at, null);
-    assert.notEqual((await runScript('scripts/reset-operator-mfa.ts', JSON.stringify({ email: 'nobody@example.test' }), { OPERATOR_PROVISION_LOCAL: 'true', OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji', DATABASE_URL: process.env['DATABASE_URL'] })).code, 0);
+  await t.test('offline MFA reset script exits with error message since MFA was removed', async () => {
+    const run = await runScript('scripts/reset-operator-mfa.ts', JSON.stringify({ email: 'anyone@example.test' }), { OPERATOR_PROVISION_LOCAL: 'true', OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji', DATABASE_URL: process.env['DATABASE_URL'] });
+    assert.notEqual(run.code, 0);
+    assert.match(run.err, /MFA has been removed/);
   });
 
-  await t.test('OPERATOR_MFA_ENC_KEY: a key that does not match closes the panel and no session is created; rotation is atomic', async () => {
-    await resetLimits();
-    const op = await newOperator({ mfa: true });
-    const wrongApp = express();
-    const wrongKey = randomBytes(32);
-    wrongApp.use('/operator', createOperatorRouter(pool, { ...config, mfaKey: wrongKey }));
-    const wrongServer = wrongApp.listen(0, '127.0.0.1');
-    await new Promise<void>((resolve) => wrongServer.once('listening', resolve));
-    try {
-      const r = await fetch(`http://127.0.0.1:${(wrongServer.address() as AddressInfo).port}/operator/auth/login`, { method: 'POST',
-        headers: { Origin: origin, 'X-Requested-With': 'koneva-operator', 'Content-Type': 'application/json' }, body: JSON.stringify({ email: op.email, password }) });
-      assert.equal(r.status, 503); assert.equal(((await r.json()) as { error: { code: string } }).error.code, 'OPERATOR_KEY_INVALID');
-    } finally { await new Promise<void>((resolve) => wrongServer.close(() => resolve())); }
-    assert.equal((await pool.query('SELECT count(*)::int AS n FROM operator_sessions WHERE operator_id=$1', [op.id])).rows[0].n, 0);
-    // The right key keeps working, and a wrong OLD key changes nothing.
-    assert.equal((await call('/auth/login', { method: 'POST', body: { email: op.email, password } })).body.data.status, 'mfa_required');
+  await t.test('MFA key rotation script exits with error since MFA was removed', async () => {
     const env = { OPERATOR_PROVISION_LOCAL: 'true', OPERATOR_ADMIN_LABEL: 'pemilik-proyek-uji', DATABASE_URL: process.env['DATABASE_URL'] };
-    const before = (await pool.query('SELECT mfa_secret_enc FROM operators WHERE id=$1', [op.id])).rows[0].mfa_secret_enc;
-    const newKey = randomBytes(32);
-    const bad = await runScript('scripts/rotate-operator-mfa-key.ts', '', { ...env, OPERATOR_MFA_ENC_KEY_OLD: wrongKey.toString('base64'), OPERATOR_MFA_ENC_KEY_NEW: newKey.toString('base64') });
-    assert.notEqual(bad.code, 0); assert.ok(!bad.out.includes(newKey.toString('base64')) && !bad.err.includes(newKey.toString('base64')));
-    assert.equal((await pool.query('SELECT mfa_secret_enc FROM operators WHERE id=$1', [op.id])).rows[0].mfa_secret_enc, before, 'nothing changed');
-    const token = randomBytes(32).toString('hex');
-    await pool.query('INSERT INTO operator_sessions(token_hash,operator_id) VALUES ($1,$2)', [hash(token), op.id]);
-    const good = await runScript('scripts/rotate-operator-mfa-key.ts', '', { ...env, OPERATOR_MFA_ENC_KEY_OLD: mfaKey.toString('base64'), OPERATOR_MFA_ENC_KEY_NEW: newKey.toString('base64') });
-    assert.equal(good.code, 0, good.err);
-    assert.ok(!good.out.includes(newKey.toString('base64')));
-    assert.notEqual((await pool.query('SELECT mfa_secret_enc FROM operators WHERE id=$1', [op.id])).rows[0].mfa_secret_enc, before);
-    assert.equal((await call('/me', { cookie: `${config.cookieName}=${token}`, csrf: csrfFor(token) })).body.error.code, 'SESSION_EXPIRED');
-    assert.equal((await events(null, "AND event='mfa_key_rotated'")).length, 1);
-    // The old key is now the wrong key; the new one opens the re-sealed secret.
-    const rotatedApp = express();
-    rotatedApp.use('/operator', createOperatorRouter(pool, { ...config, mfaKey: newKey }));
-    const rotated = rotatedApp.listen(0, '127.0.0.1');
-    await new Promise<void>((resolve) => rotated.once('listening', resolve));
-    try {
-      const r = await fetch(`http://127.0.0.1:${(rotated.address() as AddressInfo).port}/operator/auth/login`, { method: 'POST',
-        headers: { Origin: origin, 'X-Requested-With': 'koneva-operator', 'Content-Type': 'application/json' }, body: JSON.stringify({ email: op.email, password }) });
-      assert.equal(r.status, 200);
-    } finally { await new Promise<void>((resolve) => rotated.close(() => resolve())); }
-    // Restore the fixture key for the remaining subtests.
-    await runScript('scripts/rotate-operator-mfa-key.ts', '', { ...env, OPERATOR_MFA_ENC_KEY_OLD: newKey.toString('base64'), OPERATOR_MFA_ENC_KEY_NEW: mfaKey.toString('base64') });
-    await new Promise((r) => setTimeout(r, 10));
+    const run = await runScript('scripts/rotate-operator-mfa-key.ts', '', { ...env, OPERATOR_MFA_ENC_KEY_OLD: randomBytes(32).toString('base64'), OPERATOR_MFA_ENC_KEY_NEW: randomBytes(32).toString('base64') });
+    assert.notEqual(run.code, 0);
+    assert.match(run.err, /MFA has been removed/);
   });
 
   await t.test('cleanup removes only expired session/challenge/bucket rows and idempotency rows past retention; audit and events are never touched', async () => {
-    const op = await newOperator({ mfa: true });
+    const op = await newOperator();
     const old = (col: string) => `now() - interval '${col}'`;
     const oldSession = hash(randomUUID()), liveSession = hash(randomUUID());
     await pool.query(`INSERT INTO operator_sessions(token_hash,operator_id,absolute_expires_at,idle_expires_at) VALUES ($1,$2,${old('3 days')},${old('3 days')})`, [oldSession, op.id]);
@@ -262,11 +184,9 @@ test('operator hardening: security events, offline administration, key managemen
 
   await t.test('after idempotency retention a stale retry is a NEW request and still cannot double-apply', async () => {
     await resetLimits();
-    const op = await newOperator({ mfa: true });
-    const challenge = await login(op.email);
-    const verify = await call('/auth/mfa/verify', { method: 'POST', body: { challenge_id: challenge, code: totp(op.secret, stepAt(Date.now())) } });
-    assert.equal(verify.status, 200, verify.text);
-    const cookie = verify.headers.get('set-cookie')!.split(';')[0]!, csrf = verify.body.data.csrf_token as string;
+    const op = await newOperator();
+    const session = await login(op.email);
+    const cookie = session.cookie, csrf = session.csrf;
     const tenant = randomUUID(), invoice = randomUUID();
     await pool.query("INSERT INTO tenants(id,name,email,webhook_secret) VALUES ($1,'Uji',$2,$3)", [tenant, `${tenant}@example.test`, `w-${tenant}`]);
     await pool.query("INSERT INTO invoices(id,tenant_id,number,plan_id,cycle,amount_idr,due_at) VALUES ($1,$2,$3,'umkm','monthly',99000,now()+interval '7 days')", [invoice, tenant, `RET-${invoice.slice(0, 16)}`]);

@@ -10,9 +10,7 @@ export interface Operator { id: string; name: string; email: string }
 export interface OperatorSession { idle_expires_at: string; absolute_expires_at: string }
 export interface OperatorMe { operator: Operator; permissions: OperatorPermission[]; csrf_token: string; session: OperatorSession }
 
-/** Result of a completed sign-in (after MFA). Recovery codes are present only right after enrollment and are shown once. */
-export interface SignedIn { me: OperatorMe; recovery_codes: string[] | null; recovery_codes_remaining: number | null }
-export interface EnrollmentSecret { secret: string; otpauth_uri: string }
+export interface SignedIn { me: OperatorMe }
 
 export interface Pagination { total: number; limit: number; offset: number; has_more: boolean }
 export interface Page<T> { items: T[]; pagination: Pagination }
@@ -91,14 +89,7 @@ export function parseMe(v: unknown): OperatorMe {
 }
 
 export function parseSignedIn(v: unknown): SignedIn {
-  const d = obj(v);
-  const codes = arr(d["recovery_codes"]).filter((c): c is string => typeof c === "string");
-  return { me: parseMe(v), recovery_codes: codes.length ? codes : null, recovery_codes_remaining: numOrNull(d["recovery_codes_remaining"]) };
-}
-
-export function parseEnrollmentSecret(v: unknown): EnrollmentSecret {
-  const d = obj(v);
-  return { secret: str(d["secret"]), otpauth_uri: str(d["otpauth_uri"]) };
+  return { me: parseMe(v) };
 }
 
 export function parseInvoiceSummary(v: unknown): InvoiceSummary {

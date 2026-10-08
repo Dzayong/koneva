@@ -78,6 +78,16 @@ export default function DeviceDetailPage(props: {
         </Link>
       </Button>
 
+      {connectRequested && device?.status === "online" && !connectDismissed && (
+        <div className="rounded-lg border border-green-300 bg-green-50 p-4 text-sm text-green-900 dark:border-green-800 dark:bg-green-950/40 dark:text-green-100">
+          <p className="font-medium">Device tersambung. Langkah berikutnya:</p>
+          <p className="mt-1">
+            1. Minta penerima uji kirim <strong>MULAI</strong>/<strong>START</strong> ke nomor ini dari WhatsApp mereka.{" "}
+            2. Setelah itu, <Link href="/developers/quickstart" className="font-medium underline underline-offset-4">kirim pesan uji di Mulai cepat</Link>.
+          </p>
+        </div>
+      )}
+
       {isLoading || !device ? (
         <Skeleton className="h-24 w-full" />
       ) : (

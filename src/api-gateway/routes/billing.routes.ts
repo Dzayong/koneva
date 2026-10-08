@@ -3,7 +3,8 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import config from '../../shared/config';
 import { validate } from '../middleware/validate';
-import { createOrder, getBillingState, requestStudentVerification } from '../services/billing.service';
+import { createOrder, getBillingState, getLatestUnpaidInvoice, requestStudentVerification } from '../services/billing.service';
+import { createDokuCheckout } from '../services/doku.service';
 import { ServiceError } from '../services/service-error';
 
 const router = Router();
@@ -31,6 +32,17 @@ router.post('/billing/orders', requireVerifiedEmail, validate({ body: orderSchem
     payment: { instructions: config.billing.paymentInstructions, contact: config.billing.operatorContact },
     notice: 'Setelah membayar, kirim bukti pembayaran ke penyedia layanan. Paket aktif setelah pembayaran dikonfirmasi.',
   });
+});
+
+router.post('/billing/doku/checkout', requireVerifiedEmail, async (request: Request, response: Response) => {
+  const invoice = await getLatestUnpaidInvoice(request.tenant!.id);
+  if (!invoice) throw new ServiceError(404, 'NO_UNPAID_INVOICE', 'Belum ada invoice yang belum dibayar. Buat pesanan dulu lewat POST /billing/orders.');
+  const checkout = await createDokuCheckout(invoice.number, invoice.amount_idr, {
+    id: request.tenant!.id,
+    name: request.tenant!.name,
+    email: request.tenant!.email,
+  });
+  response.json({ success: true, data: { invoice_number: invoice.number, payment_url: checkout.payment_url } });
 });
 
 router.post('/billing/student-request', validate({ body: studentSchema }), async (request: Request, response: Response) => {

@@ -1,9 +1,8 @@
 import { operatorClient } from "./client";
-import { OperatorApiError } from "./errors";
 import {
-  parseAudit, parseOtpAlerts, parseOwnerInsights, parseConfirmResult, parseDecisionResult, parseEnrollmentSecret, parseInvoiceDetail, parseInvoiceSummary, parseMe, parsePagination, parseSignedIn,
+  parseAudit, parseOtpAlerts, parseOwnerInsights, parseConfirmResult, parseDecisionResult, parseInvoiceDetail, parseInvoiceSummary, parseMe, parsePagination, parseSignedIn,
   parseStudentDetail, parseStudentSummary, parseWorkspace,
-  type AuditEntry, type OtpAlerts, type EnrollmentSecret, type SignedIn, type ConfirmPaymentInput, type ConfirmPaymentResult, type DecisionInput, type DecisionResult, type InvoiceDetail,
+  type AuditEntry, type OtpAlerts, type SignedIn, type ConfirmPaymentInput, type ConfirmPaymentResult, type DecisionInput, type DecisionResult, type InvoiceDetail,
   type InvoiceSummary, type InvoiceStatus, type OperatorMe, type OwnerInsights, type Page, type StudentRequestDetail, type StudentRequestSummary,
   type StudentStatus, type WorkspaceDetail,
 } from "./types";
@@ -17,9 +16,6 @@ function page<T>(res: { data: unknown; pagination?: unknown } | undefined, parse
   return { items, pagination: parsePagination(res?.pagination, PAGE_SIZE) };
 }
 
-/** Step 1 never yields a session: the password only earns a short-lived challenge that MFA must complete. */
-export type LoginOutcome = { status: "mfa_required" | "mfa_enrollment_required"; challengeId: string };
-
 function signedIn(res: { data: unknown } | undefined): SignedIn {
   const result = parseSignedIn(res?.data);
   operatorClient.setCsrf(result.me.csrf_token || null);
@@ -27,23 +23,8 @@ function signedIn(res: { data: unknown } | undefined): SignedIn {
 }
 
 export const operatorApi = {
-  async login(email: string, password: string): Promise<LoginOutcome> {
-    const res = await operatorClient.request<Record<string, unknown>>("/auth/login", { method: "POST", body: { email, password }, effectful: false });
-    const data = res?.data as { status?: string; challenge_id?: string } | undefined;
-    if ((data?.status === "mfa_required" || data?.status === "mfa_enrollment_required") && typeof data.challenge_id === "string") {
-      return { status: data.status, challengeId: data.challenge_id };
-    }
-    throw new OperatorApiError("server", 200, "BAD_RESPONSE", "Unexpected sign-in response");
-  },
-  async verifyMfa(challengeId: string, credential: { code: string } | { recoveryCode: string }): Promise<SignedIn> {
-    const body = "code" in credential ? { challenge_id: challengeId, code: credential.code } : { challenge_id: challengeId, recovery_code: credential.recoveryCode };
-    return signedIn(await operatorClient.request("/auth/mfa/verify", { method: "POST", body, effectful: false }));
-  },
-  async startEnrollment(challengeId: string, enrollmentCode: string): Promise<EnrollmentSecret> {
-    return parseEnrollmentSecret((await operatorClient.request("/auth/mfa/enroll/start", { method: "POST", body: { challenge_id: challengeId, enrollment_code: enrollmentCode }, effectful: false }))?.data);
-  },
-  async confirmEnrollment(challengeId: string, code: string): Promise<SignedIn> {
-    return signedIn(await operatorClient.request("/auth/mfa/enroll/confirm", { method: "POST", body: { challenge_id: challengeId, code }, effectful: false }));
+  async login(email: string, password: string): Promise<SignedIn> {
+    return signedIn(await operatorClient.request("/auth/login", { method: "POST", body: { email, password }, effectful: false }));
   },
 
   async me(): Promise<OperatorMe> {

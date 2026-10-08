@@ -3,8 +3,6 @@ export interface OperatorConfig {
   origin: string;
   cookieName: string;
   secure: boolean;
-  /** AES-256 key protecting TOTP secrets at rest; present whenever the module is enabled. */
-  mfaKey: Buffer | null;
   /** Per-IP request ceiling of the whole operator router; only tests override the default of 120. */
   requestsPerMinute?: number;
 }
@@ -19,12 +17,7 @@ export function readOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
   if (production && (insecure || !secure || !cookieName.startsWith('__Host-'))) {
     throw new Error('Insecure operator cookie configuration is forbidden in production');
   }
-  let mfaKey: Buffer | null = null;
   if (enabled) {
-    // MFA is mandatory for every operator sign-in in every environment; there is no switch to turn it off.
-    const raw = env['OPERATOR_MFA_ENC_KEY'] ?? '';
-    mfaKey = Buffer.from(raw, 'base64');
-    if (mfaKey.length !== 32 || mfaKey.toString('base64') !== raw) throw new Error('OPERATOR_MFA_ENC_KEY must be base64 of exactly 32 random bytes');
     if (production && env['OPERATOR_ALLOW_PRODUCTION'] !== 'true') {
       throw new Error('Operator production access needs explicit OPERATOR_ALLOW_PRODUCTION=true after the operational checklist in docs/OPERATOR_PANEL.md');
     }
@@ -36,5 +29,5 @@ export function readOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     if (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw new Error('HTTP operator access is limited to loopback development');
     if (production && url.protocol !== 'https:') throw new Error('Production operator access requires an https origin');
   }
-  return { enabled, origin, cookieName, secure, mfaKey };
+  return { enabled, origin, cookieName, secure };
 }

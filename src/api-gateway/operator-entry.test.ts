@@ -9,7 +9,6 @@ import path from 'node:path';
 import { test } from 'node:test';
 import bcrypt from 'bcryptjs';
 import pool from '../shared/database/connection';
-import { encryptSecret, stepAt, totp } from './operator/mfa';
 
 // Runs the REAL src/api-gateway/index.ts as a child process (scripts/test-operator-entry.sh: disposable PostgreSQL + Redis).
 const enabled = process.env['OPERATOR_ENTRY_TEST'] === '1';
@@ -19,8 +18,7 @@ if (enabled) {
     'refusing to run: EMAIL_TRANSPORT/GMAIL_* must be pinned by the test scripts (see scripts/test-operator-*.sh)');
 }
 const root = path.join(__dirname, '../..');
-const key = process.env['OPERATOR_MFA_ENC_KEY'] ?? '';
-const strong = randomBytes(24).toString('hex'); // 48 chars: passes the production secret checks
+const strong = randomBytes(24).toString('hex');
 const password = 'synthetic-test-password-26';
 
 const freePort = () => new Promise<number>((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = (s.address() as net.AddressInfo).port; s.close(() => resolve(p)); }); });
@@ -54,16 +52,15 @@ async function mustFail(env: Record<string, string>, pattern: RegExp): Promise<v
 }
 
 const production = { NODE_ENV: 'production', ADMIN_API_KEY: strong, JWT_SECRET: strong };
-const operatorOn = { OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000', OPERATOR_MFA_ENC_KEY: key };
+const operatorOn = { OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000' };
 
 test('real entrypoint: startup failures, middleware, cookies, proxy config, error handling', { skip: !enabled }, async (t) => {
   const passwordHash = await bcrypt.hash(password, 10);
   const all = ['payments:read', 'payments:confirm', 'students:read', 'students:decide', 'workspaces:read', 'audit:read'];
-  const mfaKey = Buffer.from(key, 'base64');
   async function operator() {
-    const id = randomUUID(), email = `${id}@example.test`, secret = randomBytes(20);
-    await pool.query('INSERT INTO operators(id,email,name,password_hash,permissions,mfa_secret_enc,mfa_enrolled_at) VALUES ($1,$2,$3,$4,$5,$6,now())', [id, email, 'Operator Uji', passwordHash, all, encryptSecret(mfaKey, secret, id)]);
-    return { id, email, secret };
+    const id = randomUUID(), email = `${id}@example.test`;
+    await pool.query('INSERT INTO operators(id,email,name,password_hash,permissions) VALUES ($1,$2,$3,$4,$5)', [id, email, 'Operator Uji', passwordHash, all]);
+    return { id, email };
   }
   const client = (server: Running, ip: string, origin = 'http://localhost:13000') => async (route: string, o: { method?: string; body?: unknown; cookie?: string; csrf?: string; headers?: Record<string, string> } = {}) => {
     const headers: Record<string, string> = { Origin: origin, 'X-Requested-With': 'koneva-operator', 'X-Forwarded-For': ip, ...o.headers };
@@ -79,8 +76,6 @@ test('real entrypoint: startup failures, middleware, cookies, proxy config, erro
   const nextIp = () => `198.51.100.${(ipCounter += 1)}`;
 
   await t.test('invalid security configuration stops startup before the server listens', async () => {
-    await mustFail({ ...operatorOn, OPERATOR_MFA_ENC_KEY: '' }, /OPERATOR_MFA_ENC_KEY/);
-    await mustFail({ ...operatorOn, OPERATOR_MFA_ENC_KEY: 'short' }, /OPERATOR_MFA_ENC_KEY/);
     await mustFail({ ...operatorOn, OPERATOR_COOKIE_SECURE: 'false', OPERATOR_COOKIE_NAME: 'koneva_op' }, /Weak operator cookies/);
     await mustFail({ ...operatorOn, OPERATOR_ALLOWED_ORIGIN: 'http://panel.example.test' }, /loopback/);
     await mustFail({ ...production, OPERATOR_INSECURE_DEV_COOKIES: 'true' }, /Insecure operator cookie/);
@@ -117,10 +112,9 @@ test('real entrypoint: startup failures, middleware, cookies, proxy config, erro
       assert.equal((await api('/operator/nope')).status, 401, 'unknown operator paths do not reveal themselves without a session');
       // Full sign-in through the real app; cookie attributes exactly as designed, and the CSRF token is not in a cookie.
       const op = await operator();
-      const first = await api('/operator/auth/login', { method: 'POST', body: { email: op.email, password } });
-      assert.equal(first.body.data.status, 'mfa_required'); assert.equal(first.headers.get('set-cookie'), null);
-      const done = await api('/operator/auth/mfa/verify', { method: 'POST', body: { challenge_id: first.body.data.challenge_id, code: totp(op.secret, stepAt(Date.now())) } });
+      const done = await api('/operator/auth/login', { method: 'POST', body: { email: op.email, password } });
       assert.equal(done.status, 200, done.text);
+      assert.equal(done.body.data.status, 'authenticated');
       const setCookie = done.headers.get('set-cookie')!;
       assert.match(setCookie, /^__Host-koneva_op=[a-f0-9]{64}; /); assert.match(setCookie, /Path=\//); assert.match(setCookie, /HttpOnly/);
       assert.match(setCookie, /Secure/); assert.match(setCookie, /SameSite=Strict/); assert.ok(!/Domain=/i.test(setCookie));
@@ -145,10 +139,9 @@ test('real entrypoint: startup failures, middleware, cookies, proxy config, erro
       assert.equal((await inside('/admin/plans', { headers: { 'x-admin-key': 'wrong' } })).status, 401);
       // Operator credentials are not admin credentials, and the admin key is not an operator credential.
       const op = await operator();
-      const step1 = await inside('/operator/auth/login', { method: 'POST', body: { email: op.email, password } });
-      const step2 = await inside('/operator/auth/mfa/verify', { method: 'POST', body: { challenge_id: step1.body.data.challenge_id, code: totp(op.secret, stepAt(Date.now())) } });
-      assert.equal(step2.status, 200, step2.text);
-      const cookie = step2.headers.get('set-cookie')!.split(';')[0]!;
+      const loginResult = await inside('/operator/auth/login', { method: 'POST', body: { email: op.email, password } });
+      assert.equal(loginResult.status, 200, loginResult.text);
+      const cookie = loginResult.headers.get('set-cookie')!.split(';')[0]!;
       assert.equal((await inside('/admin/plans', { cookie })).status, 401);
       assert.equal((await inside('/admin/plans', { headers: { Authorization: `Bearer ${cookie.split('=')[1]}` } })).status, 401);
       assert.equal((await inside('/operator/me', { headers: { 'x-admin-key': strong } })).status, 401);
@@ -209,7 +202,8 @@ test('real entrypoint: startup failures, middleware, cookies, proxy config, erro
       // Recovery: the window is shortened in the database to 2 s (15 real minutes are impractical); the server's own expiry logic then runs for real.
       await pool.query("UPDATE operator_login_attempts SET expires_at = now() + interval '2 seconds' WHERE expires_at > now() + interval '1 minute' AND attempts > 5");
       await new Promise((r) => setTimeout(r, 3000));
-      assert.equal((await api('/operator/auth/login', { method: 'POST', body: { email: victim.email, password } })).status, 200, 'accepted again once the window ended');
+      const recovered = await api('/operator/auth/login', { method: 'POST', body: { email: victim.email, password } });
+      assert.equal(recovered.status, 200, 'accepted again once the window ended');
       // Per address: 30 attempts on distinct unknown accounts, then 429; another address is unaffected.
       const flood = client(server, nextIp());
       let last = 0;
@@ -218,17 +212,11 @@ test('real entrypoint: startup failures, middleware, cookies, proxy config, erro
       const floodBlocked = await flood('/operator/auth/login', { method: 'POST', body: { email: bystander.email, password } });
       assert.equal(floodBlocked.status, 429); assert.ok(retryAfter(floodBlocked) > 0);
       assert.equal((await client(server, nextIp())('/operator/auth/login', { method: 'POST', body: { email: `x-${randomUUID()}@example.test`, password: 'whatever-password-1' } })).status, 401);
-      // MFA: per challenge five wrong codes, and per operator ten across challenges, then 429 with Retry-After.
-      const target = await operator(), mfaApi = client(server, nextIp());
-      const challenge = async () => (await mfaApi('/operator/auth/login', { method: 'POST', body: { email: target.email, password } })).body.data.challenge_id as string;
-      for (let round = 0; round < 2; round++) {
-        const id = await challenge();
-        for (let i = 0; i < 5; i++) assert.equal((await mfaApi('/operator/auth/mfa/verify', { method: 'POST', body: { challenge_id: id, code: '000000' } })).status, 401);
-        assert.equal((await mfaApi('/operator/auth/mfa/verify', { method: 'POST', body: { challenge_id: id, code: totp(target.secret, stepAt(Date.now())) } })).status, 401, 'an exhausted challenge stays dead even for the right code');
-      }
-      const third = await challenge();
-      const mfaBlocked = await mfaApi('/operator/auth/mfa/verify', { method: 'POST', body: { challenge_id: third, code: totp(target.secret, stepAt(Date.now())) } });
-      assert.equal(mfaBlocked.status, 429, mfaBlocked.text); assert.ok(retryAfter(mfaBlocked) > 0);
+      // MFA endpoints return 410 Gone.
+      const mfaApi = client(server, nextIp());
+      const mfaResult = await mfaApi('/operator/auth/mfa/verify', { method: 'POST', body: { challenge_id: 'a'.repeat(64), code: '123456' }, headers: { 'Content-Type': 'application/json' } });
+      assert.equal(mfaResult.status, 410);
+      assert.equal(mfaResult.body.error.code, 'MFA_REMOVED');
       // Router-wide ceiling: 120 requests a minute per address, isolated per address.
       const busy = client(server, nextIp());
       const codes: number[] = [];

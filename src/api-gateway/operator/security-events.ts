@@ -2,7 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import logger from '../../shared/utils/logger';
 import { hash } from './core';
 
-export type SecurityEvent = 'operator_provisioned' | 'break_glass_provisioned' | 'break_glass_login' | 'break_glass_alert_failed' | 'mfa_enrollment_started' | 'mfa_enrolled' | 'mfa_verified' | 'mfa_failed' | 'recovery_code_used' | 'mfa_reset' | 'mfa_key_rotated';
+export type SecurityEvent = 'login_success' | 'operator_provisioned' | 'break_glass_provisioned' | 'break_glass_login' | 'break_glass_alert_failed' | 'mfa_enrollment_started' | 'mfa_enrolled' | 'mfa_verified' | 'mfa_failed' | 'recovery_code_used' | 'mfa_reset' | 'mfa_key_rotated';
 export type SecurityReason = 'challenge_invalid' | 'code_invalid' | 'recovery_code_invalid' | 'enrollment_code_invalid' | 'totp' | 'recovery_code';
 
 export interface SecurityEventInput {

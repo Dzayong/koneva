@@ -39,8 +39,6 @@ export DOTENV_CONFIG_QUIET=true
 # Tests never send email. EMAIL_TRANSPORT and every Gmail variable are set explicitly, because shared/config loads .env
 # (dotenv does not override variables that already exist, not even empty ones). Individual tests switch to the file outbox themselves.
 export EMAIL_TRANSPORT=none GMAIL_OAUTH_CLIENT_ID= GMAIL_OAUTH_CLIENT_SECRET= GMAIL_OAUTH_REFRESH_TOKEN= GMAIL_SENDER_EMAIL= DEV_EMAIL_OUTBOX_FILE=
-# One synthetic MFA key for the whole run: the key guard compares against every secret stored in the shared disposable DB.
-OPERATOR_MFA_ENC_KEY=$(head -c 32 /dev/urandom | base64); export OPERATOR_MFA_ENC_KEY
 ./node_modules/.bin/tsc --noEmit
 if [[ "${1:-}" == '--all' ]]; then
   node --require ts-node/register --test --test-concurrency=1 src/**/*.test.ts src/api-gateway/services/mailer.test.ts src/api-gateway/services/recipient-consent.test.ts

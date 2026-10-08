@@ -33,3 +33,7 @@ export function useStudentRequest() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["billing"] }),
   });
 }
+
+export function useDokuCheckout() {
+  return useMutation({ mutationFn: () => api.createDokuCheckout() });
+}

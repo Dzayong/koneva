@@ -1,4 +1,4 @@
-// Shared guard for the offline operator administration scripts (provision, reset MFA). These are run by a person with
+// Shared guard for the offline operator administration scripts (provision). These are run by a person with
 // database access, never by the web API. There is no bootstrap account and no default password anywhere.
 export interface AdminContext { databaseUrl: string; label: string; target: string }
 

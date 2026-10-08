@@ -18,7 +18,7 @@ test.describe("operator sign-in and session handling (UI evidence, API faked)", 
     await page.goto("/operator/login");
     await page.getByLabel("Email").fill("ops@example.test");
     await page.getByLabel("Kata sandi").fill("salah");
-    await page.getByRole("button", { name: "Lanjut" }).click();
+    await page.getByRole("button", { name: "Masuk" }).click();
     await expect(page.getByRole("alert").filter({ hasText: "Email atau kata sandi salah" })).toBeVisible();
     await expect(page).toHaveURL(/\/operator\/login/);
   });
@@ -31,9 +31,8 @@ test.describe("operator sign-in and session handling (UI evidence, API faked)", 
     await expect(page).toHaveURL(/\/operator\/payments$/);
     await expect(page.getByRole("heading", { name: "Pembayaran" })).toBeVisible();
     expect((await storageKeys(page)).filter((k) => SENSITIVE.test(k))).toEqual([]);
-    // The panel identifies itself to the API on every call.
     expect(state.requests.every((r) => r.headers["x-requested-with"] === "koneva-operator")).toBe(true);
-    expect(await page.evaluate(() => document.cookie)).toBe(""); // nothing readable by scripts
+    expect(await page.evaluate(() => document.cookie)).toBe("");
   });
 
   test("an unsafe return address is ignored", async ({ page }) => {
@@ -48,29 +47,8 @@ test.describe("operator sign-in and session handling (UI evidence, API faked)", 
     await page.goto("/operator/login");
     await page.getByLabel("Email").fill("a@example.test");
     await page.getByLabel("Kata sandi").fill("x");
-    await page.getByRole("button", { name: "Lanjut" }).click();
+    await page.getByRole("button", { name: "Masuk" }).click();
     await expect(page.getByRole("alert").filter({ hasText: "42 detik" })).toBeVisible();
-  });
-
-  test("a wrong one-time code is refused and no session exists until the right one is given", async ({ page }) => {
-    const state = freshState({ authenticated: false });
-    await installOperatorMock(page, state);
-    await page.goto("/operator/login");
-    await signIn(page, { code: "000000" });
-    await expect(page.getByRole("alert").filter({ hasText: "Kode verifikasi salah" })).toBeVisible();
-    await expect(page).toHaveURL(/\/operator\/login/);
-    expect(state.mfaVerified).toBe(0);
-    await page.getByLabel("Kode verifikasi").fill("123456");
-    await page.getByRole("button", { name: "Verifikasi" }).click();
-    await expect(page).toHaveURL(/\/operator$/);
-  });
-
-  test("an expired challenge sends the operator back to the password step", async ({ page }) => {
-    await installOperatorMock(page, freshState({ authenticated: false, loginMode: "challenge_dies" }));
-    await page.goto("/operator/login");
-    await signIn(page);
-    await expect(page.getByRole("alert").filter({ hasText: "Verifikasi berakhir" })).toBeVisible();
-    await expect(page.getByLabel("Kata sandi")).toBeVisible();
   });
 
   test("when the operator API does not exist the login page says so", async ({ page }) => {
@@ -78,7 +56,7 @@ test.describe("operator sign-in and session handling (UI evidence, API faked)", 
     await page.goto("/operator/login");
     await page.getByLabel("Email").fill("a@example.test");
     await page.getByLabel("Kata sandi").fill("x");
-    await page.getByRole("button", { name: "Lanjut" }).click();
+    await page.getByRole("button", { name: "Masuk" }).click();
     await expect(page.getByRole("alert").filter({ hasText: "belum tersedia" })).toBeVisible();
   });
 
@@ -109,7 +87,6 @@ test.describe("operator sign-in and session handling (UI evidence, API faked)", 
     await page.getByRole("button", { name: "Keluar" }).click();
     await expect(page).toHaveURL(/\/operator\/login\?reason=logged_out/);
     expect(await page.evaluate(() => [localStorage.getItem("wa_gateway_session"), localStorage.getItem("wa_gateway_workspace")])).toEqual(["wgs_TENANT_TEST", "ws-1"]);
-    // sign-out was a 204 with no body and the client coped
     expect(state.requests.some((r) => r.path === "/auth/logout")).toBe(true);
   });
 

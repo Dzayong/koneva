@@ -21,7 +21,6 @@ export DATABASE_URL="postgres://postgres:operator_test_only@${binding}/operator_
 export NODE_ENV=test JWT_SECRET=stack-test-jwt ADMIN_API_KEY=stack-test-admin REDIS_URL=redis://127.0.0.1:1 DOTENV_CONFIG_QUIET=true
 export OPERATOR_STACK_HARNESS=1 OPERATOR_ENABLED=true OPERATOR_ALLOWED_ORIGIN=http://localhost:13300
 export OPERATOR_COOKIE_NAME=__Host-koneva_op OPERATOR_COOKIE_SECURE=true OPERATOR_INSECURE_DEV_COOKIES=false
-OPERATOR_MFA_ENC_KEY=$(head -c 32 /dev/urandom | base64); export OPERATOR_MFA_ENC_KEY
 export DEVICE_MANAGER_URL=http://127.0.0.1:18092 STACK_MANAGER_PORT=18092 EMAIL_TRANSPORT=dev-outbox DEV_EMAIL_OUTBOX_FILE="$outbox_dir/outbox.jsonl"
 # No Gmail variable may reach this run (shared/config loads .env; existing variables, even empty, are never overridden).
 export GMAIL_OAUTH_CLIENT_ID= GMAIL_OAUTH_CLIENT_SECRET= GMAIL_OAUTH_REFRESH_TOKEN= GMAIL_SENDER_EMAIL=
