@@ -51,7 +51,7 @@ export default function DocsPage() {
             {TOC.map(([id, label]) => <li key={id}><a href={`#${id}`} className="text-muted-foreground hover:text-primary">{label}</a></li>)}
           </ul>
         </nav>
-        <article className="max-w-3xl [&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_p]:mt-3 [&_p]:leading-relaxed [&_table]:mt-4 [&_table]:w-full [&_table]:text-sm [&_td]:border-b [&_td]:py-2 [&_td]:pr-4 [&_td]:align-top [&_th]:border-b [&_th]:py-2 [&_th]:pr-4 [&_th]:text-left [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:space-y-1.5 [&_ul]:pl-5">
+        <article className="max-w-3xl [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.85em] [&_p]:mt-3 [&_p]:leading-relaxed [&_table]:mt-4 [&_table]:w-full [&_table]:text-sm [&_td]:border-b [&_td]:py-2 [&_td]:pr-4 [&_td]:align-top [&_th]:border-b [&_th]:py-2 [&_th]:pr-4 [&_th]:text-left [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:space-y-1.5 [&_ul]:pl-5">
           <h1 className="font-display text-4xl md:text-5xl">Dokumentasi API</h1>
           <p className="text-lg text-muted-foreground">Kirim dan terima pesan WhatsApp dari aplikasi Anda memakai nomor Anda sendiri. Layanan ini memakai koneksi tidak resmi, jadi baca juga <Link className="text-primary underline" href="/#faq">risiko dan batasannya</Link>.</p>
 
