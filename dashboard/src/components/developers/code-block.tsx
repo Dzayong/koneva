@@ -35,7 +35,7 @@ export function CodeBlock({ tabs }: { tabs: CodeTab[] }) {
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied ? "Tersalin" : "Salin"}
         </button>
       </div>
-      <pre className="overflow-x-auto p-4 font-mono text-[12.5px] leading-6 text-slate-200"><code>{tab.code}</code></pre>
+      <pre className="overflow-x-auto p-4 font-mono text-[12.5px] leading-6 text-slate-200"><code className="!rounded-none !bg-transparent !px-0 !py-0 !text-inherit">{tab.code}</code></pre>
     </div>
   );
 }

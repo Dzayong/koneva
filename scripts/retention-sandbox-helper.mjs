@@ -79,12 +79,23 @@ const SEEDERS = {
          VALUES ('synthetic-retention-sandbox-tenant-sec','retention-sandbox-sec@example.test',NULL,'active') RETURNING id`,
       )
     ).rows[0].id;
+    const operatorId = (
+      await client.query(
+        `INSERT INTO operators(email,name,password_hash,permissions)
+         VALUES ('retention-sandbox-operator@example.test','Synthetic Retention Operator','not-a-login-hash',ARRAY[]::text[])
+         RETURNING id`,
+      )
+    ).rows[0].id;
     await client.query(
-      `INSERT INTO operator_audit(action,target_type,target_id,changes,request_id,at)
-       VALUES ('synthetic-sandbox','test','00000000-0000-4000-8000-000000000011','{}','00000000-0000-4000-8000-000000000012',now()-interval '13 months')`,
+      `INSERT INTO operator_audit(operator_id,action,target_type,target_id,changes,request_id,at)
+       VALUES ($1,'synthetic-sandbox','test','00000000-0000-4000-8000-000000000011','{}','00000000-0000-4000-8000-000000000012',now()-interval '13 months')`,
+      [operatorId],
     );
-    await client.query(`INSERT INTO operator_audit(action,target_type,target_id,changes,request_id)
-       VALUES ('synthetic-sandbox-fresh','test','00000000-0000-4000-8000-000000000013','{}','00000000-0000-4000-8000-000000000014')`);
+    await client.query(
+      `INSERT INTO operator_audit(operator_id,action,target_type,target_id,changes,request_id)
+       VALUES ($1,'synthetic-sandbox-fresh','test','00000000-0000-4000-8000-000000000013','{}','00000000-0000-4000-8000-000000000014')`,
+      [operatorId],
+    );
     await client.query(`INSERT INTO operator_security_events(at,event) VALUES (now()-interval '13 months','mfa_failed')`);
     await client.query(`INSERT INTO operator_security_events(event) VALUES ('mfa_failed')`);
     await client.query(
