@@ -16,6 +16,8 @@ const contactBody = z.object({
 }).strict();
 const updateBody = contactBody.partial().refine((value) => Object.keys(value).length > 0);
 const idParams = z.object({ id: z.string().uuid() });
+const groupBody = z.object({ name: z.string().trim().min(1).max(100) }).strict();
+const groupMembersBody = z.object({ contact_ids: z.array(z.string().uuid()).max(500) }).strict();
 const consentBody = z.object({
   status: z.enum(['opted_in', 'opted_out']),
   source_note: z.string().trim().min(1).max(500),
@@ -130,6 +132,94 @@ export async function deleteContact(request: Request, response: Response): Promi
   response.json({ success: true, data: null });
 }
 
+export async function listContactGroups(request: Request, response: Response): Promise<void> {
+  const result = await pool.query(
+    `SELECT g.id, g.name, g.created_at, g.updated_at, count(m.contact_id)::int AS member_count
+     FROM contact_groups g LEFT JOIN contact_group_members m
+       ON m.group_id = g.id AND m.tenant_id = g.tenant_id
+     WHERE g.tenant_id = $1 GROUP BY g.id ORDER BY g.name ASC`, [request.tenant!.id],
+  );
+  response.json({ success: true, data: result.rows });
+}
+
+export async function createContactGroup(request: Request, response: Response): Promise<void> {
+  const { name } = request.validated!.body as z.infer<typeof groupBody>;
+  try {
+    const result = await pool.query(
+      `INSERT INTO contact_groups (tenant_id, name) VALUES ($1, $2)
+       RETURNING id, name, created_at, updated_at`, [request.tenant!.id, name],
+    );
+    response.status(201).json({ success: true, data: { ...result.rows[0], member_count: 0 } });
+  } catch (error) {
+    if ((error as { code?: string }).code === '23505') throw new ServiceError(409, 'CONTACT_GROUP_EXISTS', 'A group with this name already exists');
+    throw error;
+  }
+}
+
+export async function updateContactGroup(request: Request, response: Response): Promise<void> {
+  const { id } = request.validated!.params as { id: string };
+  const { name } = request.validated!.body as z.infer<typeof groupBody>;
+  try {
+    const result = await pool.query(
+      `UPDATE contact_groups SET name = $1, updated_at = now()
+       WHERE id = $2 AND tenant_id = $3 RETURNING id, name, created_at, updated_at`, [name, id, request.tenant!.id],
+    );
+    if (!result.rows[0]) throw new ServiceError(404, 'CONTACT_GROUP_NOT_FOUND', 'Contact group not found');
+    response.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    if ((error as { code?: string }).code === '23505') throw new ServiceError(409, 'CONTACT_GROUP_EXISTS', 'A group with this name already exists');
+    throw error;
+  }
+}
+
+export async function deleteContactGroup(request: Request, response: Response): Promise<void> {
+  const { id } = request.validated!.params as { id: string };
+  try {
+    const result = await pool.query('DELETE FROM contact_groups WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, request.tenant!.id]);
+    if (!result.rows[0]) throw new ServiceError(404, 'CONTACT_GROUP_NOT_FOUND', 'Contact group not found');
+    response.json({ success: true, data: null });
+  } catch (error) {
+    if ((error as { code?: string }).code === '23503') throw new ServiceError(409, 'CONTACT_GROUP_HAS_CAMPAIGNS', 'A group used by a campaign cannot be deleted');
+    throw error;
+  }
+}
+
+export async function replaceContactGroupMembers(request: Request, response: Response): Promise<void> {
+  const { id } = request.validated!.params as { id: string };
+  const { contact_ids } = request.validated!.body as z.infer<typeof groupMembersBody>;
+  await transaction(async (client) => {
+    const group = await client.query('SELECT id FROM contact_groups WHERE id = $1 AND tenant_id = $2 FOR UPDATE', [id, request.tenant!.id]);
+    if (!group.rows[0]) throw new ServiceError(404, 'CONTACT_GROUP_NOT_FOUND', 'Contact group not found');
+    const uniqueIds = [...new Set(contact_ids)];
+    if (uniqueIds.length) {
+      const count = await client.query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM contacts WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [request.tenant!.id, uniqueIds],
+      );
+      if (Number(count.rows[0]?.count ?? 0) !== uniqueIds.length) throw new ServiceError(400, 'INVALID_CONTACT_GROUP_MEMBERS', 'One or more contacts do not belong to this workspace');
+    }
+    await client.query('DELETE FROM contact_group_members WHERE group_id = $1 AND tenant_id = $2', [id, request.tenant!.id]);
+    if (uniqueIds.length) {
+      await client.query(
+        `INSERT INTO contact_group_members (tenant_id, group_id, contact_id)
+         SELECT $1, $2, unnest($3::uuid[])`, [request.tenant!.id, id, uniqueIds],
+      );
+    }
+  });
+  response.json({ success: true, data: { group_id: id, member_count: new Set(contact_ids).size } });
+}
+
+export async function listContactGroupMembers(request: Request, response: Response): Promise<void> {
+  const { id } = request.validated!.params as { id: string };
+  const exists = await pool.query('SELECT 1 FROM contact_groups WHERE id = $1 AND tenant_id = $2', [id, request.tenant!.id]);
+  if (!exists.rows[0]) throw new ServiceError(404, 'CONTACT_GROUP_NOT_FOUND', 'Contact group not found');
+  const result = await pool.query(
+    `SELECT c.id, c.name, c.phone_number, c.tags
+     FROM contact_group_members m JOIN contacts c ON c.id = m.contact_id AND c.tenant_id = m.tenant_id
+     WHERE m.group_id = $1 AND m.tenant_id = $2 ORDER BY c.name NULLS LAST, c.phone_number`, [id, request.tenant!.id],
+  );
+  response.json({ success: true, data: result.rows });
+}
+
 export async function readContactConsent(request: Request, response: Response): Promise<void> {
   const { id } = request.validated!.params as { id: string };
   response.json({ success: true, data: await getContactConsent(request.tenant!.id, id) });
@@ -172,4 +262,10 @@ router.put('/contacts/:id/consent', validate({ params: idParams, body: consentBo
 router.get('/contacts/:id', validate({ params: idParams }), getContact);
 router.patch('/contacts/:id', validate({ params: idParams, body: updateBody }), updateContact);
 router.delete('/contacts/:id', validate({ params: idParams }), deleteContact);
+router.get('/contact-groups', listContactGroups);
+router.post('/contact-groups', validate({ body: groupBody }), createContactGroup);
+router.patch('/contact-groups/:id', validate({ params: idParams, body: groupBody }), updateContactGroup);
+router.delete('/contact-groups/:id', validate({ params: idParams }), deleteContactGroup);
+router.get('/contact-groups/:id/members', validate({ params: idParams }), listContactGroupMembers);
+router.put('/contact-groups/:id/members', validate({ params: idParams, body: groupMembersBody }), replaceContactGroupMembers);
 export default router;

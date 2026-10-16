@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { isAxiosError } from "axios";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ContactListParams, CreateContactRequest } from "@/lib/types";
+import type { ContactListParams, CreateContactRequest, CreateScheduledCampaign } from "@/lib/types";
 
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (isAxiosError(error)) {
@@ -77,4 +77,20 @@ export function useContactNames(): Map<string, string> {
     if (c.name) map.set(c.phone_number.replace(/\D/g, ""), c.name);
   }
   return map;
+}
+
+export function useContactGroups() {
+  const queryClient = useQueryClient();
+  const groups = useQuery({ queryKey: ["contact-groups"], queryFn: () => api.getContactGroups() });
+  const create = useMutation({ mutationFn: (name: string) => api.createContactGroup(name), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["contact-groups"] }) });
+  const members = useMutation({ mutationFn: ({ id, contact_ids }: { id: string; contact_ids: string[] }) => api.replaceContactGroupMembers(id, contact_ids), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["contact-groups"] }) });
+  return { ...groups, createGroup: create, saveMembers: members };
+}
+
+export function useScheduledCampaigns() {
+  const queryClient = useQueryClient();
+  const campaigns = useQuery({ queryKey: ["scheduled-campaigns"], queryFn: () => api.getScheduledCampaigns(), refetchInterval: 15_000 });
+  const create = useMutation({ mutationFn: (input: CreateScheduledCampaign) => api.createScheduledCampaign(input), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["scheduled-campaigns"] }) });
+  const cancel = useMutation({ mutationFn: (id: string) => api.cancelScheduledCampaign(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["scheduled-campaigns"] }) });
+  return { ...campaigns, createCampaign: create, cancelCampaign: cancel };
 }

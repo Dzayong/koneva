@@ -44,6 +44,9 @@ import type {
   ApiErrorBody,
   ContactListParams,
   ContactRecord,
+  ContactGroup,
+  ScheduledCampaign,
+  CreateScheduledCampaign,
   CreateContactRequest,
   ApiSuccess,
   DokuCheckoutResult,
@@ -261,6 +264,39 @@ class ApiClient {
       { skipErrorToast: true },
     );
     return response.data.data;
+  }
+
+  async getContactGroups(): Promise<ContactGroup[]> {
+    const response = await this.client.get<ApiSuccess<ContactGroup[]>>("/api/v1/contact-groups");
+    return response.data.data;
+  }
+
+  async createContactGroup(name: string): Promise<ContactGroup> {
+    const response = await this.client.post<ApiSuccess<ContactGroup>>("/api/v1/contact-groups", { name });
+    return response.data.data;
+  }
+
+  async getContactGroupMembers(id: string): Promise<ContactRecord[]> {
+    const response = await this.client.get<ApiSuccess<ContactRecord[]>>(`/api/v1/contact-groups/${id}/members`);
+    return response.data.data;
+  }
+
+  async replaceContactGroupMembers(id: string, contact_ids: string[]): Promise<void> {
+    await this.client.put(`/api/v1/contact-groups/${id}/members`, { contact_ids });
+  }
+
+  async getScheduledCampaigns(): Promise<ScheduledCampaign[]> {
+    const response = await this.client.get<ApiSuccess<ScheduledCampaign[]>>("/api/v1/campaigns");
+    return response.data.data;
+  }
+
+  async createScheduledCampaign(input: CreateScheduledCampaign): Promise<{ id: string; recipient_count: number; status: string }> {
+    const response = await this.client.post<ApiSuccess<{ id: string; recipient_count: number; status: string }>>("/api/v1/campaigns", input, { skipErrorToast: true });
+    return response.data.data;
+  }
+
+  async cancelScheduledCampaign(id: string): Promise<void> {
+    await this.client.post(`/api/v1/campaigns/${id}/cancel`);
   }
 
   // ---- Auto-reply rules --------------------------------------------------

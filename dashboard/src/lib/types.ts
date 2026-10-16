@@ -175,6 +175,41 @@ export interface ContactListParams {
   offset?: number;
 }
 
+export interface ContactGroup {
+  id: string;
+  name: string;
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScheduledCampaign {
+  id: string;
+  name: string;
+  group_id: string;
+  group_name: string;
+  device_key: string;
+  scheduled_at: string;
+  status: "scheduled" | "processing" | "completed" | "cancelled";
+  recipient_count: number;
+  pending_count: number;
+  queued_count: number;
+  quota_hold_count: number;
+  failed_count: number;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface CreateScheduledCampaign {
+  name: string;
+  group_id: string;
+  device_key: string;
+  scheduled_at: string;
+  message: string;
+  media_url?: string;
+  media_type?: "image" | "video" | "document";
+}
+
 export interface AnalyticsOverview {
   total_messages: number;
   /** Percentage 0-100. */

@@ -9,6 +9,7 @@ import { analyticsOverview } from './routes/analytics.routes';
 import { listAutoReplyRules } from './routes/auto-reply.routes';
 import { dashboardStats } from './routes/stats.routes';
 import { broadcastSchema } from './routes/broadcast.routes';
+import { scheduledCampaignSchema } from './routes/campaign.routes';
 import { listMessages, retryMessage } from './services/message.service';
 import { renderMessageTemplate, templateVariables } from '../shared/utils/message-template';
 
@@ -102,6 +103,16 @@ test('broadcast contract accepts snake_case device key and recipient list', () =
   assert.equal(broadcastSchema.safeParse({
     deviceKey: 'WAPI-1', recipients: [], message: 'Halo',
   }).success, false);
+});
+
+test('scheduled campaign requires a future time, a group and message content', () => {
+  const base = {
+    name: 'Promo', group_id: '8fca6485-b3df-47c2-b87e-0c235c0a4bb9', device_key: 'WAPI-1',
+    scheduled_at: new Date(Date.now() + 10 * 60_000).toISOString(), message: 'Halo {{nama}}',
+  };
+  assert.equal(scheduledCampaignSchema.safeParse(base).success, true);
+  assert.equal(scheduledCampaignSchema.safeParse({ ...base, scheduled_at: new Date(Date.now() + 60_000).toISOString() }).success, false);
+  assert.equal(scheduledCampaignSchema.safeParse({ ...base, message: ' ' }).success, false);
 });
 
 test('retry rejects a tenant-owned message that is not failed or blocked', async () => {

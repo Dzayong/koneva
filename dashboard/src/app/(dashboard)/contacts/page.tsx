@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Plus, Search, Trash2, Upload, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { ContactAvatar } from "@/components/ui/contact-avatar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,7 +30,9 @@ import {
   useCreateContact,
   useDeleteContact,
   useImportContacts,
+  useContactGroups,
 } from "@/hooks/use-contacts";
+import { api } from "@/lib/api";
 import {
   clearLegacyContacts,
   getLegacyContacts,
@@ -45,6 +49,8 @@ export default function ContactsPage() {
   const [offset, setOffset] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
   const [legacy, setLegacy] = useState<LegacyContact[]>([]);
+  const [groupName, setGroupName] = useState("");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data, isLoading, isPlaceholderData } = useContacts({
@@ -54,6 +60,12 @@ export default function ContactsPage() {
   });
   const deleteContact = useDeleteContact();
   const importContacts = useImportContacts();
+  const groups = useContactGroups();
+  const groupMembers = useQuery({
+    queryKey: ["contact-group-members", selectedGroupId],
+    queryFn: () => api.getContactGroupMembers(selectedGroupId),
+    enabled: Boolean(selectedGroupId),
+  });
 
   // Debounce search so typing doesn't fire a request per keystroke.
   useEffect(() => {
@@ -141,6 +153,33 @@ export default function ContactsPage() {
         />
         </div>
       </div>
+
+      <Card>
+        <CardHeader><CardTitle>Grup kontak</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">Buat grup dan tambahkan kontak yang sedang terlihat pada halaman ini. Campaign hanya menyertakan kontak dengan consent opt-in.</p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input aria-label="Nama grup baru" placeholder="Nama grup baru" value={groupName} onChange={(event) => setGroupName(event.target.value)} maxLength={100} />
+            <Button disabled={!groupName.trim() || groups.createGroup.isPending} onClick={() => groups.createGroup.mutate(groupName.trim(), { onSuccess: (group) => { setSelectedGroupId(group.id); setGroupName(""); } })}>Buat grup</Button>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <select aria-label="Pilih grup kontak" className="h-10 min-w-0 flex-1 rounded-lg border bg-background px-3 text-sm" value={selectedGroupId} onChange={(event) => setSelectedGroupId(event.target.value)}>
+              <option value="">Pilih grup</option>
+              {(groups.data ?? []).map((group) => <option key={group.id} value={group.id}>{group.name} ({group.member_count})</option>)}
+            </select>
+            <Button variant="outline" disabled={!selectedGroupId || !contacts.length || groups.saveMembers.isPending || groupMembers.isLoading} onClick={() => {
+              const ids = new Set((groupMembers.data ?? []).map((member) => member.id));
+              for (const contact of contacts) ids.add(contact.id);
+              groups.saveMembers.mutate({ id: selectedGroupId, contact_ids: [...ids] });
+            }}>Tambahkan {contacts.length} kontak halaman ini</Button>
+            <Button variant="outline" disabled={!selectedGroupId || !contacts.length || groups.saveMembers.isPending || groupMembers.isLoading} onClick={() => {
+              const visibleIds = new Set(contacts.map((contact) => contact.id));
+              const ids = (groupMembers.data ?? []).map((member) => member.id).filter((id) => !visibleIds.has(id));
+              groups.saveMembers.mutate({ id: selectedGroupId, contact_ids: ids });
+            }}>Keluarkan kontak halaman ini</Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="overflow-x-auto rounded-2xl border bg-card shadow-card">
         <Table>

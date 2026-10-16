@@ -61,6 +61,26 @@ export async function queueMessage(
   input: SendMessageRequest,
 ): Promise<MessageRow> {
   return withRecipientConsentLock(tenantId, input.to, async () => {
+  // Scheduled campaigns can resume after an API restart. Their deterministic external IDs make the
+  // database insert and BullMQ enqueue safely repeatable across the scheduler's claim lease.
+  if (input.external_id?.startsWith('cmp_')) {
+    const existing = await pool.query<MessageRow>(
+      `SELECT id, tenant_id, device_id, device_key, to_number, content, status, external_id, priority, quota_exempt, created_at, type, media_url
+       FROM messages WHERE tenant_id = $1 AND external_id = $2`, [tenantId, input.external_id],
+    );
+    const prior = existing.rows[0];
+    if (prior) {
+      const expectedType = input.media_url ? (input.media_type ?? 'image') : 'text';
+      if (prior.device_key !== input.device_key || prior.to_number !== input.to || prior.content !== input.message
+        || prior.type !== expectedType || (prior as MessageRow & { media_url?: string | null }).media_url !== (input.media_url ?? null)) {
+        throw new ServiceError(409, 'CAMPAIGN_MESSAGE_ID_CONFLICT', 'Campaign message id was already used for different content');
+      }
+      if (prior.status === 'queued') {
+        await enqueueStoredMessage(prior.device_key, prior.id, prior.id, (prior.priority as 'normal' | 'urgent' | undefined) ?? 'normal');
+      }
+      return prior;
+    }
+  }
   // Classification happens BEFORE the send transaction and is never the client's `priority` field: it requires the
   // request's own otp_code to genuinely appear in the message content (short, no media) AND a per-recipient/tenant
   // rate limit not already spent. See message-exempt-limits.ts. A failed/skipped claim never blocks the send --

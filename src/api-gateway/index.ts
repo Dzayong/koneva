@@ -19,6 +19,7 @@ import analyticsRoutes from './routes/analytics.routes';
 import autoReplyRoutes from './routes/auto-reply.routes';
 import statsRoutes from './routes/stats.routes';
 import broadcastRoutes from './routes/broadcast.routes';
+import campaignRoutes, { processDueCampaigns } from './routes/campaign.routes';
 import activityRoutes from './routes/activity.routes';
 import authRoutes from './routes/auth.routes';
 import keysRoutes from './routes/keys.routes';
@@ -94,7 +95,7 @@ app.use('/auth', authRoutes);
 app.use('/public', publicRoutes);
 app.use(dokuWebhookRoutes);
 app.use('/api/v1', tenantAuth, authorize, auditTrail, messageRoutes, deviceRoutes, tenantRoutes,
-  contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, deviceContentRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes, billingRoutes);
+  contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, campaignRoutes, deviceContentRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes, billingRoutes);
 app.use('/admin', adminNetworkGuard(), adminAuth, adminRoutes);
 app.use((_request, response) => response.status(404).json({
   success: false, error: { code: 'NOT_FOUND', message: 'Route not found' },
@@ -163,6 +164,13 @@ setTimeout(runStudentVerificationMaintenance, 35_000).unref();
 setInterval(runStudentVerificationMaintenance, 60_000).unref();
 setTimeout(runQuotaRelease, 40_000).unref();
 setInterval(runQuotaRelease, 2 * 60_000).unref();
+const runScheduledCampaigns = (): void => {
+  processDueCampaigns()
+    .then((count) => { if (count > 0) logger.info('Scheduled campaigns processed', { count }); })
+    .catch((error: unknown) => logger.error('Scheduled campaign processing failed', { error: error instanceof Error ? error.message : String(error) }));
+};
+setTimeout(runScheduledCampaigns, 15_000).unref();
+setInterval(runScheduledCampaigns, 15_000).unref();
 
 function shutdown(): void {
   server.close(() => process.exit(0));
