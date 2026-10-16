@@ -395,23 +395,23 @@ class ApiClient {
     return response.data.data;
   }
 
-  async signup(data: { email: string; password: string; name: string; workspace_name?: string; accept_terms: true }): Promise<{ verification_required: true; email: string; resend_after: number }> {
-    const response = await this.client.post<ApiSuccess<{ verification_required: true; email: string; resend_after: number }>>(
+  async signup(data: { email: string; password: string; name: string; workspace_name?: string; phone_number?: string; verification_method?: 'email' | 'whatsapp'; accept_terms: true }): Promise<{ verification_required: true; verification_method: 'email' | 'whatsapp'; email: string; resend_after: number }> {
+    const response = await this.client.post<ApiSuccess<{ verification_required: true; verification_method: 'email' | 'whatsapp'; email: string; resend_after: number }>>(
       "/auth/signup", data, { skipErrorToast: true, skipAuthRedirect: true },
     );
     return response.data.data;
   }
 
-  async requestSignupEmailVerification(email: string): Promise<{ sent: true; expires_in: number; resend_after: number }> {
+  async requestSignupEmailVerification(email: string, channel: 'email' | 'whatsapp' = 'email'): Promise<{ sent: true; expires_in: number; resend_after: number }> {
     const response = await this.client.post<ApiSuccess<{ sent: true; expires_in: number; resend_after: number }>>(
-      "/auth/signup/verification/request", { email }, { skipErrorToast: true, skipAuthRedirect: true },
+      "/auth/signup/verification/request", { email, channel }, { skipErrorToast: true, skipAuthRedirect: true },
     );
     return response.data.data;
   }
 
-  async confirmSignupEmailVerification(email: string, code: string): Promise<AuthResult> {
+  async confirmSignupEmailVerification(email: string, code: string, channel: 'email' | 'whatsapp' = 'email'): Promise<AuthResult> {
     const response = await this.client.post<ApiSuccess<AuthResult>>(
-      "/auth/signup/verification/confirm", { email, code }, { skipErrorToast: true, skipAuthRedirect: true },
+      "/auth/signup/verification/confirm", { email, code, channel }, { skipErrorToast: true, skipAuthRedirect: true },
     );
     return response.data.data;
   }

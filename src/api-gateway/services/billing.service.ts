@@ -310,7 +310,7 @@ export async function getBillingState(tenantId: string) {
   // in the current window, which never counted against messages_used -- shown so the exemption is never a mystery.
   const held = (await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM messages WHERE tenant_id = $1 AND status = 'quota_hold'`, [tenantId])).rows[0]?.n ?? 0;
   const exemptUsed = window ? (await pool.query<{ n: number }>(
-    `SELECT count(*)::int AS n FROM messages WHERE tenant_id = $1 AND quota_exempt = true AND created_at >= $2`, [tenantId, window.start],
+    `SELECT count(*)::int AS n FROM messages WHERE tenant_id = $1 AND quota_exempt = true AND system_otp=false AND created_at >= $2`, [tenantId, window.start],
   )).rows[0]?.n ?? 0 : 0;
 
   return {

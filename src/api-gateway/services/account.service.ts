@@ -60,14 +60,31 @@ async function listWorkspaces(db: Queryable, userId: string): Promise<Workspace[
   return rows;
 }
 
-export interface SignupInput { email: string; password: string; name: string; workspace_name?: string | undefined }
+export interface SignupInput {
+  email: string; password: string; name: string; workspace_name?: string | undefined;
+  verification_method?: 'email' | 'whatsapp' | undefined; phone_number?: string | undefined;
+}
 
 export interface PendingSignup { user_id: string; email: string }
+
+export function normalizeSignupPhone(value: string): string {
+  let digits = value.replace(/[^0-9]/g, '');
+  if (digits.startsWith('0062')) digits = digits.slice(2);
+  if (digits.startsWith('620')) digits = `62${digits.slice(3)}`;
+  if (digits.startsWith('0')) digits = `62${digits.slice(1)}`;
+  else if (digits.startsWith('8')) digits = `62${digits}`;
+  if (!digits.startsWith('62') || digits.length < 10 || digits.length > 15) {
+    throw new ServiceError(400, 'INVALID_PHONE_NUMBER', 'Masukkan nomor WhatsApp Indonesia yang valid.');
+  }
+  return digits;
+}
 
 /** Reserve only a non-authenticating pending record. No workspace, trial, or session exists until mailbox proof succeeds. */
 export async function signup(input: SignupInput): Promise<PendingSignup> {
   const passwordHash = await hashPassword(input.password);
   const workspaceName = input.workspace_name ?? `Workspace ${input.name}`;
+  const verificationMethod = input.verification_method ?? 'email';
+  const pendingPhone = verificationMethod === 'whatsapp' && input.phone_number ? normalizeSignupPhone(input.phone_number) : null;
   try {
     return await transaction(async (client) => {
       const existing = (await client.query<{ id: string; status: string; email_verified_at: Date | null }>(
@@ -79,15 +96,19 @@ export async function signup(input: SignupInput): Promise<PendingSignup> {
       const user = existing
         ? (await client.query<{ id: string }>(
           `UPDATE users SET name=$2, password_hash=$3, pending_signup_workspace_name=$4,
-             terms_accepted_at=now(), terms_version=$5
+             pending_signup_phone_number=$5, pending_signup_verification_method=$6,
+             terms_accepted_at=now(), terms_version=$7
            WHERE id=$1 RETURNING id`,
-          [existing.id, input.name, passwordHash, workspaceName, TERMS_VERSION],
+          [existing.id, input.name, passwordHash, workspaceName, pendingPhone, verificationMethod, TERMS_VERSION],
         )).rows[0]!
         : (await client.query<{ id: string }>(
-          `INSERT INTO users (email, name, password_hash, status, pending_signup_workspace_name, terms_accepted_at, terms_version)
-           VALUES ($1, $2, $3, 'pending_email', $4, now(), $5) RETURNING id`,
-          [input.email, input.name, passwordHash, workspaceName, TERMS_VERSION],
+          `INSERT INTO users (email, name, password_hash, status, pending_signup_workspace_name,
+             pending_signup_phone_number, pending_signup_verification_method, terms_accepted_at, terms_version)
+           VALUES ($1, $2, $3, 'pending_email', $4, $5, $6, now(), $7) RETURNING id`,
+          [input.email, input.name, passwordHash, workspaceName, pendingPhone, verificationMethod, TERMS_VERSION],
         )).rows[0]!;
+      await client.query('UPDATE email_verifications SET consumed_at=now() WHERE user_id=$1 AND consumed_at IS NULL', [user.id]);
+      await client.query('UPDATE signup_phone_verifications SET consumed_at=now() WHERE user_id=$1 AND consumed_at IS NULL', [user.id]);
       return { user_id: user.id, email: input.email };
     });
   } catch (error) {
@@ -99,10 +120,11 @@ export async function signup(input: SignupInput): Promise<PendingSignup> {
 }
 
 /** Activate one pending signup only inside the verified-OTP transaction. */
-export async function activatePendingSignup(client: PoolClient, userId: string, meta: ClientMeta): Promise<SessionResult> {
+export async function activatePendingSignup(client: PoolClient, userId: string, meta: ClientMeta, method: 'email' | 'whatsapp' = 'email'): Promise<SessionResult> {
   const user = (await client.query<{ email: string; name: string; workspace_name: string }>(
     `SELECT email, name, pending_signup_workspace_name AS workspace_name FROM users
-     WHERE id=$1 AND status='pending_email' AND email_verified_at IS NOT NULL FOR UPDATE`, [userId],
+     WHERE id=$1 AND status='pending_email' AND
+       (($2 = 'email' AND email_verified_at IS NOT NULL) OR ($2 = 'whatsapp' AND phone_verified_at IS NOT NULL)) FOR UPDATE`, [userId, method],
   )).rows[0];
   if (!user) throw new ServiceError(409, 'SIGNUP_STATE_INVALID', 'Pendaftaran tidak dapat diaktifkan.');
 
@@ -114,7 +136,7 @@ export async function activatePendingSignup(client: PoolClient, userId: string, 
   )).rows[0]!;
   await createTrial(client, tenant.id);
   await client.query(`INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`, [userId, tenant.id]);
-  await client.query("UPDATE users SET status='active', pending_signup_workspace_name=NULL, last_login_at=now() WHERE id=$1", [userId]);
+  await client.query("UPDATE users SET status='active', pending_signup_workspace_name=NULL, pending_signup_phone_number=NULL, pending_signup_verification_method='email', last_login_at=now() WHERE id=$1", [userId]);
   const session = await issueSessionToken(client, userId, meta);
   return {
     token: session.token, expires_at: session.expiresAt,

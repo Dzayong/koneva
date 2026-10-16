@@ -27,6 +27,7 @@ const environmentSchema = z.object({
   BOT_STORAGE_CLASS: z.string().optional(),
   BOT_SESSION_STORAGE_SIZE: z.string().min(1).default('1Gi'),
   SIGNUP_ENABLED: z.string().optional(),
+  SIGNUP_OTP_DEVICE_KEY: z.string().trim().min(1).optional(),
   PAYMENT_INSTRUCTIONS: z.string().optional(),
   OPERATOR_CONTACT: z.string().optional(),
   DOKU_CLIENT_ID: z.string().optional(),
@@ -67,6 +68,7 @@ const config = {
   },
   signup: {
     enabled: environment.SIGNUP_ENABLED !== 'false',
+    whatsappOtpDeviceKey: environment.SIGNUP_OTP_DEVICE_KEY ?? null,
   },
   billing: {
     paymentInstructions: environment.PAYMENT_INSTRUCTIONS ?? 'Instruksi pembayaran belum diatur. Hubungi penyedia layanan.',

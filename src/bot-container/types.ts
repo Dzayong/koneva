@@ -74,5 +74,7 @@ export interface MessageRecord {
   priority: 'normal' | 'urgent';
   /** Set only by the API gateway's server-verified transactional exemption. */
   quotaExempt?: boolean;
+  /** Platform signup OTP; terminal sends erase the stored recipient and body. */
+  systemOtp?: boolean;
   createdAt: Date;
 }

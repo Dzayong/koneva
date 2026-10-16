@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import pool from '../shared/database/connection';
 import { cleanupOtpData, startOtpMaintenance } from './services/otp-maintenance';
 import {
-  DEFAULT_OTP_LIMITS, SENDER_WARN_RATIO, invitationKey, ipKey, limiterAddress, otpLimits, recipientKey, reserveIpRequest, reserveOtpSend, workspaceKey, type OtpLimits,
+  DEFAULT_OTP_LIMITS, SENDER_WARN_RATIO, invitationKey, ipKey, limiterAddress, otpLimits, recipientKey, reserveIpRequest, reserveOtpSend, whatsappRecipientKey, workspaceKey, type OtpLimits,
 } from './services/otp-limits';
 import { ServiceError } from './services/service-error';
 
@@ -26,6 +26,10 @@ test('limiter keys: Gmail dots, +tags and googlemail.com fold into one bucket; o
     for (const raw of ['ab', 'gmail', 'inv-1', 'ws-1', '203.0.113.7']) assert.ok(!key.includes(raw) || raw === 'ab' /* hex can contain "ab" */, raw);
   }
   assert.notEqual(recipientKey('ab@gmail.com'), invitationKey('ab@gmail.com'), 'labels separate the key spaces');
+  const phoneKey = whatsappRecipientKey('6281234567890');
+  assert.match(phoneKey, /^[a-f0-9]{64}$/);
+  assert.ok(!phoneKey.includes('6281234567890'), 'phone number is never stored as the limiter key');
+  assert.notEqual(phoneKey, recipientKey('6281234567890@example.test'), 'phone and email recipients use separate keys');
 });
 
 test('limits: defaults are the approved numbers; the sender cap is configurable but validated; 70 % of 200 is 140', () => {
@@ -180,21 +184,29 @@ test('OTP limits against PostgreSQL: rolling windows, aliases, concurrency, send
     await verification('3 days', '-10 minutes', '2 days');
     await verification('1 minute', '-9 minutes', null);   // live: kept
     await verification('2 hours', '1 hour', '90 minutes'); // recently consumed: kept
+    const phoneVerification = (created: string, expires: string, consumed: string | null, who = user) => pool.query(
+      `INSERT INTO signup_phone_verifications(user_id, code_hash, created_at, expires_at, consumed_at) VALUES ($1,$2, now() - $3::interval, now() - $4::interval, ${consumed ? 'now() - $5::interval' : 'NULL'})`,
+      consumed ? [who, 'c'.repeat(64), created, expires, consumed] : [who, 'c'.repeat(64), created, expires]);
+    await phoneVerification('3 days', '2 days', null);
+    await phoneVerification('1 minute', '-9 minutes', null);
     await pool.query("INSERT INTO otp_threshold_events(kind, window_count, cap) VALUES ('sender_cap_reached', 200, 200)");
     const thresholdBefore = (await pool.query('SELECT count(*)::int AS n FROM otp_threshold_events')).rows[0].n;
     const result = await cleanupOtpData(pool);
-    assert.ok(result.invitation_otps >= 3 && result.email_verifications >= 2, JSON.stringify(result));
+    assert.ok(result.invitation_otps >= 3 && result.email_verifications >= 2 && result.signup_phone_verifications >= 1, JSON.stringify(result));
     const left = async (table: string, col: string, ref: string) => (await pool.query(`SELECT count(*)::int AS n FROM ${table} WHERE ${col} = $1`, [ref])).rows[0].n;
     assert.equal(await left('invitation_otps', 'invitation_id', inv), 2, 'only the day-of-slack row and the live row remain');
     assert.equal(await left('email_verifications', 'user_id', user), 2, 'live and recently consumed remain');
+    assert.equal(await left('signup_phone_verifications', 'user_id', user), 1, 'live code remains');
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM otp_threshold_events')).rows[0].n, thresholdBefore);
     // The hourly schedule really runs (short delays here; production uses 90 s and 1 h).
     await otp('5 days', '4 days', null);
     await verification('5 days', '4 days', null, other);
+    await phoneVerification('5 days', '4 days', null, other);
     const stop = startOtpMaintenance(pool, { firstDelayMs: 30, intervalMs: 3_600_000 });
     try {
       for (let i = 0; i < 50 && (await left('email_verifications', 'user_id', other)) > 0; i++) await new Promise((r) => setTimeout(r, 100));
       assert.equal(await left('email_verifications', 'user_id', other), 0);
+      assert.equal(await left('signup_phone_verifications', 'user_id', other), 0);
       assert.equal(await left('invitation_otps', 'invitation_id', inv), 2);
     } finally { stop(); }
   });

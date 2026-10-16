@@ -137,16 +137,19 @@ are also tenant scoped.
 People sign in to the console with an account; systems call the API with a key. The two are separate
 credentials. Both reach the same `/api/v1` routes, and every route checks a permission.
 
-**Sign up** first reserves a pending account and emails a one-time code. Until that code is confirmed,
-the account cannot log in and has no workspace, trial, membership, or session. Confirmation activates
-the account and creates a personal workspace with you as `owner`. A new workspace is a trial
-(1 number, 200 messages) until an operator raises the limits.
+**Sign up** reserves a pending account and sends a one-time code by email by default. A person may
+instead choose WhatsApp and provide an Indonesian number. Confirming a WhatsApp code verifies that
+number and activates the account/workspace, but does not verify the email; email verification remains
+required for actions such as inviting teammates or billing, and password recovery still uses email.
+Until either selected code is confirmed, the account cannot log in and has no workspace, trial,
+membership, or session. A new workspace is a trial (1 number, 200 messages) until an operator raises
+the limits.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/auth/signup` | `{ email, password (10+ chars), name, workspace_name?, accept_terms: true }`; returns `202 { verification_required, email, resend_after }`, sends the email OTP. Terms include that this service connects through an unofficial channel. 10 per hour per IP. |
-| POST | `/auth/signup/verification/request` | `{ email }`; resends a pending signup OTP subject to cooldown/rate limits. |
-| POST | `/auth/signup/verification/confirm` | `{ email, code }`; consumes the OTP, activates the account and returns the first session/workspace. |
+| POST | `/auth/signup` | `{ email, password (10+ chars), name, workspace_name?, verification_method?: "email"|"whatsapp", phone_number?, accept_terms: true }`; WhatsApp selection requires `phone_number`. Returns `202 { verification_required, verification_method, email, resend_after }`. Terms include that this service connects through an unofficial channel. 10 per hour per IP. |
+| POST | `/auth/signup/verification/request` | `{ email, channel?: "email"|"whatsapp" }`; resends a pending signup OTP subject to cooldown/rate limits. |
+| POST | `/auth/signup/verification/confirm` | `{ email, code, channel?: "email"|"whatsapp" }`; consumes the selected OTP, activates the account and returns the first session/workspace. WhatsApp confirmation leaves `email_verified_at` unset. |
 | POST | `/auth/login` | `{ email, password }`. Five wrong attempts lock that email and IP for 15 minutes. |
 | POST | `/auth/logout` | Revokes the session in the `Authorization` header. |
 | GET | `/auth/me` | Current user, workspace, role and permission list. |

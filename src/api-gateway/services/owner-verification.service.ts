@@ -1,10 +1,11 @@
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import config from '../../shared/config';
 import pool, { transaction } from '../../shared/database/connection';
-import { activatePendingSignup, type ClientMeta, type SessionResult } from './account.service';
+import { activatePendingSignup, normalizeSignupPhone, type ClientMeta, type SessionResult } from './account.service';
 import { requireEmail, sendInvitationOtp } from './mailer';
-import { reserveIpRequest, reserveOtpSend } from './otp-limits';
+import { reserveIpRequest, reserveOtpSend, reserveWhatsappOtpSend } from './otp-limits';
 import { ServiceError } from './service-error';
+import { queueSystemOtp } from './message.service';
 
 /**
  * Email verification for people who own a workspace (any email domain). It is required before inviting someone, changing the
@@ -15,6 +16,7 @@ export const VERIFY_MINUTES = 10;
 export const VERIFY_MAX_ATTEMPTS = 5;
 export const VERIFY_RESEND_SECONDS = 60;
 const codeHash = (id: string, code: string): string => createHmac('sha256', config.jwt.secret).update(`email-verification-v1:${id}:${code}`).digest('hex');
+const phoneCodeHash = (id: string, code: string): string => createHmac('sha256', config.jwt.secret).update(`signup-whatsapp-verification-v1:${id}:${code}`).digest('hex');
 
 export async function isEmailVerified(userId: string): Promise<boolean> {
   return Boolean((await pool.query<{ email_verified_at: Date | null }>('SELECT email_verified_at FROM users WHERE id = $1', [userId])).rows[0]?.email_verified_at);
@@ -67,6 +69,87 @@ export async function requestSignupEmailVerification(email: string, ip?: string)
   return 'already_verified' in result ? { sent: true, expires_in: VERIFY_MINUTES * 60, resend_after: VERIFY_RESEND_SECONDS } : result;
 }
 
+/** Request signup verification through the platform-owned WhatsApp device. No email transport is involved. */
+export async function requestSignupWhatsAppVerification(email: string, ip?: string): Promise<{ sent: true; expires_in: number; resend_after: number }> {
+  await reserveIpRequest(ip);
+  const deviceKey = config.signup.whatsappOtpDeviceKey;
+  if (!deviceKey) throw new ServiceError(503, 'WHATSAPP_OTP_NOT_CONFIGURED', 'Verifikasi WhatsApp belum dikonfigurasi.');
+  const user = (await pool.query<{ id: string; phone_number: string }>(
+    `SELECT id, pending_signup_phone_number AS phone_number FROM users
+     WHERE lower(email)=lower($1) AND status='pending_email' AND email_verified_at IS NULL
+       AND pending_signup_verification_method='whatsapp' AND pending_signup_phone_number IS NOT NULL`, [email],
+  )).rows[0];
+  if (!user) return { sent: true, expires_in: VERIFY_MINUTES * 60, resend_after: VERIFY_RESEND_SECONDS };
+  const phone = normalizeSignupPhone(user.phone_number);
+  const device = (await pool.query<{ tenant_id: string }>(
+    `SELECT tenant_id FROM devices WHERE device_key=$1 AND status='online'`, [deviceKey],
+  )).rows[0];
+  if (!device) throw new ServiceError(503, 'WHATSAPP_OTP_SENDER_OFFLINE', 'Nomor pengirim verifikasi WhatsApp sedang tidak terhubung.');
+  await reserveWhatsappOtpSend(phone);
+  const issued = await transaction(async (client) => {
+    const current = (await client.query<{ phone_number: string }>(
+      `SELECT pending_signup_phone_number AS phone_number FROM users WHERE id=$1 AND status='pending_email'
+       AND pending_signup_verification_method='whatsapp' FOR UPDATE`, [user.id],
+    )).rows[0];
+    if (!current || normalizeSignupPhone(current.phone_number) !== phone) return undefined;
+    const recent = (await client.query<{ last: number | null }>(
+      'SELECT extract(epoch FROM now() - max(created_at))::float AS last FROM signup_phone_verifications WHERE user_id=$1', [user.id],
+    )).rows[0]!;
+    if (recent.last !== null && recent.last < VERIFY_RESEND_SECONDS) {
+      const wait = Math.ceil(VERIFY_RESEND_SECONDS - recent.last);
+      throw new ServiceError(429, 'OTP_COOLDOWN', `Tunggu ${wait} detik sebelum meminta kode lagi.`, wait);
+    }
+    await client.query('UPDATE signup_phone_verifications SET consumed_at=now() WHERE user_id=$1 AND consumed_at IS NULL', [user.id]);
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    const id = randomUUID();
+    await client.query(
+      `INSERT INTO signup_phone_verifications(id,user_id,code_hash,expires_at) VALUES($1,$2,$3,now()+make_interval(mins=>$4))`,
+      [id, user.id, phoneCodeHash(id, code), VERIFY_MINUTES],
+    );
+    return { id, code, phone };
+  });
+  if (!issued) return { sent: true, expires_in: VERIFY_MINUTES * 60, resend_after: VERIFY_RESEND_SECONDS };
+  try {
+    const queued = await queueSystemOtp(device.tenant_id, {
+      device_key: deviceKey, to: phone,
+      message: `${issued.code} adalah kode verifikasi KONEVA Anda. Berlaku ${VERIFY_MINUTES} menit. Jangan bagikan kode ini kepada siapa pun.`,
+    });
+    if (queued.status !== 'queued') throw new ServiceError(503, 'WHATSAPP_OTP_QUEUE_FAILED', 'Kode verifikasi WhatsApp tidak dapat dimasukkan ke antrean.');
+  } catch (error) {
+    await pool.query('UPDATE signup_phone_verifications SET consumed_at=now() WHERE id=$1', [issued.id]);
+    if (error instanceof ServiceError) throw error;
+    throw new ServiceError(503, 'WHATSAPP_OTP_SEND_FAILED', 'Kode verifikasi WhatsApp gagal dikirim.');
+  }
+  return { sent: true, expires_in: VERIFY_MINUTES * 60, resend_after: VERIFY_RESEND_SECONDS };
+}
+
+export async function confirmSignupWhatsAppVerification(email: string, code: string, meta: ClientMeta): Promise<SessionResult> {
+  const session = await transaction(async (client) => {
+    const user = (await client.query<{ id: string; phone_number: string }>(
+      `SELECT id,pending_signup_phone_number AS phone_number FROM users
+       WHERE lower(email)=lower($1) AND status='pending_email' AND email_verified_at IS NULL
+         AND pending_signup_verification_method='whatsapp' AND pending_signup_phone_number IS NOT NULL FOR UPDATE`, [email],
+    )).rows[0];
+    if (!user) return undefined;
+    const row = (await client.query<{ id: string; code_hash: string }>(
+      `UPDATE signup_phone_verifications v SET attempts=v.attempts+1
+       WHERE v.id=(SELECT id FROM signup_phone_verifications WHERE user_id=$1 AND consumed_at IS NULL
+         AND expires_at>now() AND attempts<$2 ORDER BY created_at DESC LIMIT 1)
+         AND v.consumed_at IS NULL AND v.expires_at>now() AND v.attempts<$2 RETURNING v.id,v.code_hash`,
+      [user.id, VERIFY_MAX_ATTEMPTS],
+    )).rows[0];
+    if (!row) return undefined;
+    const expected = Buffer.from(row.code_hash), given = Buffer.from(phoneCodeHash(row.id, code));
+    if (expected.length !== given.length || !timingSafeEqual(expected, given)) return undefined;
+    const consumed = await client.query('UPDATE signup_phone_verifications SET consumed_at=now() WHERE id=$1 AND consumed_at IS NULL RETURNING id', [row.id]);
+    if (!consumed.rowCount) return undefined;
+    await client.query('UPDATE users SET phone_number=$2, phone_verified_at=now() WHERE id=$1', [user.id, user.phone_number]);
+    return activatePendingSignup(client, user.id, meta, 'whatsapp');
+  });
+  if (!session) throw CODE_INVALID();
+  return session;
+}
+
 const CODE_INVALID = () => new ServiceError(422, 'OTP_INVALID', 'Kode salah, kedaluwarsa, atau sudah dipakai. Minta kode baru.') // not 401: the session itself is valid;
 
 /**
@@ -98,7 +181,8 @@ export async function confirmEmailVerification(userId: string, code: string): Pr
 export async function confirmSignupEmailVerification(email: string, code: string, meta: ClientMeta): Promise<SessionResult> {
   const session = await transaction(async (client) => {
     const user = (await client.query<{ id: string }>(
-      `SELECT id FROM users WHERE lower(email)=lower($1) AND status='pending_email' AND email_verified_at IS NULL FOR UPDATE`, [email],
+      `SELECT id FROM users WHERE lower(email)=lower($1) AND status='pending_email' AND email_verified_at IS NULL
+        AND pending_signup_verification_method='email' FOR UPDATE`, [email],
     )).rows[0];
     if (!user) return undefined;
     const row = (await client.query<{ id: string; code_hash: string }>(

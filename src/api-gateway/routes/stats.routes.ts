@@ -24,7 +24,7 @@ export async function dashboardStats(request: Request, response: Response): Prom
        COUNT(*) FILTER (WHERE status='failed')::int AS failed_messages,
        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE direction='outbound' AND status IN ('delivered','read')) /
          NULLIF(COUNT(*) FILTER (WHERE direction='outbound' AND status IN ('sent','delivered','read','failed')), 0), 2), 0) AS delivery_rate
-       FROM messages WHERE tenant_id=$1`, [request.tenant!.id],
+       FROM messages WHERE tenant_id=$1 AND system_otp=false`, [request.tenant!.id],
     ),
     pool.query(
       `SELECT COUNT(*)::int AS total_devices,
@@ -54,7 +54,7 @@ export async function deviceStats(request: Request, response: Response): Promise
      COUNT(*) FILTER (WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta') AT TIME ZONE 'Asia/Jakarta'))::int AS messages_today,
      COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE direction='outbound' AND status IN ('delivered','read')) /
        NULLIF(COUNT(*) FILTER (WHERE direction='outbound' AND status IN ('sent','delivered','read','failed')), 0), 2), 0) AS delivery_rate
-     FROM messages WHERE tenant_id=$1 AND device_key=$2`,
+     FROM messages WHERE tenant_id=$1 AND device_key=$2 AND system_otp=false`,
     [request.tenant!.id, key],
   );
   const metrics = Object.fromEntries(Object.entries(result.rows[0] ?? {}).map(([name, value]) => [name, number(value)]));

@@ -75,6 +75,21 @@ test('delivery receipt updates delivered_at and dispatches message.delivered', a
   assert.equal(event, 'message.delivered');
 });
 
+test('system OTP delivery receipts update status without exposing the recipient to tenant webhooks', async () => {
+  let query = '';
+  let dispatched = false;
+  const queryFn: QueryFn = async (sql) => {
+    query = sql;
+    return { rows: [{
+      id: 'otp-1', tenant_id: 'platform', device_key: 'WAPI-OTP',
+      to_number: '[redacted]', system_otp: true,
+    }] };
+  };
+  await handleReceiptUpdate(receipt(WAMessageStatus.DELIVERY_ACK), queryFn, testLogger(), async () => { dispatched = true; });
+  assert.match(query, /COALESCE\(system_otp, false\) AS system_otp/);
+  assert.equal(dispatched, false);
+});
+
 import { failStuckMessages } from './queue';
 
 test('queued messages without a live job are failed and reported; live ones are left alone', async () => {
@@ -83,8 +98,9 @@ test('queued messages without a live job are failed and reported; live ones are 
   const queryFn: QueryFn = async (sql, params) => {
     if (sql.startsWith('SELECT id, tenant_id')) {
       return { rows: [
-        { id: 'lost-1', tenant_id: 't1', device_key: 'WAPI-1', to_number: '6281' },
-        { id: 'delayed-1', tenant_id: 't1', device_key: 'WAPI-1', to_number: '6282' },
+        { id: 'lost-1', tenant_id: 't1', device_key: 'WAPI-1', to_number: '6281', system_otp: false },
+        { id: 'lost-otp', tenant_id: 'platform', device_key: 'WAPI-1', to_number: '6283', system_otp: true },
+        { id: 'delayed-1', tenant_id: 't1', device_key: 'WAPI-1', to_number: '6282', system_otp: false },
       ] };
     }
     if (sql.includes("SET status = 'failed'")) { updates.push(params ?? []); return { rows: [{ id: params?.[0] }] }; }
@@ -93,8 +109,8 @@ test('queued messages without a live job are failed and reported; live ones are 
 
   const failed = await failStuckMessages('WAPI-1', new Set(['delayed-1']), queryFn, testLogger(), async (_t, payload) => { hooks.push(payload); });
 
-  assert.equal(failed, 1);
-  assert.deepEqual(updates, [['lost-1']]);
+  assert.equal(failed, 2);
+  assert.deepEqual(updates, [['lost-1'], ['lost-otp']]);
   assert.equal(hooks.length, 1);
   assert.equal(hooks[0]?.event, 'message.failed');
   assert.equal(hooks[0]?.message_id, 'lost-1');

@@ -15,15 +15,15 @@ export async function ownerInsights(db: Pool, actor: Actor, requestId: string, c
       (SELECT count(*)::int FROM users) AS registered_accounts,
       (SELECT count(*)::int FROM tenants WHERE status='active') AS active_workspaces,
       (SELECT count(*)::int FROM tenants WHERE status='suspended') AS suspended_workspaces,
-      (SELECT count(*)::int FROM messages WHERE direction='outbound' AND status IN ('sent','delivered','read') AND sent_at >= now()-interval '24 hours') AS messages_sent_24h,
-      (SELECT count(*)::int FROM messages WHERE direction='outbound' AND status IN ('sent','delivered','read') AND sent_at >= now()-interval '30 days') AS messages_sent_30d,
+      (SELECT count(*)::int FROM messages WHERE system_otp=false AND direction='outbound' AND status IN ('sent','delivered','read') AND sent_at >= now()-interval '24 hours') AS messages_sent_24h,
+      (SELECT count(*)::int FROM messages WHERE system_otp=false AND direction='outbound' AND status IN ('sent','delivered','read') AND sent_at >= now()-interval '30 days') AS messages_sent_30d,
       (SELECT count(*)::int FROM otp_rate_events WHERE dim='sender' AND at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta') AT TIME ZONE 'Asia/Jakarta')) AS otp_sender_today,
-      (SELECT count(*)::int FROM messages WHERE status='queued') AS queue_queued,
-      (SELECT count(*)::int FROM messages WHERE status='sending') AS queue_sending,
-      (SELECT count(*)::int FROM messages WHERE direction='outbound' AND status='failed' AND created_at >= now()-interval '24 hours') AS failed_messages_24h,
-      (SELECT count(*)::int FROM messages WHERE direction='outbound' AND status IN ('sent','delivered','read','failed') AND created_at >= now()-interval '24 hours') AS attempted_messages_24h,
+      (SELECT count(*)::int FROM messages WHERE system_otp=false AND status='queued') AS queue_queued,
+      (SELECT count(*)::int FROM messages WHERE system_otp=false AND status='sending') AS queue_sending,
+      (SELECT count(*)::int FROM messages WHERE system_otp=false AND direction='outbound' AND status='failed' AND created_at >= now()-interval '24 hours') AS failed_messages_24h,
+      (SELECT count(*)::int FROM messages WHERE system_otp=false AND direction='outbound' AND status IN ('sent','delivered','read','failed') AND created_at >= now()-interval '24 hours') AS attempted_messages_24h,
       (SELECT count(*)::int FROM recipient_consent_events WHERE status='opted_out' AND created_at >= now()-interval '1 hour') AS stop_events_1h,
-      (SELECT count(*)::int FROM messages WHERE status='blocked' AND error_message IN ('recipient_opted_out','recipient_consent_required') AND created_at >= now()-interval '1 hour') AS consent_blocked_1h,
+      (SELECT count(*)::int FROM messages WHERE system_otp=false AND status='blocked' AND error_message IN ('recipient_opted_out','recipient_consent_required') AND created_at >= now()-interval '1 hour') AS consent_blocked_1h,
       (SELECT count(*)::int FROM devices) AS devices_total,
       (SELECT count(*)::int FROM devices WHERE status = 'online') AS devices_online,
       (SELECT count(*)::int FROM devices WHERE status = 'offline') AS devices_offline,
@@ -40,7 +40,7 @@ export async function ownerInsights(db: Pool, actor: Actor, requestId: string, c
         LEFT JOIN LATERAL (
           SELECT count(*) FILTER (WHERE m.status = 'failed') AS failed,
                  count(*) FILTER (WHERE m.status IN ('sent','delivered','read','failed')) AS attempted
-          FROM messages m WHERE m.device_id = d_att.id AND m.direction = 'outbound' AND m.created_at >= now() - interval '24 hours'
+          FROM messages m WHERE m.system_otp=false AND m.device_id = d_att.id AND m.direction = 'outbound' AND m.created_at >= now() - interval '24 hours'
         ) msg ON true
         WHERE d_att.status IN ('error', 'banned')
           OR (d_att.health_score IS NOT NULL AND d_att.health_score < 70)
@@ -73,7 +73,7 @@ export async function ownerInsights(db: Pool, actor: Actor, requestId: string, c
         SELECT m.id::text, 'message_error'::text, m.created_at,
           'Pengiriman pesan gagal'::text, t.name
         FROM messages m LEFT JOIN tenants t ON t.id=m.tenant_id
-        WHERE m.direction='outbound' AND m.status='failed' AND m.created_at >= now()-interval '30 days'
+        WHERE m.system_otp=false AND m.direction='outbound' AND m.status='failed' AND m.created_at >= now()-interval '30 days'
         UNION ALL
         SELECT w.id::text, 'webhook_error'::text, w.created_at,
           'Webhook mendapat respons gagal'::text, COALESCE(w.event_type, 'Webhook') || ' · HTTP ' || w.response_status::text
@@ -217,11 +217,11 @@ export async function ownerDeviceList(db: Pool, actor: Actor, requestId: string,
         AND de.previous_status IN ('offline','error') AND de.created_at >= now()-interval '24 hours') > ${OWNER_THRESHOLDS.reconnect_24h}
       OR (SELECT count(*) FROM device_events de WHERE de.device_id=d.id AND (de.status='error' OR de.code IN (515,503))
         AND de.created_at >= now()-interval '24 hours') > ${OWNER_THRESHOLDS.stream_error_24h}
-      OR (SELECT count(*) FROM messages m WHERE m.device_id=d.id AND m.direction='outbound' AND m.status='failed'
+      OR (SELECT count(*) FROM messages m WHERE m.system_otp=false AND m.device_id=d.id AND m.direction='outbound' AND m.status='failed'
         AND m.created_at >= now()-interval '24 hours') * 100 > ${OWNER_THRESHOLDS.fail_ratio_percent} *
-        (SELECT count(*) FROM messages m WHERE m.device_id=d.id AND m.direction='outbound'
+        (SELECT count(*) FROM messages m WHERE m.system_otp=false AND m.device_id=d.id AND m.direction='outbound'
           AND m.status IN ('sent','delivered','read','failed') AND m.created_at >= now()-interval '24 hours')
-        AND (SELECT count(*) FROM messages m WHERE m.device_id=d.id AND m.direction='outbound'
+        AND (SELECT count(*) FROM messages m WHERE m.system_otp=false AND m.device_id=d.id AND m.direction='outbound'
           AND m.status IN ('sent','delivered','read','failed') AND m.created_at >= now()-interval '24 hours') >= ${OWNER_THRESHOLDS.fail_ratio_min_messages})`;
     conditions.push(attention);
     countConditions.push(attention);
@@ -288,7 +288,7 @@ export async function ownerDeviceDetail(db: Pool, actor: Actor, requestId: strin
     db.query<{ failed: number; attempted: number }>(`SELECT
         count(*) FILTER (WHERE status = 'failed')::int AS failed,
         count(*) FILTER (WHERE status IN ('sent','delivered','read','failed'))::int AS attempted
-      FROM messages WHERE device_id = $1 AND direction = 'outbound' AND created_at >= now() - interval '24 hours'`, [deviceId]),
+      FROM messages WHERE system_otp=false AND device_id = $1 AND direction = 'outbound' AND created_at >= now() - interval '24 hours'`, [deviceId]),
     db.query(`SELECT id, status, previous_status, reason, code, created_at
       FROM device_events WHERE device_id = $1 ORDER BY created_at DESC LIMIT 10`, [deviceId]),
     db.query(`SELECT created_at AS status_since, status AS event_status
@@ -332,15 +332,15 @@ export async function ownerSystemHealth(db: Pool, actor: Actor, requestId: strin
       count(*) FILTER (WHERE status = 'queued')::int AS queued,
       count(*) FILTER (WHERE status = 'sending')::int AS sending,
       min(created_at) FILTER (WHERE status = 'queued') AS oldest_queued_at
-      FROM messages WHERE status IN ('queued','sending')`),
+      FROM messages WHERE system_otp=false AND status IN ('queued','sending')`),
     db.query<{ attempted: number; failed: number }>(`SELECT
       count(*) FILTER (WHERE status IN ('sent','delivered','read','failed'))::int AS attempted,
       count(*) FILTER (WHERE status = 'failed')::int AS failed
-      FROM messages WHERE direction = 'outbound' AND created_at >= now() - interval '24 hours'`),
+      FROM messages WHERE system_otp=false AND direction = 'outbound' AND created_at >= now() - interval '24 hours'`),
     db.query<{ attempted: number; failed: number }>(`SELECT
       count(*) FILTER (WHERE status IN ('sent','delivered','read','failed'))::int AS attempted,
       count(*) FILTER (WHERE status = 'failed')::int AS failed
-      FROM messages WHERE direction = 'outbound' AND created_at >= now() - interval '1 hour'`),
+      FROM messages WHERE system_otp=false AND direction = 'outbound' AND created_at >= now() - interval '1 hour'`),
     db.query<{ n: number }>(`SELECT count(*)::int AS n FROM otp_rate_events
       WHERE dim = 'sender' AND at >= (${wibToday})`),
     db.query(`SELECT id, at, kind, window_count, cap FROM otp_threshold_events
@@ -419,10 +419,10 @@ export async function ownerWorkspaceList(db: Pool, actor: Actor, requestId: stri
         CASE WHEN s.tenant_id IS NULL THEN NULL ELSE json_build_object('plan',p.name,'status',s.status) END AS subscription,
         (SELECT count(*)::int FROM devices d WHERE d.tenant_id = t.id) AS device_count,
         (SELECT count(*)::int FROM memberships m WHERE m.tenant_id = t.id) AS member_count,
-        (SELECT count(*)::int FROM messages m WHERE m.tenant_id = t.id AND m.direction = 'outbound'
+        (SELECT count(*)::int FROM messages m WHERE m.system_otp=false AND m.tenant_id = t.id AND m.direction = 'outbound'
           AND m.status IN ('sent','delivered','read') AND m.sent_at >= now() - interval '30 days') AS messages_30d,
         GREATEST(
-          (SELECT max(m.created_at) FROM messages m WHERE m.tenant_id = t.id AND m.direction = 'outbound' AND m.status IN ('sent','delivered','read')),
+          (SELECT max(m.created_at) FROM messages m WHERE m.system_otp=false AND m.tenant_id = t.id AND m.direction = 'outbound' AND m.status IN ('sent','delivered','read')),
           (SELECT max(de.created_at) FROM device_events de WHERE de.tenant_id = t.id),
           (SELECT max(i.created_at) FROM invoices i WHERE i.tenant_id = t.id AND i.status = 'paid')
         ) AS last_activity
@@ -476,10 +476,10 @@ export async function ownerWorkspaceDetail(db: Pool, actor: Actor, requestId: st
       ) owner ON true
       WHERE t.id = $1`, [workspaceId]),
     db.query<{ n: number }>(`SELECT count(*)::int AS n FROM messages
-      WHERE tenant_id = $1 AND direction = 'outbound' AND status IN ('sent','delivered','read')
+      WHERE system_otp=false AND tenant_id = $1 AND direction = 'outbound' AND status IN ('sent','delivered','read')
         AND sent_at >= now() - interval '30 days'`, [workspaceId]),
     db.query<{ last_msg: Date | null; last_event: Date | null; last_payment: Date | null }>(`SELECT
-      (SELECT max(m.created_at) FROM messages m WHERE m.tenant_id = $1 AND m.direction = 'outbound' AND m.status IN ('sent','delivered','read')) AS last_msg,
+      (SELECT max(m.created_at) FROM messages m WHERE m.system_otp=false AND m.tenant_id = $1 AND m.direction = 'outbound' AND m.status IN ('sent','delivered','read')) AS last_msg,
       (SELECT max(de.created_at) FROM device_events de WHERE de.tenant_id = $1) AS last_event,
       (SELECT max(i.created_at) FROM invoices i WHERE i.tenant_id = $1 AND i.status = 'paid') AS last_payment`, [workspaceId]),
     db.query(`SELECT d.id, d.label, d.status, d.health_score, d.created_at

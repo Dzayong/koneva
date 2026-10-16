@@ -28,6 +28,18 @@ Migration impact and follow-up decisions for the owner are at the end of this fi
 3. To accept, the recipient must prove they own the mailbox: request a 6-digit OTP (emailed to the invited address only), then submit it with the acceptance. Codes: 10 minutes, 5 wrong attempts (counted atomically), 60 s between sends, 5 sends per hour per invitation, only a keyed hash is stored, a new code replaces the old one, a code is single use. Accepting marks the account's email as verified.
 4. An existing account must be signed in as the invited address; otherwise `ACCOUNT_EXISTS` (never silently merged).
 
+## Signup WhatsApp verification
+
+Signup may use WhatsApp instead of email OTP. The phone number is normalized to Indonesian country-code digits, verified with a
+6-digit, 10-minute OTP, and stored with `phone_verified_at`. That proof activates the account/workspace but does not mark the
+email verified. Email verification remains available after sign-in and is still required for sensitive owner actions; password
+recovery continues to use email. The phone and signup code are not exposed in tenant message history or webhooks, and the message
+body/recipient are erased after the send reaches a terminal state. Codes are stored as keyed hashes and expire after 10 minutes.
+
+Set `SIGNUP_OTP_DEVICE_KEY` to an online device key belonging to a dedicated platform/admin workspace to enable this channel.
+The device's tenant must be able to send. If the key is absent or the device is offline, the API returns a 503 and never falls
+back to email. The sender is subject to shared IP, recipient, and daily OTP limits.
+
 ### Email sender: state (updated 2026-09-27)
 
 - `EMAIL_TRANSPORT` unset/`none` (default): **OTP cannot be sent** and invitations cannot be accepted. The API answers `503 EMAIL_NOT_CONFIGURED`, creates nothing, and there is no path around verification.

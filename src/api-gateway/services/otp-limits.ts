@@ -6,12 +6,12 @@ import logger from '../../shared/utils/logger';
 import { ServiceError } from './service-error';
 
 /**
- * Limits on emailed OTPs (invitation OTPs and Owner email verification), shared by every API process through PostgreSQL.
+ * Limits on OTP sends (email and signup WhatsApp), shared by every API process through PostgreSQL.
  *
  *   recipient  3 per hour and 6 per 24 h, across all invitations/workspaces/purposes (Gmail aliases share one bucket)
  *   invitation 3 per hour (plus the 60 s pause kept in team.service)
  *   workspace  10 per 24 h
- *   sender     200 per 24 h for the whole system (OTP_SENDER_DAILY_CAP), 70 % is recorded
+ *   sender     200 per 24 h for the whole system across channels (OTP_SENDER_DAILY_CAP), 70 % is recorded
  *   ip         20 OTP requests per 15 min
  *
  * Rolling windows: a slot frees exactly when its event is older than the window. Each check-and-record runs in one transaction
@@ -44,6 +44,7 @@ export function limiterAddress(email: string): string {
   return `${local}@${domain}`;
 }
 export const recipientKey = (email: string): string => keyOf('recipient', limiterAddress(email));
+export const whatsappRecipientKey = (phoneDigits: string): string => keyOf('recipient', `whatsapp:${phoneDigits}`);
 export const invitationKey = (invitationId: string): string => keyOf('invitation', invitationId);
 export const workspaceKey = (tenantId: string): string => keyOf('workspace', tenantId);
 export const ipKey = (ip: string | undefined): string => keyOf('ip', ip ?? 'unknown');
@@ -135,6 +136,34 @@ export async function reserveOtpSend(context: SendContext, limits: OtpLimits = o
     await client.query("INSERT INTO otp_rate_events (dim, key) VALUES ('recipient', $1), ('sender', $2)", [recipient, SENDER_KEY]);
     if (invitation) await client.query("INSERT INTO otp_rate_events (dim, key) VALUES ('invitation', $1)", [invitation]);
     if (workspace) await client.query("INSERT INTO otp_rate_events (dim, key) VALUES ('workspace', $1)", [workspace]);
+    const { n } = (await client.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM otp_rate_events WHERE dim = 'sender' AND key = $1 AND at > now() - interval '24 hours'", [SENDER_KEY])).rows[0]!;
+    if (n >= Math.ceil(limits.senderPerDay * SENDER_WARN_RATIO)) await recordThreshold(client, 'sender_70_percent', n, limits.senderPerDay);
+    return undefined;
+  });
+  if (refusal) throw refuse(refusal);
+}
+
+/** Same recipient and shared sender budgets as email OTP, but keyed by a normalized phone number. */
+export async function reserveWhatsappOtpSend(phoneDigits: string, limits: OtpLimits = otpLimits()): Promise<void> {
+  const recipient = whatsappRecipientKey(phoneDigits);
+  const refusal = await transaction(async (client): Promise<Refusal | undefined> => {
+    for (const [dim, key] of [['recipient', recipient], ['sender', SENDER_KEY]].sort((a, b) => `${a[0]}:${a[1]}`.localeCompare(`${b[0]}:${b[1]}`)) as Array<[Dim, string]>) {
+      await lock(client, dim, key);
+    }
+    const rules: Rule[] = [
+      { dim: 'recipient', key: recipient, windowSeconds: 3600, limit: limits.recipientPerHour },
+      { dim: 'recipient', key: recipient, windowSeconds: 86_400, limit: limits.recipientPerDay },
+    ];
+    const hit = await violated(client, rules);
+    if (hit) return { code: 'OTP_RATE_LIMITED', status: 429, retryAfter: hit.wait };
+    const senderRule: Rule = { dim: 'sender', key: SENDER_KEY, windowSeconds: 86_400, limit: limits.senderPerDay };
+    const senderHit = await violated(client, [senderRule]);
+    if (senderHit) {
+      await recordThreshold(client, 'sender_cap_reached', limits.senderPerDay, limits.senderPerDay);
+      return { code: 'OTP_CAPACITY_REACHED', status: 503, retryAfter: senderHit.wait };
+    }
+    await client.query("INSERT INTO otp_rate_events (dim, key) VALUES ('recipient', $1), ('sender', $2)", [recipient, SENDER_KEY]);
     const { n } = (await client.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM otp_rate_events WHERE dim = 'sender' AND key = $1 AND at > now() - interval '24 hours'", [SENDER_KEY])).rows[0]!;
     if (n >= Math.ceil(limits.senderPerDay * SENDER_WARN_RATIO)) await recordThreshold(client, 'sender_70_percent', n, limits.senderPerDay);

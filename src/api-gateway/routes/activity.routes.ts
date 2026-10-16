@@ -71,7 +71,7 @@ const DAILY_SQL = `
   m AS (
     SELECT ((COALESCE(sent_at, created_at) AT TIME ZONE 'UTC') AT TIME ZONE $3::text) AS local_at, direction
     FROM messages
-    WHERE device_id = $1::uuid AND created_at >= now() - make_interval(days => $2::int + 1)
+    WHERE device_id = $1::uuid AND system_otp=false AND created_at >= now() - make_interval(days => $2::int + 1)
       AND (direction = 'inbound' OR status IN ('sent', 'delivered', 'read'))
   )
   SELECT days.d AS date,

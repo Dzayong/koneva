@@ -123,6 +123,7 @@ interface MessageRow {
   error_message: string | null;
   priority: MessageRecord['priority'];
   quota_exempt: boolean;
+  system_otp: boolean;
   created_at: Date;
 }
 
@@ -141,6 +142,7 @@ function mapMessageRow(row: MessageRow): MessageRecord {
     errorMessage: row.error_message,
     priority: row.quota_exempt ? 'urgent' : 'normal',
     quotaExempt: row.quota_exempt,
+    ...(row.system_otp ? { systemOtp: true } : {}),
     createdAt: row.created_at,
   };
 }
@@ -148,7 +150,8 @@ function mapMessageRow(row: MessageRow): MessageRecord {
 async function getMessageById(id: string, queryFn: QueryFn): Promise<MessageRecord | undefined> {
   const { rows } = await queryFn(
     `SELECT id, tenant_id, device_id, device_key, to_number, content, media_url, type, status,
-            whatsapp_message_id, error_message, priority, COALESCE(quota_exempt, false) AS quota_exempt, created_at
+            whatsapp_message_id, error_message, priority, COALESCE(quota_exempt, false) AS quota_exempt,
+            COALESCE(system_otp, false) AS system_otp, created_at
      FROM messages WHERE id = $1`,
     [id],
   );
@@ -184,6 +187,10 @@ async function updateMessageStatus(
   }
   if (fields.timestampColumn) {
     sets.push(`${fields.timestampColumn} = now()`);
+  }
+  if (['sent', 'failed', 'blocked'].includes(fields.status)) {
+    sets.push("content = CASE WHEN system_otp THEN '[redacted]' ELSE content END");
+    sets.push("to_number = CASE WHEN system_otp THEN '[redacted]' ELSE to_number END");
   }
 
   await queryFn(`UPDATE messages SET ${sets.join(', ')} WHERE id = $1`, params);
@@ -298,7 +305,7 @@ async function failAttempt(
     await updateMessageStatus(message.id, { status: 'failed', errorMessage }, queryFn);
     await moveToDeadLetter(deviceKey, job.data, connection, log);
     messagesFailedTotal.inc({ device_key: deviceKey, reason: reasonLabel });
-    await dispatchWebhook(
+    if (!message.systemOtp) await dispatchWebhook(
       message.tenantId,
       {
         event: 'message.failed',
@@ -341,7 +348,7 @@ async function applyTransmitBlock(
   }
   await updateMessageStatus(message.id, { status: 'failed', errorMessage: reason }, queryFn);
   messagesFailedTotal.inc({ device_key: deviceKey, reason });
-  await dispatchWebhook(message.tenantId, {
+  if (!message.systemOtp) await dispatchWebhook(message.tenantId, {
     event: 'message.failed', device_key: message.deviceKey, message_id: message.id, to: message.to,
     status: 'failed', reason, timestamp: nowIso(),
   }, { queryFn });
@@ -390,6 +397,10 @@ async function processJobBody(
     log.info('Message already handled, skipping', { messageId: message.id, status: message.status });
     return;
   }
+  if (message.systemOtp && Date.now() - message.createdAt.getTime() >= 10 * 60_000) {
+    await updateMessageStatus(message.id, { status: 'failed', errorMessage: 'otp_expired' }, queryFn);
+    throw new UnrecoverableError('Signup OTP expired before delivery');
+  }
 
   const initialConsent = await getStoredRecipientConsent(queryFn, message.tenantId, message.to);
   if (!message.quotaExempt && initialConsent !== 'opted_in') {
@@ -400,7 +411,7 @@ async function processJobBody(
       messageId: message.id, errorCode: code,
     });
     messagesFailedTotal.inc({ device_key: deviceKey, reason: code.toLocaleLowerCase() });
-    await dispatchWebhook(message.tenantId, {
+    if (!message.systemOtp) await dispatchWebhook(message.tenantId, {
       event: 'message.failed', device_key: message.deviceKey, message_id: message.id,
       to: message.to, status: 'failed', reason: code, timestamp: nowIso(),
     }, { queryFn });
@@ -463,7 +474,7 @@ async function processJobBody(
 
     await updateMessageStatus(message.id, { status: 'failed', errorMessage: reasonLabel }, queryFn);
     messagesFailedTotal.inc({ device_key: deviceKey, reason: reasonLabel });
-    await dispatchWebhook(
+    if (!message.systemOtp) await dispatchWebhook(
       message.tenantId,
       {
         event: 'message.failed',
@@ -545,7 +556,7 @@ async function processJobBody(
         tenantId: message.tenantId, recipientLast4: message.to.replace(/\D/g, '').slice(-4),
         messageId: message.id, errorCode: err.code,
       });
-      await dispatchWebhook(message.tenantId, {
+      if (!message.systemOtp) await dispatchWebhook(message.tenantId, {
         event: 'message.failed', device_key: message.deviceKey, message_id: message.id,
         to: message.to, status: 'failed', reason: err.code, timestamp: nowIso(),
       }, { queryFn });
@@ -563,7 +574,7 @@ async function processJobBody(
     await updateMessageStatus(message.id, { status: 'failed', errorMessage: 'delivery_uncertain' }, queryFn);
     await moveToDeadLetter(deviceKey, job.data, connection, log);
     messagesFailedTotal.inc({ device_key: deviceKey, reason: 'delivery_uncertain' });
-    await dispatchWebhook(message.tenantId, {
+    if (!message.systemOtp) await dispatchWebhook(message.tenantId, {
       event: 'message.failed', device_key: message.deviceKey, message_id: message.id, to: message.to,
       status: 'failed', reason: 'delivery_uncertain', timestamp: nowIso(),
     }, { queryFn });
@@ -579,7 +590,7 @@ async function processJobBody(
   );
   messagesSentTotal.inc({ device_key: deviceKey, type: message.type });
 
-  await dispatchWebhook(
+  if (!message.systemOtp) await dispatchWebhook(
     message.tenantId,
     {
       event: 'message.sent',
@@ -593,7 +604,7 @@ async function processJobBody(
     { queryFn },
   );
 
-  log.info('Message sent', { messageId: message.id, to: message.to });
+  log.info('Message sent', { messageId: message.id, ...(!message.systemOtp ? { recipientLast4: message.to.replace(/\D/g, '').slice(-4) } : {}) });
 }
 
 /**
@@ -610,27 +621,32 @@ export async function failStuckMessages(
   dispatch: typeof dispatchWebhook = dispatchWebhook,
 ): Promise<number> {
   const { rows } = await queryFn(
-    `SELECT id, tenant_id, device_key, to_number FROM messages
+    `SELECT id, tenant_id, device_key, to_number, COALESCE(system_otp, false) AS system_otp FROM messages
      WHERE device_key = $1 AND direction = 'outbound' AND status = 'queued'
        AND created_at < now() - CASE WHEN priority = 'urgent' THEN interval '2 minutes' ELSE interval '15 minutes' END`,
     [deviceKey],
   );
   let failed = 0;
-  for (const row of rows as { id: string; tenant_id: string; device_key: string; to_number: string }[]) {
+  for (const row of rows as { id: string; tenant_id: string; device_key: string; to_number: string; system_otp: boolean }[]) {
     if (liveMessageIds.has(row.id)) continue;
     const updated = await queryFn(
-      `UPDATE messages SET status = 'failed', error_message = 'lost_in_queue' WHERE id = $1 AND status = 'queued' RETURNING id`,
+      `UPDATE messages SET status = 'failed', error_message = 'lost_in_queue',
+         content = CASE WHEN system_otp THEN '[redacted]' ELSE content END,
+         to_number = CASE WHEN system_otp THEN '[redacted]' ELSE to_number END
+       WHERE id = $1 AND status = 'queued' RETURNING id`,
       [row.id],
     );
     if (updated.rows.length === 0) continue;
     failed += 1;
     log.error('Queued message had no live job; marked failed', { messageId: row.id, deviceKey });
-    await dispatch(row.tenant_id, {
-      event: 'message.failed', device_key: row.device_key, message_id: row.id,
-      to: row.to_number, status: 'failed', reason: 'lost_in_queue', timestamp: nowIso(),
-    }, { queryFn }).catch((error: unknown) => {
-      log.error('Failed to dispatch lost-message webhook', { error: error instanceof Error ? error.message : String(error) });
-    });
+    if (!row.system_otp) {
+      await dispatch(row.tenant_id, {
+        event: 'message.failed', device_key: row.device_key, message_id: row.id,
+        to: row.to_number, status: 'failed', reason: 'lost_in_queue', timestamp: nowIso(),
+      }, { queryFn }).catch((error: unknown) => {
+        log.error('Failed to dispatch lost-message webhook', { error: error instanceof Error ? error.message : String(error) });
+      });
+    }
   }
   return failed;
 }
@@ -732,7 +748,7 @@ export async function handleReceiptUpdate(
     receiptStatus: update.status,
     receiptStatusName: WAMessageStatus[update.status] ?? 'UNKNOWN',
     mappedStatus: newStatus,
-    remoteJid: key.remoteJid,
+    recipientLast4: key.remoteJid?.replace(/\D/g, '').slice(-4) ?? '',
     fromMe: key.fromMe,
   });
 
@@ -743,11 +759,11 @@ export async function handleReceiptUpdate(
     `UPDATE messages
      SET status = $1, ${timestampColumn} = COALESCE(${timestampColumn}, now())
      WHERE whatsapp_message_id = $2 AND status = ANY($3::varchar[])
-     RETURNING id, tenant_id, device_key, to_number`,
+     RETURNING id, tenant_id, device_key, to_number, COALESCE(system_otp, false) AS system_otp`,
     [newStatus, key.id, allowedStatuses],
   );
   const row = rows[0] as
-    | { id: string; tenant_id: string; device_key: string; to_number: string }
+    | { id: string; tenant_id: string; device_key: string; to_number: string; system_otp: boolean }
     | undefined;
   if (!row) {
     log.warn('WhatsApp receipt did not match an updatable message', {
@@ -757,19 +773,21 @@ export async function handleReceiptUpdate(
     return;
   }
 
-  await webhookDispatcher(
-    row.tenant_id,
-    {
-      event,
-      device_key: row.device_key,
-      message_id: row.id,
-      whatsapp_message_id: key.id,
-      to: row.to_number,
-      status: newStatus,
-      timestamp: nowIso(),
-    },
-    { queryFn },
-  );
+  if (!row.system_otp) {
+    await webhookDispatcher(
+      row.tenant_id,
+      {
+        event,
+        device_key: row.device_key,
+        message_id: row.id,
+        whatsapp_message_id: key.id,
+        to: row.to_number,
+        status: newStatus,
+        timestamp: nowIso(),
+      },
+      { queryFn },
+    );
+  }
 
   log.info('Message receipt updated', { messageId: row.id, status: newStatus });
 }

@@ -7,7 +7,7 @@ import { getRedisClient } from '../../shared/redis';
 import { validate } from '../middleware/validate';
 import { login, resolveSession, revokeSession, sha256, signup } from '../services/account.service';
 import { acceptInvitation, previewInvitation, requestInvitationOtp } from '../services/team.service';
-import { confirmEmailVerification, confirmSignupEmailVerification, requestEmailVerification, requestSignupEmailVerification } from '../services/owner-verification.service';
+import { confirmEmailVerification, confirmSignupEmailVerification, confirmSignupWhatsAppVerification, requestEmailVerification, requestSignupEmailVerification, requestSignupWhatsAppVerification } from '../services/owner-verification.service';
 import { confirmPasswordReset, requestPasswordReset } from '../services/password-reset.service';
 import { recordSiteEvent } from '../services/site-stats.service';
 import { getSubscriptionSummary } from '../services/billing.service';
@@ -21,8 +21,14 @@ export const signupSchema = z.object({
   password: z.string().min(10, 'Password must be at least 10 characters').max(128),
   name: z.string().trim().min(1).max(120),
   workspace_name: z.string().trim().min(2).max(80).optional(),
+  verification_method: z.enum(['email', 'whatsapp']).default('email'),
+  phone_number: z.string().trim().min(8).max(24).regex(/^\+?[0-9\s().-]+$/).optional(),
   accept_terms: z.literal(true, { error: 'You must accept the terms to create an account' }),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.verification_method === 'whatsapp' && !value.phone_number) {
+    ctx.addIssue({ code: 'custom', path: ['phone_number'], message: 'Nomor WhatsApp wajib diisi untuk verifikasi lewat WhatsApp.' });
+  }
+});
 
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(255),
@@ -55,7 +61,9 @@ router.post('/signup', limited(60 * 60_000, 10), validate({ body: signupSchema }
   const pending = await signup(body);
   let resendAfter: number;
   try {
-    const verification = await requestEmailVerification(pending.user_id, request.ip);
+    const verification = body.verification_method === 'whatsapp'
+      ? await requestSignupWhatsAppVerification(pending.email, request.ip)
+      : await requestEmailVerification(pending.user_id, request.ip);
     resendAfter = 'resend_after' in verification ? verification.resend_after : 60;
   } catch (error) {
     // A restarted pending signup may reuse an already-sent, still-valid OTP during its cooldown.
@@ -63,22 +71,26 @@ router.post('/signup', limited(60 * 60_000, 10), validate({ body: signupSchema }
     else throw error;
   }
   response.status(202).json({ success: true, data: {
-    verification_required: true, email: pending.email,
+    verification_required: true, verification_method: body.verification_method, email: pending.email,
     resend_after: resendAfter,
   } });
 });
 
-const signupVerificationRequestSchema = z.object({ email: z.string().trim().toLowerCase().email().max(255) }).strict();
+const signupVerificationRequestSchema = z.object({ email: z.string().trim().toLowerCase().email().max(255), channel: z.enum(['email', 'whatsapp']).default('email') }).strict();
 const signupVerificationConfirmSchema = signupVerificationRequestSchema.extend({ code: z.string().regex(/^\d{6}$/) }).strict();
 
 router.post('/signup/verification/request', limited(15 * 60_000, 20), validate({ body: signupVerificationRequestSchema }), async (request: Request, response: Response) => {
-  const { email } = request.validated!.body as z.infer<typeof signupVerificationRequestSchema>;
-  response.json({ success: true, data: await requestSignupEmailVerification(email, request.ip) });
+  const { email, channel } = request.validated!.body as z.infer<typeof signupVerificationRequestSchema>;
+  response.json({ success: true, data: channel === 'whatsapp'
+    ? await requestSignupWhatsAppVerification(email, request.ip)
+    : await requestSignupEmailVerification(email, request.ip) });
 });
 
 router.post('/signup/verification/confirm', limited(15 * 60_000, 30), validate({ body: signupVerificationConfirmSchema }), async (request: Request, response: Response) => {
-  const { email, code } = request.validated!.body as z.infer<typeof signupVerificationConfirmSchema>;
-  const session = await confirmSignupEmailVerification(email, code, meta(request));
+  const { email, code, channel } = request.validated!.body as z.infer<typeof signupVerificationConfirmSchema>;
+  const session = channel === 'whatsapp'
+    ? await confirmSignupWhatsAppVerification(email, code, meta(request))
+    : await confirmSignupEmailVerification(email, code, meta(request));
   void recordSiteEvent('signup').catch(() => undefined);
   response.json({ success: true, data: session });
 });

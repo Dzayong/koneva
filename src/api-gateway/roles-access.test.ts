@@ -132,7 +132,7 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
     const email = `${randomUUID()}@gmail.com`, firstPassword = 'first-synthetic-password-26', secondPassword = 'second-synthetic-password-26';
     const first = await call('/auth/signup', { method: 'POST', body: { email, password: firstPassword, name: 'Pendaftar Pertama', accept_terms: true } });
     assert.equal(first.status, 202, first.text);
-    assert.deepEqual(first.body.data, { verification_required: true, email, resend_after: 60 });
+    assert.deepEqual(first.body.data, { verification_required: true, verification_method: 'email', email, resend_after: 60 });
     assert.equal('token' in first.body.data, false);
     const pending = (await pool.query<{ status: string; email_verified_at: Date | null }>('SELECT status,email_verified_at FROM users WHERE lower(email)=lower($1)', [email])).rows[0];
     assert.deepEqual(pending, { status: 'pending_email', email_verified_at: null });

@@ -53,6 +53,7 @@ interface MessageRow extends QueryResultRow {
   external_id: string | null;
   priority?: string;
   quota_exempt?: boolean;
+  system_otp?: boolean;
   created_at: Date;
 }
 
@@ -60,6 +61,15 @@ export async function queueMessage(
   tenantId: string,
   input: SendMessageRequest,
 ): Promise<MessageRow> {
+  return queueMessageInternal(tenantId, input, false);
+}
+
+/** Platform-only OTP path. Its marker is set in SQL, never accepted from an API request. */
+export async function queueSystemOtp(tenantId: string, input: SendMessageRequest): Promise<MessageRow> {
+  return queueMessageInternal(tenantId, input, true);
+}
+
+async function queueMessageInternal(tenantId: string, input: SendMessageRequest, systemOtp: boolean): Promise<MessageRow> {
   return withRecipientConsentLock(tenantId, input.to, async () => {
   // Scheduled campaigns can resume after an API restart. Their deterministic external IDs make the
   // database insert and BullMQ enqueue safely repeatable across the scheduler's claim lease.
@@ -85,8 +95,8 @@ export async function queueMessage(
   // request's own otp_code to genuinely appear in the message content (short, no media) AND a per-recipient/tenant
   // rate limit not already spent. See message-exempt-limits.ts. A failed/skipped claim never blocks the send --
   // it just means this particular send counts against quota like any other.
-  const exempt = looksLikeTransactional({ message: input.message, mediaUrl: input.media_url, otpCode: input.otp_code })
-    && await reserveTransactionalExemption(tenantId, input.to);
+  const exempt = systemOtp || (looksLikeTransactional({ message: input.message, mediaUrl: input.media_url, otpCode: input.otp_code })
+    && await reserveTransactionalExemption(tenantId, input.to));
 
   const message = await transaction(async (client: PoolClient) => {
     await assertSubscriptionActive(client, tenantId);
@@ -115,10 +125,10 @@ export async function queueMessage(
 
     const result = await client.query<MessageRow>(
       `INSERT INTO messages
-         (tenant_id, device_id, device_key, to_number, content, external_id, status, priority, type, media_url, quota_exempt)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+         (tenant_id, device_id, device_key, to_number, content, external_id, status, priority, type, media_url, quota_exempt, system_otp)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
       [tenantId, device.id, input.device_key, input.to, input.message, input.external_id ?? null, status, priority,
-        input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt],
+        input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt, systemOtp],
     );
     if (status === 'queued' && !exempt) await client.query('UPDATE tenants SET used_messages = used_messages + 1 WHERE id = $1', [tenantId]);
     return result.rows[0]!;
@@ -130,7 +140,9 @@ export async function queueMessage(
     await enqueueStoredMessage(input.device_key, message.id, message.id, (message.priority as 'normal' | 'urgent' | undefined) ?? 'normal');
   } catch (error) {
     await pool.query(
-      `UPDATE messages SET status = 'failed', error_message = $2 WHERE id = $1`,
+      `UPDATE messages SET status = 'failed', error_message = $2,
+         content = CASE WHEN system_otp THEN '[redacted]' ELSE content END,
+         to_number = CASE WHEN system_otp THEN '[redacted]' ELSE to_number END WHERE id = $1`,
       [message.id, error instanceof Error ? error.message : 'Queue unavailable'],
     );
     throw new ServiceError(503, 'QUEUE_UNAVAILABLE', 'Unable to enqueue message');
@@ -191,7 +203,7 @@ export async function getMessageStatus(tenantId: string, messageId: string) {
          ORDER BY h.created_at) FILTER (WHERE h.id IS NOT NULL), '[]') AS status_history
      FROM messages m
      LEFT JOIN message_status_history h ON h.message_id = m.id
-     WHERE m.tenant_id = $1 AND m.id = $2
+     WHERE m.tenant_id = $1 AND m.id = $2 AND m.system_otp = false
      GROUP BY m.id`,
     [tenantId, messageId],
   );
@@ -211,7 +223,7 @@ export async function listMessages(
   },
 ): Promise<PaginatedResponse<QueryResultRow>> {
   const values: unknown[] = [tenantId];
-  const conditions = ['tenant_id = $1'];
+  const conditions = ['tenant_id = $1', 'system_otp = false'];
   if (filter.device_key) {
     values.push(filter.device_key);
     conditions.push(`device_key = $${values.length}`);
@@ -255,7 +267,7 @@ export async function retryMessage(tenantId: string, messageId: string): Promise
   await assertSubscriptionActive(pool, tenantId);
   const target = (await pool.query<{ device_status: string | null; to_number: string; quota_exempt: boolean; error_message: string | null }>(
     `SELECT d.status AS device_status, m.to_number, COALESCE(m.quota_exempt, false) AS quota_exempt, m.error_message
-     FROM messages m LEFT JOIN devices d ON d.id = m.device_id WHERE m.id = $1 AND m.tenant_id = $2`, [messageId, tenantId])).rows[0];
+     FROM messages m LEFT JOIN devices d ON d.id = m.device_id WHERE m.id = $1 AND m.tenant_id = $2 AND m.system_otp = false`, [messageId, tenantId])).rows[0];
   const retry = async (): Promise<MessageRow> => {
   if (target?.error_message === 'recipient_opted_out' || target?.error_message === 'recipient_consent_required') {
     logger.warn('Consent-suppressed message retry refused', {
@@ -268,12 +280,12 @@ export async function retryMessage(tenantId: string, messageId: string): Promise
   if (target && target.device_status !== 'online') throw new ServiceError(503, 'DEVICE_OFFLINE', 'Device is not online');
   const result = await pool.query<MessageRow>(
     `UPDATE messages SET status='queued', error_message=NULL
-     WHERE id=$1 AND tenant_id=$2 AND status IN ('failed','blocked') RETURNING *`,
+     WHERE id=$1 AND tenant_id=$2 AND system_otp=false AND status IN ('failed','blocked') RETURNING *`,
     [messageId, tenantId],
   );
   const message = result.rows[0];
   if (!message) {
-    const exists = await pool.query('SELECT status FROM messages WHERE id=$1 AND tenant_id=$2', [messageId, tenantId]);
+    const exists = await pool.query('SELECT status FROM messages WHERE id=$1 AND tenant_id=$2 AND system_otp=false', [messageId, tenantId]);
     if (!exists.rows[0]) throw new ServiceError(404, 'MESSAGE_NOT_FOUND', 'Message not found');
     throw new ServiceError(409, 'MESSAGE_NOT_RETRYABLE', 'Only failed or blocked messages can be retried');
   }
