@@ -61,10 +61,12 @@ export default function BroadcastPage() {
   const [mediaType, setMediaType] = useState<"image" | "video" | "document">("image");
   const [manualNumbers, setManualNumbers] = useState("");
   const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
+  const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [recipients, setRecipients] = useState<RecipientState[]>([]);
   const [isSending, setIsSending] = useState(false);
 
   const toggleContact = (id: string) => {
+    setConsentConfirmed(false);
     setSelectedContactIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -111,9 +113,27 @@ export default function BroadcastPage() {
       toast.error("Belum ada penerima", { description: "Pilih kontak atau tempel nomor telepon." });
       return;
     }
+    if (!consentConfirmed) {
+      toast.error("Konfirmasi izin penerima dulu", {
+        description: "Pastikan semua nomor di daftar ini memang sudah setuju menerima pesan WhatsApp.",
+      });
+      return;
+    }
 
     setRecipients(list);
     setIsSending(true);
+    try {
+      await api.recordBroadcastConsent(list.map((recipient) => recipient.phone));
+    } catch (err) {
+      const failure = apiFailure(err, "Konfirmasi izin gagal");
+      const message = failure.code === "RECIPIENT_OPTED_OUT"
+        ? "Ada penerima yang pernah meminta berhenti. Tidak ada pesan yang dikirim; keluarkan nomor tersebut dari daftar."
+        : failure.message;
+      setRecipients(list.map((recipient) => ({ ...recipient, status: "failed", error: message })));
+      setIsSending(false);
+      toast.error("Tidak ada pesan yang dikirim", { description: message });
+      return;
+    }
     let queuedCount = 0;
     let quotaHoldCount = 0;
     let failedCount = 0;
@@ -227,9 +247,25 @@ export default function BroadcastPage() {
                   rows={4}
                   placeholder={"6281234567890\n6281234567891"}
                   value={manualNumbers}
-                  onChange={(e) => setManualNumbers(e.target.value)}
+                  onChange={(e) => {
+                    setManualNumbers(e.target.value);
+                    setConsentConfirmed(false);
+                  }}
                 />
               </div>
+              <label className="flex cursor-pointer items-start gap-3 rounded-md border bg-muted/30 p-3 text-sm leading-5">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 shrink-0 accent-primary"
+                  checked={consentConfirmed}
+                  onChange={(event) => setConsentConfirmed(event.target.checked)}
+                  disabled={isSending}
+                  aria-label="Konfirmasi izin penerima"
+                />
+                <span>
+                  Saya memastikan semua nomor yang dipilih atau ditempel di atas telah memberi izin menerima pesan WhatsApp dari bisnis ini. Konfirmasi ini dicatat atas nama akun saya. Nomor yang pernah meminta berhenti tetap diblokir.
+                </span>
+              </label>
             </CardContent>
           </Card>
         </div>

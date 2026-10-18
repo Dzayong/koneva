@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import pool, { transaction } from '../../shared/database/connection';
 import logger from '../../shared/utils/logger';
-import { normalizeRecipientNumber, withRecipientConsentLock } from '../../shared/recipient-consent';
+import { normalizeRecipientNumber, withRecipientConsentLock, withRecipientConsentLocks } from '../../shared/recipient-consent';
 import { ServiceError } from './service-error';
 
 export { normalizeRecipientNumber } from '../../shared/recipient-consent';
@@ -137,6 +137,50 @@ export async function recordManualContactConsent(
     }
     return preference.rows[0] ?? {};
   }));
+}
+
+/** Record the signed-in sender's per-recipient consent attestation from the Broadcast form.
+ * A prior opt-out is authoritative and cannot be reversed by this bulk confirmation.
+ */
+export async function recordBroadcastConsent(
+  tenantId: string,
+  recipients: string[],
+  actorId: string,
+): Promise<{ recorded: number }> {
+  const phoneNumbers = [...new Set(recipients.map(normalizeRecipientNumber))].sort();
+  if (phoneNumbers.length < 1 || phoneNumbers.length > 500 || phoneNumbers.some((phone) => !/^[1-9]\d{6,19}$/.test(phone))) {
+    throw new ServiceError(400, 'INVALID_RECIPIENTS', 'Provide between 1 and 500 valid recipient numbers');
+  }
+  const sourceNote = 'Pengirim mengonfirmasi melalui checklist Broadcast bahwa penerima telah memberi izin.';
+
+  await withRecipientConsentLocks(tenantId, phoneNumbers, () => transaction(async (client: PoolClient) => {
+    const existing = await client.query<{ phone_number: string; status: RecipientConsentStatus }>(
+      `SELECT phone_number, status FROM recipient_preferences
+       WHERE tenant_id = $1 AND phone_number = ANY($2::text[]) FOR UPDATE`,
+      [tenantId, phoneNumbers],
+    );
+    const optedOut = existing.rows.filter((row) => row.status === 'opted_out').map((row) => row.phone_number);
+    if (optedOut.length) {
+      throw new ServiceError(409, 'RECIPIENT_OPTED_OUT', 'Some recipients opted out; remove them before sending');
+    }
+
+    for (const phoneNumber of phoneNumbers) {
+      await client.query(
+        `INSERT INTO recipient_preferences
+           (tenant_id, phone_number, status, source, source_note, decided_by, decided_at, updated_at)
+         VALUES ($1, $2, 'opted_in', 'manual', $3, $4, now(), now())
+         ON CONFLICT (tenant_id, phone_number) DO NOTHING`,
+        [tenantId, phoneNumber, sourceNote, actorId],
+      );
+      await client.query(
+        `INSERT INTO recipient_consent_events
+           (tenant_id, phone_number, status, source, source_note, actor_kind, actor_id)
+         VALUES ($1, $2, 'opted_in', 'manual', $3, 'user', $4)`,
+        [tenantId, phoneNumber, sourceNote, actorId],
+      );
+    }
+  }));
+  return { recorded: phoneNumbers.length };
 }
 
 /**

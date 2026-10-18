@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import type { Request, Response } from 'express';
 import pool from '../../shared/database/connection';
-import { assertRecipientConsent, normalizeRecipientNumber, recordApiSignupConsent, recordManualContactConsent } from './recipient-consent.service';
+import { assertRecipientConsent, normalizeRecipientNumber, recordApiSignupConsent, recordBroadcastConsent, recordManualContactConsent } from './recipient-consent.service';
 import { ServiceError } from './service-error';
 import { queueMessage, retryMessage } from './message.service';
-import { recordSignupConsent, setContactConsent } from '../routes/contact.routes';
+import { recordBroadcastConsentForUser, recordSignupConsent, setContactConsent } from '../routes/contact.routes';
 
 type Query = (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
 const database = pool as unknown as { query: Query; connect: () => Promise<unknown> };
@@ -59,6 +59,46 @@ test('manual contact consent requires a signed-in workspace member, evidence not
   assert.equal(statements.some((s) => s.text === 'COMMIT'), true);
 
   await assert.rejects(() => recordManualContactConsent('tenant-a', 'contact-a', 'opted_in', '   ', 'user-a'), code('CONSENT_SOURCE_REQUIRED'));
+});
+
+test('Broadcast confirmation records each sender attestation and never replaces a prior opt-out', async () => {
+  const statements: Array<{ text: string; values?: unknown[] }> = [];
+  database.connect = async () => ({
+    query: async (text: string, values?: unknown[]) => {
+      statements.push({ text, ...(values === undefined ? {} : { values }) });
+      if (text.includes('SELECT phone_number, status FROM recipient_preferences')) return { rows: [] };
+      return { rows: [] };
+    },
+    release() {},
+  });
+
+  const result = await recordBroadcastConsent('tenant-a', ['+6281234567890', '6281234567891'], 'user-a');
+  assert.deepEqual(result, { recorded: 2 });
+  assert.equal(statements.filter((statement) => statement.text.includes('INSERT INTO recipient_preferences')).length, 2);
+  assert.equal(statements.filter((statement) => statement.text.includes('INSERT INTO recipient_consent_events')).length, 2);
+  assert.equal(statements.some((statement) => statement.values?.includes('user-a')), true);
+  assert.equal(statements.some((statement) => statement.values?.includes('6281234567890')), true);
+
+  const optedOutStatements: string[] = [];
+  database.connect = async () => ({
+    query: async (text: string) => {
+      optedOutStatements.push(text);
+      if (text.includes('SELECT phone_number, status FROM recipient_preferences')) return { rows: [{ phone_number: '6281234567890', status: 'opted_out' }] };
+      return { rows: [] };
+    },
+    release() {},
+  });
+  await assert.rejects(() => recordBroadcastConsent('tenant-a', ['6281234567890', '6281234567891'], 'user-a'), code('RECIPIENT_OPTED_OUT'));
+  assert.equal(optedOutStatements.some((text) => text.includes('INSERT INTO recipient_preferences') || text.includes('INSERT INTO recipient_consent_events')), false);
+  await assert.rejects(() => recordBroadcastConsent('tenant-a', ['bad'], 'user-a'), code('INVALID_RECIPIENTS'));
+});
+
+test('Broadcast consent confirmation is restricted to a signed-in user', async () => {
+  const request = {
+    tenant: { id: 'tenant-a' }, actor: { kind: 'api_key', role: 'admin' },
+    validated: { body: { recipients: ['6281234567890'] } },
+  } as unknown as Request;
+  await assert.rejects(() => recordBroadcastConsentForUser(request, {} as Response), code('CONSENT_ACTOR_REQUIRED'));
 });
 
 test('an API key cannot self-assert manual opt-in', async () => {

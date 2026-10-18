@@ -35,16 +35,45 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/contacts**", (route) =>
     route.fulfill({ json: { data: [], pagination: { limit: 100, offset: 0, total: 0 } } }),
   );
+  await page.route("**/api/v1/contacts/broadcast-consent", (route) =>
+    route.fulfill({ json: { success: true, data: { recorded: 1 } } }),
+  );
 });
 
-async function prepareBroadcast(page: import("@playwright/test").Page, recipients: string) {
+async function prepareBroadcast(page: import("@playwright/test").Page, recipients: string, confirmConsent = true) {
   await page.goto("/broadcast");
   await page.getByText("Pilih device yang online").click();
   await page.getByRole("option", { name: /Device Uji/ }).click();
   await page.getByLabel("Templat pesan").fill("Pesan uji");
   await page.getByLabel("Atau tempel nomor telepon (satu per baris)").fill(recipients);
+  if (confirmConsent) await page.getByRole("checkbox", { name: "Konfirmasi izin penerima" }).check();
   await page.getByRole("button", { name: "Kirim broadcast" }).click();
 }
+
+test("broadcast requires the sender's consent confirmation before any send", async ({ page }) => {
+  let consentCalls = 0;
+  let sendCalls = 0;
+  await page.route("**/api/v1/contacts/broadcast-consent", (route) => { consentCalls++; return route.fulfill({ json: { success: true, data: { recorded: 1 } } }); });
+  await page.route("**/api/v1/message/send", (route) => { sendCalls++; return route.fulfill({ json: { success: true, message_id: "m1", status: "queued" } }); });
+
+  await prepareBroadcast(page, "6281234567890", false);
+  await expect(page.getByText("Konfirmasi izin penerima dulu")).toBeVisible();
+  expect(consentCalls).toBe(0);
+  expect(sendCalls).toBe(0);
+});
+
+test("opted-out recipient blocks the entire broadcast before any message is queued", async ({ page }) => {
+  let sendCalls = 0;
+  await page.route("**/api/v1/contacts/broadcast-consent", (route) =>
+    route.fulfill({ status: 409, json: { success: false, error: { code: "RECIPIENT_OPTED_OUT", message: "Some recipients opted out" } } }),
+  );
+  await page.route("**/api/v1/message/send", (route) => { sendCalls++; return route.fulfill({ json: { success: true, message_id: "m1", status: "queued" } }); });
+
+  await prepareBroadcast(page, "6281234567890");
+  await expect(page.getByText("Tidak ada pesan yang dikirim", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Notifications alt+T" }).getByText(/pernah meminta berhenti/)).toBeVisible();
+  expect(sendCalls).toBe(0);
+});
 
 test("all rejected recipients produce an error result, never a success toast", async ({ page }) => {
   await page.route("**/api/v1/message/send", (route) =>

@@ -60,6 +60,7 @@ test('routes map to the intended permission', () => {
   assert.equal(permissionFor('GET', '/contact-groups/abc/members'), 'messages:read');
   assert.equal(permissionFor('POST', '/contact-groups'), 'content:write');
   assert.equal(permissionFor('POST', '/contacts/signup-consent'), 'content:write');
+  assert.equal(permissionFor('POST', '/contacts/broadcast-consent'), 'messages:send');
   assert.equal(permissionFor('PUT', '/contact-groups/abc/members'), 'content:write');
   assert.equal(permissionFor('GET', '/campaigns'), 'messages:read');
   assert.equal(permissionFor('POST', '/campaigns'), 'messages:send');

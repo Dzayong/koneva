@@ -43,6 +43,7 @@ const ANY_WRITE = ['POST', 'PATCH', 'PUT', 'DELETE'] as const;
 // Order matters: the first matching rule wins, so specific rules come before general ones.
 const RULES: readonly Rule[] = [
   [['POST'], /^\/message\/send$/, 'messages:send'],
+  [['POST'], /^\/contacts\/broadcast-consent$/, 'messages:send'],
   [['POST'], /^\/broadcast$/, 'messages:send'],
   [['GET'], /^\/messages(\/[^/]+)?$/, 'messages:read'],
   [['POST'], /^\/messages\/[^/]+\/retry$/, 'messages:send'],

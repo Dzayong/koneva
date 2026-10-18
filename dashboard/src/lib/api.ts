@@ -187,6 +187,15 @@ class ApiClient {
     return response.data;
   }
 
+  async recordBroadcastConsent(recipients: string[]): Promise<{ recorded: number }> {
+    const response = await this.client.post<ApiSuccess<{ recorded: number }>>(
+      "/api/v1/contacts/broadcast-consent",
+      { recipients },
+      { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
   async getMessages(params?: MessageListParams): Promise<PaginatedResponse<Message>> {
     const response = await this.client.get<PaginatedResponse<Message>>("/api/v1/messages", {
       params,

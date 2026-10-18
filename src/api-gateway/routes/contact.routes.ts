@@ -4,7 +4,7 @@ import pool, { transaction } from '../../shared/database/connection';
 import type { TenantContext } from '../../shared/types/api';
 import { validate } from '../middleware/validate';
 import { ServiceError } from '../services/service-error';
-import { getContactConsent, recordApiSignupConsent, recordManualContactConsent } from '../services/recipient-consent.service';
+import { getContactConsent, recordApiSignupConsent, recordBroadcastConsent, recordManualContactConsent } from '../services/recipient-consent.service';
 
 const router = Router();
 const phone = z.string().regex(/^\+?[1-9]\d{6,19}$/);
@@ -30,6 +30,7 @@ const signupConsentBody = z.object({
   consent_text: z.string().trim().min(10).max(500),
   evidence_ref: z.string().trim().min(1).max(100),
 }).strict();
+const broadcastConsentBody = z.object({ recipients: z.array(phone).min(1).max(500) }).strict();
 const listQuery = z.object({
   search: z.string().max(100).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -269,6 +270,16 @@ export async function recordSignupConsent(request: Request, response: Response):
   response.status(200).json({ success: true, data });
 }
 
+export async function recordBroadcastConsentForUser(request: Request, response: Response): Promise<void> {
+  const actor = request.actor;
+  if (!actor || actor.kind !== 'user') {
+    throw new ServiceError(403, 'CONSENT_ACTOR_REQUIRED', 'A signed-in workspace member must confirm recipient consent');
+  }
+  const input = request.validated!.body as z.infer<typeof broadcastConsentBody>;
+  const data = await recordBroadcastConsent(request.tenant!.id, input.recipients, actor.userId);
+  response.status(200).json({ success: true, data });
+}
+
 export async function importContacts(request: Request, response: Response): Promise<void> {
   const input = request.validated!.body as z.infer<typeof importContactsSchema>;
   const contacts = parseContactsCsv(input.csv);
@@ -306,6 +317,7 @@ export async function importContacts(request: Request, response: Response): Prom
 
 router.post('/contacts/import', validate({ body: importContactsSchema }), importContacts);
 router.post('/contacts/signup-consent', validate({ body: signupConsentBody }), recordSignupConsent);
+router.post('/contacts/broadcast-consent', validate({ body: broadcastConsentBody }), recordBroadcastConsentForUser);
 router.post('/contacts', validate({ body: createContactBody }), createContact);
 router.get('/contacts', validate({ query: listQuery }), listContacts);
 router.get('/contacts/:id/consent', validate({ params: idParams }), readContactConsent);
