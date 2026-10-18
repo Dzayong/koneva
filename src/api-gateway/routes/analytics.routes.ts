@@ -21,7 +21,7 @@ export async function analyticsOverview(request: Request, response: Response): P
            AND out_msg.device_key=m.device_key AND out_msg.to_number=m.from_number AND out_msg.created_at >= m.created_at
          ORDER BY out_msg.created_at LIMIT 1
        ) reply ON m.direction='inbound'
-       WHERE m.tenant_id=$1 AND m.system_otp=false`,
+       WHERE m.tenant_id=$1 AND m.system_otp=false AND system_notification=false`,
       [request.tenant!.id],
     ),
     pool.query(`SELECT COUNT(*) FILTER (WHERE status='online')::int AS active_devices FROM devices WHERE tenant_id=$1`, [request.tenant!.id]),
@@ -49,7 +49,7 @@ export async function analyticsDaily(request: Request, response: Response): Prom
        COUNT(m.id) FILTER (WHERE m.status IN ('delivered','read'))::int AS delivered,
        COUNT(m.id) FILTER (WHERE m.status='read')::int AS read
      FROM generate_series((now() AT TIME ZONE 'Asia/Jakarta')::date - ($2::int - 1), (now() AT TIME ZONE 'Asia/Jakarta')::date, INTERVAL '1 day') series(day)
-     LEFT JOIN messages m ON m.tenant_id=$1 AND m.system_otp=false
+     LEFT JOIN messages m ON m.tenant_id=$1 AND m.system_otp=false AND system_notification=false
        AND (m.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Jakarta' >= series.day
        AND (m.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Jakarta' < series.day + INTERVAL '1 day'
      GROUP BY series.day ORDER BY series.day`,

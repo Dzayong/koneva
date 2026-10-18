@@ -13,6 +13,7 @@ export const sendSchema = z.object({
   media_url: mediaUrl.optional(),
   media_type: z.enum(MEDIA_TYPES).default('image'),
   external_id: z.string().max(64).optional(),
+  reply_to_message_id: z.string().uuid().optional(),
   priority: z.enum(['normal', 'urgent']).default('normal'),
   otp_code: z.string().regex(/^[0-9]{4,10}$/).optional(),
 }).superRefine((v, ctx) => {
@@ -22,6 +23,7 @@ const listSchema = z.object({
   device_key: z.string().max(32).optional(),
   status: z.enum(['queued', 'sending', 'sent', 'delivered', 'read', 'failed', 'blocked', 'received']).optional(),
   direction: z.enum(['inbound', 'outbound']).optional(),
+  created_today: z.enum(['true']).optional(),
   search: z.string().trim().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
@@ -38,7 +40,7 @@ router.post('/message/send', validate({ body: sendSchema }), async (request, res
 
 router.get('/messages', validate({ query: listSchema }), async (request, response) => {
   const filter = request.validated!.query as z.infer<typeof listSchema>;
-  response.json(await listMessages(request.tenant!.id, filter));
+  response.json(await listMessages(request.tenant!.id, { ...filter, created_today: filter.created_today === 'true' }));
 });
 
 router.get(

@@ -14,6 +14,7 @@ import billingRoutes from '../src/api-gateway/routes/billing.routes';
 import publicRoutes from '../src/api-gateway/routes/public.routes';
 import deviceRoutes from '../src/api-gateway/routes/device.routes';
 import teamRoutes from '../src/api-gateway/routes/team.routes';
+import statsRoutes from '../src/api-gateway/routes/stats.routes';
 import { ServiceError } from '../src/api-gateway/services/service-error';
 
 type Fault = 'drop' | 'html502' | 'redirect' | 'none';
@@ -59,7 +60,7 @@ async function main(): Promise<void> {
   // Customer surface for the roles/invitation browser tests: the real routers and middleware (sessions do not need Redis).
   app.use('/public', express.json(), publicRoutes); // marketing page pricing/info; no auth needed
   app.use('/auth', express.json(), authRoutes);
-  app.use('/api/v1', express.json(), tenantAuth, authorize, auditTrail, deviceRoutes, teamRoutes, billingRoutes);
+  app.use('/api/v1', express.json(), tenantAuth, authorize, auditTrail, deviceRoutes, teamRoutes, billingRoutes, statsRoutes);
   app.use('/operator', createOperatorRouter(pool, { ...readOperatorConfig(), requestsPerMinute: 100_000 }));
   app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) { next(error); return; }

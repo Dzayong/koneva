@@ -38,6 +38,7 @@ import { createOperatorRouter } from './operator/router';
 import { readOperatorConfig } from './operator/config';
 import { cleanupOperatorData, idempotencyRetentionDays } from './operator/maintenance';
 import { startOtpMaintenance } from './services/otp-maintenance';
+import { drainSystemNotificationOutbox } from './services/system-notifications';
 
 assertMailerConfig(); // invalid mail settings stop startup; unset = OTP features fail safe
 const operatorConfig = readOperatorConfig();
@@ -171,6 +172,13 @@ const runScheduledCampaigns = (): void => {
 };
 setTimeout(runScheduledCampaigns, 15_000).unref();
 setInterval(runScheduledCampaigns, 15_000).unref();
+const runSystemNotifications = (): void => {
+  drainSystemNotificationOutbox(pool)
+    .then(({ queued, deferred }) => { if (queued || deferred) logger.info('System WhatsApp notifications processed', { queued, deferred }); })
+    .catch((error: unknown) => logger.error('System WhatsApp notification dispatcher failed', { error: error instanceof Error ? error.message : String(error) }));
+};
+setTimeout(runSystemNotifications, 10_000).unref();
+setInterval(runSystemNotifications, 5_000).unref();
 
 function shutdown(): void {
   server.close(() => process.exit(0));

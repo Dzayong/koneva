@@ -63,7 +63,7 @@ test.describe("OTP alerts in the Operator Panel (UI evidence, API faked)", () =>
     await page.goto("/operator/alerts");
     await expect(page.getByRole("status")).toContainText("Tidak ada peringatan aktif");
     await expect(page.getByRole("table").getByRole("row")).toHaveCount(2);
-    await expect(page.getByText("Riwayat", { exact: true })).toBeVisible();
+    await expect(page.getByRole("table").getByRole("cell", { name: "Riwayat" })).toBeVisible();
   });
 
   test("the page never renders fields it does not know: an email, IP, code or key sent by a faulty API stays out of the DOM", async ({ page }) => {

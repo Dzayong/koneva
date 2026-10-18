@@ -55,6 +55,7 @@ import type {
   CreateDeviceRequest,
   Device,
   DeviceHealthData,
+  DashboardStats,
   Message,
   MessageListParams,
   PaginatedResponse,
@@ -62,6 +63,7 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   Tenant,
+  WorkspaceReadiness,
 } from "./types";
 
 class ApiClient {
@@ -192,6 +194,11 @@ class ApiClient {
     return response.data;
   }
 
+  async getDashboardStats(): Promise<DashboardStats> {
+    const response = await this.client.get<ApiSuccess<DashboardStats>>("/api/v1/dashboard/stats");
+    return response.data.data;
+  }
+
   async getMessage(id: string): Promise<Message> {
     const response = await this.client.get<ApiSuccess<Message>>(`/api/v1/messages/${id}`);
     return response.data.data;
@@ -252,15 +259,19 @@ class ApiClient {
     return response.data.data;
   }
 
+  async setContactConsent(id: string, status: "opted_in" | "opted_out", source_note: string): Promise<void> {
+    await this.client.put(`/api/v1/contacts/${id}/consent`, { status, source_note });
+  }
+
   async deleteContact(id: string): Promise<void> {
     await this.client.delete(`/api/v1/contacts/${id}`);
   }
 
   /** Server-side CSV parse/upsert; header needs phone_number|phone|number. */
-  async importContacts(csv: string): Promise<{ imported: number }> {
+  async importContacts(csv: string, consent_source_note?: string): Promise<{ imported: number }> {
     const response = await this.client.post<ApiSuccess<{ imported: number }>>(
       "/api/v1/contacts/import",
-      { csv },
+      { csv, ...(consent_source_note ? { consent_source_note } : {}) },
       { skipErrorToast: true },
     );
     return response.data.data;
@@ -373,6 +384,34 @@ class ApiClient {
     const response = await this.client.get<ApiSuccess<DeviceHealthData>>(
       `/api/v1/devices/${deviceKey}/health`,
       { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
+  async getWorkspaceReadiness(): Promise<WorkspaceReadiness> {
+    const response = await this.client.get<ApiSuccess<WorkspaceReadiness>>("/api/v1/readiness/levels", { skipErrorToast: true });
+    return response.data.data;
+  }
+
+  async confirmWorkspaceMission(missionId: string): Promise<WorkspaceReadiness> {
+    const response = await this.client.post<ApiSuccess<WorkspaceReadiness>>(
+      `/api/v1/readiness/missions/${encodeURIComponent(missionId)}/confirm`,
+      { status: "completed" },
+      { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
+  async runWorkspaceTestMission(missionId: string, answer?: string): Promise<{ result: "passed" | "failed"; checks: Array<{ id: string; passed: boolean }>; readiness: WorkspaceReadiness }> {
+    const response = await this.client.post<ApiSuccess<{ result: "passed" | "failed"; checks: Array<{ id: string; passed: boolean }>; readiness: WorkspaceReadiness }>>(
+      `/api/v1/readiness/missions/${encodeURIComponent(missionId)}/run`, answer ? { answer } : {}, { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
+  async bypassWorkspaceLevel(input: { target_level: number; reason: string; dialog_version: "level-bypass-v1"; idempotency_key: string }): Promise<{ readiness: WorkspaceReadiness }> {
+    const response = await this.client.post<ApiSuccess<{ readiness: WorkspaceReadiness }>>(
+      "/api/v1/readiness/levels/bypass", input, { skipErrorToast: true },
     );
     return response.data.data;
   }

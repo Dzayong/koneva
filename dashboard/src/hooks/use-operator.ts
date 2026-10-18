@@ -82,6 +82,33 @@ export function useOwnerDevice(id: string, enabled = true) {
 export function useSystemHealth(enabled = true) {
   return useQuery({ queryKey: [OP, "system-health"], queryFn: () => operatorApi.getSystemHealth(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always", refetchInterval: 60_000 });
 }
+export function useSystemWhatsappOtpSender(enabled = true) {
+  return useQuery({ queryKey: [OP, "system-whatsapp-otp-sender"], queryFn: () => operatorApi.getSystemWhatsappOtpSender(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always", refetchInterval: 3_000 });
+}
+export function useSystemWhatsappOtpQr() {
+  return useMutation({ mutationFn: () => operatorApi.getSystemWhatsappOtpQr() });
+}
+export function usePairSystemWhatsappOtpSender() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: () => operatorApi.pairSystemWhatsappOtpSender(), onSuccess: () => {
+    void qc.invalidateQueries({ queryKey: [OP, "system-whatsapp-otp-sender"] });
+    void qc.invalidateQueries({ queryKey: [OP, "audit"] });
+  } });
+}
+export function useSaveSystemWhatsappNotifications() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: operatorApi.saveSystemWhatsappNotifications, onSuccess: () => {
+    void qc.invalidateQueries({ queryKey: [OP, "system-whatsapp-otp-sender"] });
+    void qc.invalidateQueries({ queryKey: [OP, "audit"] });
+  } });
+}
+export function useTestSystemWhatsappNotifications() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: operatorApi.testSystemWhatsappNotifications, onSuccess: () => {
+    void qc.invalidateQueries({ queryKey: [OP, "system-whatsapp-otp-sender"] });
+    void qc.invalidateQueries({ queryKey: [OP, "audit"] });
+  } });
+}
 export function useOwnerWorkspaces(params: { q?: string; limit?: number; offset?: number; plan?: string; status?: string }, enabled = true) {
   return useQuery({ queryKey: [OP, "owner-workspaces", params], queryFn: () => operatorApi.listOwnerWorkspaces(params), enabled, retry: retryTransient, placeholderData: keepPreviousData, refetchInterval: 60_000 });
 }

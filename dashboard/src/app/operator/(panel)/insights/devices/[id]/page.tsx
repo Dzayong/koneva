@@ -57,11 +57,11 @@ export default function DeviceDetailPage(props: { params: Promise<{ id: string }
       <button type="button" onClick={() => history.back()} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" aria-hidden />Kembali</button>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{d.label}</h1>
+          <h1 className="break-words text-2xl font-semibold tracking-tight">{d.label}</h1>
           <p className="text-sm text-muted-foreground">{d.workspace.name} · Hanya baca</p>
           {device.dataUpdatedAt > 0 && <p className="text-xs text-muted-foreground">Diperbarui: {new Date(device.dataUpdatedAt).toLocaleString("id-ID")} · auto-refresh 60 detik</p>}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Badge variant={d.status === "online" ? "default" : d.status === "error" || d.status === "banned" ? "destructive" : "secondary"}>{d.status_label}</Badge>
           <Badge variant={healthVariant(d.health_badge)}>{d.health_badge}</Badge>
         </div>
@@ -102,7 +102,20 @@ export default function DeviceDetailPage(props: { params: Promise<{ id: string }
 
       <Card title="Riwayat event (10 terakhir)">
         {d.events.length === 0 ? <p className="text-sm text-muted-foreground">Belum ada event tercatat.</p> : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="space-y-3 md:hidden">
+            {d.events.map((e) => (
+              <article key={e.id} className="rounded-lg border p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Badge variant={e.status === "online" ? "default" : e.status === "error" || e.status === "banned" ? "destructive" : "secondary"}>{e.status_label}</Badge>
+                  <time className="text-xs text-muted-foreground">{formatDate(e.at)}</time>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">{e.previous_status_label ? `Sebelumnya: ${e.previous_status_label}` : "Status awal tidak diketahui"}</p>
+                <p className="mt-1 break-words">{e.reason_label}</p>
+              </article>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -124,6 +137,7 @@ export default function DeviceDetailPage(props: { params: Promise<{ id: string }
               </TableBody>
             </Table>
           </div>
+          </>
         )}
       </Card>
 

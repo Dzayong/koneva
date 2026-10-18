@@ -93,7 +93,17 @@ export default function OwnerWorkspaceDetailPage(props: { params: Promise<{ id: 
 
       <Card title={`Anggota tim (${w.members.length})`}>
         {w.members.length > 0 ? (
-          <div className="overflow-x-auto">
+          <>
+          <div className="space-y-3 md:hidden">
+            {w.members.map((m, i) => (
+              <article key={i} className="rounded-lg border p-3 text-sm">
+                <div className="flex items-start justify-between gap-3"><p className="min-w-0 break-words font-medium">{m.name}</p><Badge className="shrink-0" variant="secondary">{m.role}</Badge></div>
+                <p className="mt-1 break-all text-muted-foreground">{m.email}</p>
+                <p className="mt-2 text-xs text-muted-foreground">Bergabung {m.joined_at ? formatDate(m.joined_at) : "—"}</p>
+              </article>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -115,12 +125,21 @@ export default function OwnerWorkspaceDetailPage(props: { params: Promise<{ id: 
               </TableBody>
             </Table>
           </div>
+          </>
         ) : <p className="text-sm text-muted-foreground">Belum ada anggota.</p>}
       </Card>
 
       {w.devices.length > 0 && (
         <Card title="Device">
-          <div className="overflow-x-auto">
+          <div className="space-y-3 md:hidden">
+            {w.devices.map((d) => (
+              <article key={d.id} className="flex min-w-0 items-start justify-between gap-3 rounded-lg border p-3 text-sm">
+                <div className="min-w-0"><Link href={`/operator/insights/devices/${d.id}`} className="break-words font-medium text-primary underline underline-offset-2">{d.label}</Link><p className="mt-1 text-xs text-muted-foreground">Device workspace</p></div>
+                <div className="flex shrink-0 flex-col items-end gap-2"><Badge variant={d.status === "online" ? "default" : d.status === "error" || d.status === "banned" ? "destructive" : "secondary"}>{d.status_label}</Badge><Badge variant={healthVariant(d.health_badge)}>{d.health_badge}</Badge></div>
+              </article>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -145,7 +164,21 @@ export default function OwnerWorkspaceDetailPage(props: { params: Promise<{ id: 
 
       <Card title="Riwayat pembayaran">
         {w.recent_payments.length > 0 ? (
-          <div className="overflow-x-auto">
+          <>
+          <div className="space-y-3 md:hidden">
+            {w.recent_payments.map((p) => (
+              <article key={p.id} className="rounded-lg border p-3 text-sm">
+                <div className="flex items-start justify-between gap-3"><p className="min-w-0 break-all font-mono text-xs font-medium">{p.number}</p><Badge className="shrink-0" variant={p.status === "paid" ? "default" : p.status === "void" ? "secondary" : "outline"}>{p.status}</Badge></div>
+                <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2">
+                  <div><dt className="text-xs text-muted-foreground">Paket</dt><dd className="mt-0.5">{p.plan_name ?? "—"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Siklus</dt><dd className="mt-0.5">{p.cycle === "yearly" ? "Tahunan" : p.cycle === "monthly" ? "Bulanan" : "—"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Jumlah</dt><dd className="mt-0.5 tabular-nums">{fmtRp(p.amount_idr)}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Tanggal</dt><dd className="mt-0.5">{p.paid_at ? formatDate(p.paid_at) : p.created_at ? formatDate(p.created_at) : "—"}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -171,6 +204,7 @@ export default function OwnerWorkspaceDetailPage(props: { params: Promise<{ id: 
               </TableBody>
             </Table>
           </div>
+          </>
         ) : <p className="text-sm text-muted-foreground">Belum ada riwayat pembayaran.</p>}
       </Card>
 

@@ -1,6 +1,6 @@
 # Cost-meter KONEVA: penemuan dan rancangan
 
-Tanggal: 2026-09-27. **Ini dokumen penemuan dan rancangan saja.** Tidak ada kode diubah, tidak ada workload dijalankan di nomor asli, tidak ada harga/paket diubah, tidak ada layanan lokal di-restart, tidak ada migrasi. Merujuk brief PM di `docs/research/2026-09-27-koneva/README.md` ("Brief pekerjaan berikutnya untuk Claude") dan `pricing.md` (asumsi biaya yang belum diukur).
+Tanggal rancangan: 2026-09-27. **Status 2026-10-17: fondasi implementasi lokal tersedia; rancangan biaya dan angka masih belum tervalidasi.** Device Manager memiliki snapshot CPU/RAM cgroup Docker untuk bot KONEVA per-device dan layanan bersama Compose yang dikenali di jaringan KONEVA (`postgres`, `redis`, `api-gateway`, `device-manager`, `dashboard`, serta layanan opsional). Endpoint `/resources` memerlukan admin key; respons menandai tiap sampel sebagai `device` atau `shared` agar biaya layanan bersama tidak dibebankan ke satu device. Kubernetes menyatakan metrik unavailable tanpa Metrics Server. Belum ada sampling historis, rollup, benchmark sintetis, invoice aktual, ataupun perubahan harga/paket. Merujuk brief PM di `docs/research/2026-09-27-koneva/README.md` ("Brief pekerjaan berikutnya untuk Claude") dan `pricing.md` (asumsi biaya yang belum diukur).
 
 ## 1. Metrik yang sudah ada (inventarisasi, tanpa membangun ulang)
 

@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { BotOrchestrator, BotPodStatus, BotStatefulSetSpec, DeviceManagerConfig } from './types';
+import type { BotOrchestrator, BotPodStatus, BotResourceSnapshot, BotStatefulSetSpec, DeviceManagerConfig } from './types';
 
 type CommandRunner = (
   file: string,
@@ -23,6 +23,50 @@ function containerUrl(url: string): string {
   }
   return parsed.toString();
 }
+
+function parseDockerBytes(value: string): number | null {
+  const match = value.trim().match(/^([\d.]+)\s*(B|kB|MB|GB|TB|KiB|MiB|GiB|TiB)$/i);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = match[2]!.toLowerCase();
+  const factors: Record<string, number> = {
+    b: 1, kb: 1_000, mb: 1_000_000, gb: 1_000_000_000, tb: 1_000_000_000_000,
+    kib: 1_024, mib: 1_048_576, gib: 1_073_741_824, tib: 1_099_511_627_776,
+  };
+  return Number.isFinite(amount) ? Math.round(amount * factors[unit]!) : null;
+}
+
+export function parseDockerResourceSnapshot(
+  output: string,
+  containersByName: ReadonlyMap<string, { kind: 'device' | 'shared'; service: string | null; deviceKey: string | null }>,
+  sampledAt = new Date().toISOString(),
+): BotResourceSnapshot {
+  const containers: Extract<BotResourceSnapshot, { available: true }>['containers'] = [];
+  for (const line of output.split('\n').map((part) => part.trim()).filter(Boolean)) {
+    const row = JSON.parse(line) as { Name?: unknown; CPUPerc?: unknown; MemUsage?: unknown };
+    if (typeof row.Name !== 'string') continue;
+    const identity = containersByName.get(row.Name);
+    if (!identity) continue;
+    if (typeof row.CPUPerc !== 'string' || typeof row.MemUsage !== 'string') {
+      throw new Error('Docker stats row is missing resource fields');
+    }
+    const cpu = row.CPUPerc.trim().match(/^([\d.]+)%$/);
+    const memory = row.MemUsage.split('/');
+    if (!cpu || memory.length !== 2) throw new Error('Docker stats row has an invalid format');
+    const cpuPercent = Number(cpu[1]);
+    const memoryUsageBytes = parseDockerBytes(memory[0]!);
+    const memoryLimitBytes = parseDockerBytes(memory[1]!);
+    if (!Number.isFinite(cpuPercent) || memoryUsageBytes === null || memoryLimitBytes === null) {
+      throw new Error('Docker stats row has invalid numeric values');
+    }
+    containers.push({ name: row.Name, ...identity, cpuPercent, memoryUsageBytes, memoryLimitBytes });
+  }
+  return { available: true, source: 'docker-stats', sampledAt, containers };
+}
+
+const COMPOSE_SHARED_SERVICES = new Set([
+  'postgres', 'redis', 'api-gateway', 'device-manager', 'dashboard', 'nginx', 'migrate', 'certbot',
+]);
 
 export class DockerBotManager implements BotOrchestrator {
   readonly mode = 'docker' as const;
@@ -147,6 +191,44 @@ export class DockerBotManager implements BotOrchestrator {
         startedAt: null,
       };
     }) : [];
+  }
+
+  async getResourceSnapshot(): Promise<BotResourceSnapshot> {
+    const { stdout: containers } = await this.runner('docker', [
+      'ps', '--filter', `network=${this.config.dockerNetwork}`,
+      '--format', '{{.Names}}|{{.Label "wa.gateway.network"}}|{{.Label "wa.gateway.device"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project"}}',
+    ]);
+    const containersByName = new Map<string, { kind: 'device' | 'shared'; service: string | null; deviceKey: string | null }>();
+    for (const line of containers.trim().split('\n').filter(Boolean)) {
+      const [rawName, rawNetwork, rawDeviceKey, rawService, rawProject] = line.split('|');
+      const name = rawName?.trim() ?? '';
+      const network = rawNetwork?.trim() ?? '';
+      const deviceKey = rawDeviceKey?.trim() ?? '';
+      const service = rawService?.trim() ?? '';
+      const project = rawProject?.trim() ?? '';
+      if (!name) continue;
+      if (network === this.config.dockerNetwork
+          && /^wa-bot-[a-z0-9-]+$/.test(name)
+          && /^[A-Za-z0-9_-]{1,64}$/.test(deviceKey)) {
+        containersByName.set(name, { kind: 'device', service: null, deviceKey });
+      } else if (
+        COMPOSE_SHARED_SERVICES.has(service)
+        && project
+        && project !== '<no value>'
+        && name.startsWith(`${project}-${service}-`)
+      ) {
+        // The custom KONEVA network plus Compose labels keeps this read-only
+        // inventory scoped to the app stack, not arbitrary host containers.
+        containersByName.set(name, { kind: 'shared', service, deviceKey: null });
+      }
+    }
+    if (!containersByName.size) {
+      return { available: true, source: 'docker-stats', sampledAt: new Date().toISOString(), containers: [] };
+    }
+    const { stdout } = await this.runner('docker', [
+      'stats', '--no-stream', '--format', '{{json .}}', ...containersByName.keys(),
+    ]);
+    return parseDockerResourceSnapshot(stdout, containersByName);
   }
 
   async scaleBot(deviceKey: string, replicas: number): Promise<void> {

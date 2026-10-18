@@ -6,6 +6,7 @@ import type { Role } from '../../shared/permissions';
 import type { TenantContext } from '../../shared/types/api';
 import { ServiceError } from './service-error';
 import { createTrial } from './billing.service';
+import { recordSystemNotification } from './system-notification-outbox';
 
 const BCRYPT_COST = 12;
 const SESSION_DAYS = 14;
@@ -107,8 +108,8 @@ export async function signup(input: SignupInput): Promise<PendingSignup> {
            VALUES ($1, $2, $3, 'pending_email', $4, $5, $6, now(), $7) RETURNING id`,
           [input.email, input.name, passwordHash, workspaceName, pendingPhone, verificationMethod, TERMS_VERSION],
         )).rows[0]!;
-      await client.query('UPDATE email_verifications SET consumed_at=now() WHERE user_id=$1 AND consumed_at IS NULL', [user.id]);
-      await client.query('UPDATE signup_phone_verifications SET consumed_at=now() WHERE user_id=$1 AND consumed_at IS NULL', [user.id]);
+      // A pending signup restart may happen during the resend cooldown. Keep its still-valid proof
+      // so the owner can verify the mailbox/phone while the pending name/password are refreshed.
       return { user_id: user.id, email: input.email };
     });
   } catch (error) {
@@ -134,6 +135,7 @@ export async function activatePendingSignup(client: PoolClient, userId: string, 
     `INSERT INTO tenants (name, email, webhook_secret) VALUES ($1, $2, $3) RETURNING id`,
     [user.workspace_name, user.email, `whsec_${randomBytes(24).toString('hex')}`],
   )).rows[0]!;
+  await recordSystemNotification(client, `signup.created:${tenant.id}`, 'signup.created', `Signup baru KONEVA: workspace ${user.workspace_name}.`);
   await createTrial(client, tenant.id);
   await client.query(`INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`, [userId, tenant.id]);
   await client.query("UPDATE users SET status='active', pending_signup_workspace_name=NULL, pending_signup_phone_number=NULL, pending_signup_verification_method='email', last_login_at=now() WHERE id=$1", [userId]);

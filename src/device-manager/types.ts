@@ -37,6 +37,28 @@ export interface BotPodStatus {
   startedAt: string | null;
 }
 
+export type BotResourceSnapshot =
+  | {
+      available: true;
+      source: 'docker-stats';
+      sampledAt: string;
+      containers: Array<{
+        kind: 'device' | 'shared';
+        name: string;
+        service: string | null;
+        deviceKey: string | null;
+        cpuPercent: number;
+        memoryUsageBytes: number;
+        memoryLimitBytes: number;
+      }>;
+    }
+  | {
+      available: false;
+      source: 'unavailable';
+      sampledAt: string;
+      reason: 'container_metrics_not_configured';
+    };
+
 export interface BotOrchestrator {
   readonly mode: OrchestrationMode;
   healthCheck(): Promise<void>;
@@ -44,5 +66,6 @@ export interface BotOrchestrator {
   deleteBot(deviceKey: string): Promise<void>;
   getBotStatus(deviceKey: string): Promise<BotPodStatus | null>;
   listBots(): Promise<BotPodStatus[]>;
+  getResourceSnapshot(): Promise<BotResourceSnapshot>;
   scaleBot(deviceKey: string, replicas: number): Promise<void>;
 }

@@ -1,10 +1,10 @@
 import { operatorClient } from "./client";
 import {
-  parseAudit, parseOtpAlerts, parseOwnerInsights, parseOwnerDeviceSummary, parseOwnerDeviceDetail, parseOwnerSystemHealth, parseOwnerWorkspaceSummary, parseOwnerWorkspaceDetailData,
+  parseAudit, parseOtpAlerts, parseOwnerInsights, parseOwnerDeviceSummary, parseOwnerDeviceDetail, parseOwnerSystemHealth, parseSystemWhatsappOtpSender, parseOwnerWorkspaceSummary, parseOwnerWorkspaceDetailData,
   parseConfirmResult, parseDecisionResult, parseInvoiceDetail, parseInvoiceSummary, parseMe, parsePagination, parseSignedIn,
   parseStudentDetail, parseStudentSummary, parseWorkspace,
   type AuditEntry, type OtpAlerts, type SignedIn, type ConfirmPaymentInput, type ConfirmPaymentResult, type DecisionInput, type DecisionResult, type InvoiceDetail,
-  type InvoiceSummary, type InvoiceStatus, type OperatorMe, type OwnerInsights, type OwnerDeviceSummary, type OwnerDeviceDetail, type OwnerSystemHealth,
+  type InvoiceSummary, type InvoiceStatus, type OperatorMe, type OwnerInsights, type OwnerDeviceSummary, type OwnerDeviceDetail, type OwnerSystemHealth, type SystemWhatsappOtpSender,
   type OwnerWorkspaceSummary, type OwnerWorkspaceDetailData, type Page, type StudentRequestDetail, type StudentRequestSummary,
   type StudentStatus, type WorkspaceDetail,
 } from "./types";
@@ -13,6 +13,7 @@ import {
 
 export const PAGE_SIZE = 25;
 export const OWNER_PAGE_SIZE = 10;
+const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
 
 function page<T>(res: { data: unknown; pagination?: unknown } | undefined, parse: (v: unknown) => T): Page<T> {
   const items = Array.isArray(res?.data) ? (res.data as unknown[]).map(parse) : [];
@@ -79,6 +80,23 @@ export const operatorApi = {
   },
   async getSystemHealth(): Promise<OwnerSystemHealth> {
     return parseOwnerSystemHealth((await operatorClient.request("/insights/health"))?.data);
+  },
+  async getSystemWhatsappOtpSender(): Promise<SystemWhatsappOtpSender> {
+    return parseSystemWhatsappOtpSender((await operatorClient.request("/system/whatsapp-otp-sender"))?.data);
+  },
+  async getSystemWhatsappOtpQr(): Promise<SystemWhatsappOtpSender> {
+    return parseSystemWhatsappOtpSender((await operatorClient.request("/system/whatsapp-otp-sender", { query: { include_qr: "1" } }))?.data);
+  },
+  async pairSystemWhatsappOtpSender(): Promise<SystemWhatsappOtpSender> {
+    return parseSystemWhatsappOtpSender((await operatorClient.request("/system/whatsapp-otp-sender/pair", { method: "POST", body: {} }))?.data);
+  },
+  async saveSystemWhatsappNotifications(input: { recipient_phone?: string; enabled: boolean }): Promise<{ notifications_enabled: boolean; recipient_last4: string | null }> {
+    const d = object((await operatorClient.request("/system/whatsapp-otp-sender/notifications", { method: "PUT", body: input }))?.data);
+    return { notifications_enabled: d["notifications_enabled"] === true, recipient_last4: typeof d["recipient_last4"] === "string" ? d["recipient_last4"] : null };
+  },
+  async testSystemWhatsappNotifications(): Promise<{ queued: boolean; status: string; recipient_last4: string }> {
+    const d = object((await operatorClient.request("/system/whatsapp-otp-sender/notifications/test", { method: "POST", body: {} }))?.data);
+    return { queued: d["queued"] === true, status: typeof d["status"] === "string" ? d["status"] : "unknown", recipient_last4: typeof d["recipient_last4"] === "string" ? d["recipient_last4"] : "" };
   },
   async listOwnerWorkspaces(params: { q?: string; limit?: number; offset?: number; plan?: string; status?: string }): Promise<Page<OwnerWorkspaceSummary>> {
     return page(await operatorClient.request("/insights/workspaces", { query: { q: params.q, limit: params.limit ?? OWNER_PAGE_SIZE, offset: params.offset ?? 0, plan: params.plan, status: params.status } }), parseOwnerWorkspaceSummary);

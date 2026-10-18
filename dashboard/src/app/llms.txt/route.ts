@@ -12,7 +12,7 @@ ${SITE.name} is a third-party service that connects a customer's own WhatsApp nu
 ## Facts
 - Language: Indonesian. Target customers: students (Pelajar) and small businesses (UMKM) in Indonesia.
 - Free trial: 14 days, no credit card. Paid plans are monthly; prices are published on the site once final. Payment is confirmed manually.
-- Send: POST /api/v1/message/send with device_key, to, message. Promotional sends need recorded recipient consent; standalone START/MULAI opts in and STOP/BERHENTI opts out. Missing consent returns 409 RECIPIENT_CONSENT_REQUIRED; opted-out returns 409 RECIPIENT_OPTED_OUT. Caller priority is not trusted; server-verified otp_code is the only current fast transactional send path.
+- Send: POST /api/v1/message/send with device_key, to, message. A contextual reply may include reply_to_message_id referencing the same recipient's inbound message from the same device within 24 hours; it does not require START and is blocked after STOP. This does not grant marketing consent. Proactive sends/campaigns still require explicit WhatsApp opt-in, recorded through POST /api/v1/contacts/signup-consent from the customer's server with consent_text and durable evidence_ref, or by standalone START/MULAI. Possessing a phone number or receiving a message is not consent for promotions. STOP/BERHENTI opts out; missing consent returns 409 RECIPIENT_CONSENT_REQUIRED; opted-out returns 409 RECIPIENT_OPTED_OUT. Caller priority is not trusted; server-verified otp_code is the only current fast transactional send path.
 - Webhooks: signed with HMAC-SHA256 (header X-Webhook-Signature: sha256=<hex>), retried 3 times, 10 second timeout.
 - Direct chats only for now; group and channel sending are not available.
 

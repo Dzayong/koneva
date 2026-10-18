@@ -31,7 +31,7 @@ import { api } from "@/lib/api";
 import { renderSpintax } from "@/lib/spintax";
 import { formatPhoneNumber } from "@/lib/utils";
 
-type SendStatus = "pending" | "sending" | "queued" | "failed";
+type SendStatus = "pending" | "sending" | "queued" | "quota_hold" | "failed";
 
 interface RecipientState {
   phone: string;
@@ -114,6 +114,9 @@ export default function BroadcastPage() {
 
     setRecipients(list);
     setIsSending(true);
+    let queuedCount = 0;
+    let quotaHoldCount = 0;
+    let failedCount = 0;
 
     for (let i = 0; i < list.length; i++) {
       const recipient = list[i]!;
@@ -124,11 +127,15 @@ export default function BroadcastPage() {
       const content = renderSpintax(template, { nama: recipient.name || recipient.phone });
 
       try {
-        await api.sendMessage({ device_key: deviceKey, to: recipient.phone, message: content, ...(mediaUrl.trim() ? { media_url: mediaUrl.trim(), media_type: mediaType } : {}) });
+        const result = await api.sendMessage({ device_key: deviceKey, to: recipient.phone, message: content, ...(mediaUrl.trim() ? { media_url: mediaUrl.trim(), media_type: mediaType } : {}) });
+        const status = result.status === "quota_hold" ? "quota_hold" : "queued";
+        if (status === "quota_hold") quotaHoldCount++;
+        else queuedCount++;
         setRecipients((prev) =>
-          prev.map((r, idx) => (idx === i ? { ...r, status: "queued" } : r)),
+          prev.map((r, idx) => (idx === i ? { ...r, status } : r)),
         );
       } catch (err) {
+        failedCount++;
         const failure = apiFailure(err, "Gagal");
         const guidance = sendRejectionGuidance(failure.code);
         const message = guidance ? `${guidance.title}: ${guidance.description}` : failure.message;
@@ -141,9 +148,16 @@ export default function BroadcastPage() {
     }
 
     setIsSending(false);
-    toast.success("Broadcast selesai", {
-      description: "Lihat tabel di bawah untuk hasil tiap penerima.",
-    });
+    const outcome = `${queuedCount} masuk antrean · ${quotaHoldCount} ditahan karena kuota · ${failedCount} gagal`;
+    if (failedCount === 0 && quotaHoldCount === 0) {
+      toast.success("Semua pesan masuk antrean", { description: outcome });
+    } else if (queuedCount > 0) {
+      toast.warning("Broadcast selesai dengan kendala", { description: outcome });
+    } else if (quotaHoldCount > 0 && failedCount === 0) {
+      toast.warning("Pesan belum masuk antrean", { description: outcome });
+    } else {
+      toast.error("Tidak ada pesan yang masuk antrean", { description: outcome });
+    }
   };
 
   const recipientCount = selectedContactIds.size + manualNumbers.split(/[\n,]/).filter((n) => n.trim()).length;
@@ -291,8 +305,11 @@ export default function BroadcastPage() {
                     )}
                     {r.status === "queued" && (
                       <span className="flex items-center gap-1 text-green-600">
-                        <CheckCircle2 className="h-3 w-3" /> Antre
+                        <CheckCircle2 className="h-3 w-3" /> Masuk antrean
                       </span>
+                    )}
+                    {r.status === "quota_hold" && (
+                      <span className="text-amber-600">Ditahan: kuota habis</span>
                     )}
                     {r.status === "failed" && (
                       <span className="flex items-center gap-1 text-red-600">

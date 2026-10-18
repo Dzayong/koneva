@@ -13,7 +13,7 @@ test.describe("student verification (STACK-local)", () => {
     page.on("console", (m) => logs.push(m.text())); page.on("pageerror", (e) => logs.push(String(e)));
     const s = await studentRequest(NOTE);
     await page.goto("/operator/students");
-    await expect(page.getByText("m***@kampus.example.ac.id").first()).toBeVisible();
+    await expect(page.getByRole("cell", { name: "m***@kampus.example.ac.id" })).toBeVisible();
     expect(await page.content()).not.toContain("NIM 998877"); // the list carries no private note
     await page.goto(`/operator/students/${s.id}`);
     await expect(page.getByText(NOTE)).toBeVisible();

@@ -205,6 +205,30 @@ export interface OwnerSystemHealth {
   container_status: string; downtime_history: string;
 }
 
+export interface SystemWhatsappOtpSender {
+  configured: boolean; device_key: string | null; status: string; phone_last4: string | null; updated_at: string;
+  notifications_enabled: boolean; notification_recipient_last4: string | null; notification_test_queued_at: string | null;
+  recent_otps: Array<{ id: string; phone_last4: string | null; created_at: string; expires_at: string; attempts: number;
+    verification_status: "pending" | "used" | "expired" | "invalidated"; message_status: string; error_code: string | null;
+    sent_at: string | null; delivered_at: string | null; read_at: string | null }>;
+  qr_code?: string;
+}
+export function parseSystemWhatsappOtpSender(v: unknown): SystemWhatsappOtpSender {
+  const d = obj(v);
+  const qr = str(d["qr_code"]);
+  return { configured: Boolean(d["configured"]), device_key: strOrNull(d["device_key"]), status: str(d["status"]),
+    phone_last4: strOrNull(d["phone_last4"]), updated_at: str(d["updated_at"]),
+    notifications_enabled: d["notifications_enabled"] === true,
+    notification_recipient_last4: strOrNull(d["notification_recipient_last4"]),
+    notification_test_queued_at: strOrNull(d["notification_test_queued_at"]),
+    recent_otps: arr(d["recent_otps"]).map((item) => { const x = obj(item); const verification = str(x["verification_status"]);
+      return { id: str(x["id"]), phone_last4: strOrNull(x["phone_last4"]), created_at: str(x["created_at"]), expires_at: str(x["expires_at"]),
+        attempts: num(x["attempts"]), verification_status: verification === "used" || verification === "expired" || verification === "invalidated" ? verification : "pending",
+        message_status: str(x["message_status"]), error_code: strOrNull(x["error_code"]), sent_at: strOrNull(x["sent_at"]),
+        delivered_at: strOrNull(x["delivered_at"]), read_at: strOrNull(x["read_at"]) };
+    }), ...(qr ? { qr_code: qr } : {}) };
+}
+
 export interface OwnerWorkspaceSummary {
   id: string; name: string; status: string; created_at: string | null;
   owner: { name: string; email: string } | null;

@@ -27,8 +27,8 @@ test.describe("workspace detail and audit (UI evidence, API faked)", () => {
     const state = freshState();
     await installOperatorMock(page, state);
     await page.goto("/operator/audit");
-    await expect(page.getByText("invoice.confirm_payment")).toBeVisible();
-    await expect(page.getByText("unpaid → paid")).toBeVisible();
+    await expect(page.getByRole("cell", { name: "invoice.confirm_payment" })).toBeVisible();
+    await expect(page.getByRole("cell").filter({ hasText: "unpaid → paid" })).toBeVisible();
     await expect(page.getByRole("link", { name: "INV-202609-0003" })).toHaveAttribute("href", "/operator/payments/inv-3");
     await page.getByLabel("Filter aksi").fill("invoice.confirm_payment");
     await expect.poll(() => state.requests.some((r) => r.path === "/audit" && r.query.includes("action=invoice.confirm_payment"))).toBe(true);

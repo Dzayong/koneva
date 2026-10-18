@@ -1,13 +1,14 @@
 import type { Pool } from 'pg';
 import { activatePaid, type PlanRow } from '../services/billing.service';
 import { idempotent, writeAudit, OperatorError, type Actor } from './core';
+import { recordSystemNotification } from '../services/system-notification-outbox';
 
 export interface PaymentInput { method: 'transfer' | 'ewallet' | 'qris' | 'tunai' | 'lainnya'; reference?: string | undefined; note?: string | undefined; expected: { amount_idr: number; version: number } }
 export async function confirmPayment(db: Pool, actor: Actor, id: string, key: string, input: PaymentInput, requestId: string) {
   try {
     return await idempotent(db, actor, 'invoice.confirm_payment', id, key, input, 'payments:confirm', async (client) => {
       // Workspace first, invoice second: serializes concurrent payments for different invoices of the same workspace.
-      const target = (await client.query<{ tenant_id: string }>('SELECT tenant_id FROM invoices WHERE id=$1', [id])).rows[0];
+      const target = (await client.query<{ tenant_id: string; workspace_name: string }>('SELECT i.tenant_id,t.name AS workspace_name FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE i.id=$1', [id])).rows[0];
       if (!target) throw new OperatorError(404, 'INVOICE_NOT_FOUND', 'Invoice tidak ditemukan.');
       const tenant = (await client.query<{ student_verified_at: Date | null }>('SELECT student_verified_at FROM tenants WHERE id=$1 FOR UPDATE', [target.tenant_id])).rows[0];
       const invoice = (await client.query(`SELECT i.id,i.number,i.status,i.amount_idr,i.version,i.plan_id,i.cycle,i.paid_at,
@@ -24,6 +25,7 @@ export async function confirmPayment(db: Pool, actor: Actor, id: string, key: st
       const paid = (await client.query(`UPDATE invoices SET status='paid',paid_at=now(),method=$2,reference=$3,note=$4,confirmed_by=$5 WHERE id=$1
         RETURNING id,number,status,version,paid_at,method,reference`, [id, input.method, input.reference?.trim() || null, input.note ?? null, actor.id])).rows[0];
       const period = await activatePaid(client, target.tenant_id, plan, invoice.cycle);
+      await recordSystemNotification(client, `invoice.paid:${id}`, 'invoice.paid', `Pembayaran lunas: ${target.workspace_name}, invoice ${invoice.number}, Rp${invoice.amount_idr.toLocaleString('id-ID')}.`);
       await writeAudit(client, actor, 'invoice.confirm_payment', 'invoice', id, invoice.number,
         { status: { from: 'unpaid', to: 'paid' }, method: { from: null, to: input.method }, version: { from: invoice.version, to: paid.version } }, requestId);
       return { invoice: { ...paid, confirmed_by: { id: actor.id, name: actor.name } },
@@ -80,6 +82,8 @@ export async function decideStudent(db: Pool, actor: Actor, id: string, key: str
     }
     const result = (await client.query(`UPDATE student_requests SET status=$2,correction_due_at=$3,version=version+1,decided_at=now(),decided_by=$4,reason=$5 WHERE id=$1
       RETURNING id,status,version,decided_at,correction_due_at,reason`, [id, status, dueAt, actor.id, input.reason?.trim() || null])).rows[0];
+    const workspaceName = (await client.query<{ name: string }>('SELECT name FROM tenants WHERE id=$1', [target.tenant_id])).rows[0]?.name ?? 'Workspace';
+    await recordSystemNotification(client, `student.decided:${id}:${result.version}`, 'student.decided', `Pengajuan Pelajar ${workspaceName}: ${status}.`);
     // Rejecting an application never revokes a previously approved entitlement (revoke is outside MVP).
     await writeAudit(client, actor, 'student_request.decision', 'student_request', id, null,
       { status: { from: 'pending', to: status }, version: { from: row.version, to: result.version } }, requestId);

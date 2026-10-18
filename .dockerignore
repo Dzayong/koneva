@@ -12,7 +12,10 @@ docker/grafana/data
 docs
 **/node_modules
 **/.next
+**/.next-*
+**/test-results
 **/.env*
+cloudflared-linux-amd64.deb
 data
 reports
 *.tar.gz

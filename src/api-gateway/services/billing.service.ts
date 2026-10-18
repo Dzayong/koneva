@@ -6,6 +6,7 @@ import {
 } from '../../shared/billing';
 import { ServiceError } from './service-error';
 import { sendNoticeEmail } from './mailer';
+import { recordSystemNotification } from './system-notification-outbox';
 
 type Queryable = Pick<PoolClient, 'query'> | typeof pool;
 
@@ -154,7 +155,8 @@ export async function requestStudentVerification(tenantId: string, requesterEmai
     const tenant = await client.query('SELECT id FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
     if (!tenant.rows.length) throw new ServiceError(404, 'TENANT_NOT_FOUND', 'Workspace not found');
     await client.query("UPDATE student_requests SET status = 'superseded', version = version + 1 WHERE tenant_id = $1 AND status IN ('pending','correction_required')", [tenantId]);
-    await client.query('INSERT INTO student_requests (tenant_id, requester_email, note) VALUES ($1, $2, $3)', [tenantId, requesterEmail.toLowerCase(), note.slice(0, 500)]);
+    const request = (await client.query<{ id: string }>('INSERT INTO student_requests (tenant_id, requester_email, note) VALUES ($1, $2, $3) RETURNING id', [tenantId, requesterEmail.toLowerCase(), note.slice(0, 500)])).rows[0]!;
+    await recordSystemNotification(client, `student.requested:${request.id}`, 'student.requested', 'Ada pengajuan verifikasi paket Pelajar baru.');
     await client.query('UPDATE tenants SET student_request_at = now(), student_note = $2 WHERE id = $1', [tenantId, note.slice(0, 500)]);
   });
 }
@@ -241,6 +243,8 @@ export async function markInvoicePaidWithClient(
     [invoiceId, input.method, input.reference ?? null, input.note ?? null],
   );
   const period = await activatePaid(client, invoice.tenant_id, plan, invoice.cycle);
+  const workspace = (await client.query<{ name: string }>('SELECT name FROM tenants WHERE id=$1', [invoice.tenant_id])).rows[0]?.name ?? 'Workspace';
+  await recordSystemNotification(client, `invoice.paid:${invoiceId}`, 'invoice.paid', `Pembayaran lunas: ${workspace}, invoice ${invoice.number}, Rp${invoice.amount_idr.toLocaleString('id-ID')}.`);
   return { tenant_id: invoice.tenant_id, invoice: invoice.number, plan: plan.id, amount_idr: invoice.amount_idr, ...period };
 }
 
@@ -310,7 +314,7 @@ export async function getBillingState(tenantId: string) {
   // in the current window, which never counted against messages_used -- shown so the exemption is never a mystery.
   const held = (await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM messages WHERE tenant_id = $1 AND status = 'quota_hold'`, [tenantId])).rows[0]?.n ?? 0;
   const exemptUsed = window ? (await pool.query<{ n: number }>(
-    `SELECT count(*)::int AS n FROM messages WHERE tenant_id = $1 AND quota_exempt = true AND system_otp=false AND created_at >= $2`, [tenantId, window.start],
+    `SELECT count(*)::int AS n FROM messages WHERE tenant_id = $1 AND quota_exempt = true AND system_otp=false AND system_notification=false AND created_at >= $2`, [tenantId, window.start],
   )).rows[0]?.n ?? 0 : 0;
 
   return {

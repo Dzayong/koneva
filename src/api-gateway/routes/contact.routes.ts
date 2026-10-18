@@ -4,7 +4,7 @@ import pool, { transaction } from '../../shared/database/connection';
 import type { TenantContext } from '../../shared/types/api';
 import { validate } from '../middleware/validate';
 import { ServiceError } from '../services/service-error';
-import { getContactConsent, recordManualContactConsent } from '../services/recipient-consent.service';
+import { getContactConsent, recordApiSignupConsent, recordManualContactConsent } from '../services/recipient-consent.service';
 
 const router = Router();
 const phone = z.string().regex(/^\+?[1-9]\d{6,19}$/);
@@ -14,6 +14,9 @@ const contactBody = z.object({
   tags: z.array(z.string().trim().min(1).max(50)).max(20).default([]),
   notes: z.string().max(5000).nullable().optional(),
 }).strict();
+const createContactBody = contactBody.extend({
+  consent_source_note: z.string().trim().min(1).max(500).optional(),
+});
 const updateBody = contactBody.partial().refine((value) => Object.keys(value).length > 0);
 const idParams = z.object({ id: z.string().uuid() });
 const groupBody = z.object({ name: z.string().trim().min(1).max(100) }).strict();
@@ -22,12 +25,20 @@ const consentBody = z.object({
   status: z.enum(['opted_in', 'opted_out']),
   source_note: z.string().trim().min(1).max(500),
 }).strict();
+const signupConsentBody = z.object({
+  phone_number: phone,
+  consent_text: z.string().trim().min(10).max(500),
+  evidence_ref: z.string().trim().min(1).max(100),
+}).strict();
 const listQuery = z.object({
   search: z.string().max(100).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
-export const importContactsSchema = z.object({ csv: z.string().min(1).max(900_000) }).strict();
+export const importContactsSchema = z.object({
+  csv: z.string().min(1).max(900_000),
+  consent_source_note: z.string().trim().min(1).max(500).optional(),
+}).strict();
 
 export interface CsvContact { phone_number: string; name?: string; tags: string[]; notes?: string }
 
@@ -73,13 +84,20 @@ function duplicateError(error: unknown): never {
 }
 
 export async function createContact(request: Request, response: Response): Promise<void> {
-  const input = request.validated!.body as z.infer<typeof contactBody>;
+  const input = request.validated!.body as z.infer<typeof createContactBody>;
+  const actor = request.actor;
+  if (input.consent_source_note && (!actor || actor.kind !== 'user')) {
+    throw new ServiceError(403, 'CONSENT_ACTOR_REQUIRED', 'A signed-in workspace member must record manual consent');
+  }
   try {
     const result = await pool.query(
       `INSERT INTO contacts (tenant_id, phone_number, name, tags, notes)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [request.tenant!.id, input.phone_number, input.name ?? null, input.tags, input.notes ?? null],
     );
+    if (input.consent_source_note && actor?.kind === 'user') {
+      await recordManualContactConsent(request.tenant!.id, String(result.rows[0]!.id), 'opted_in', input.consent_source_note, actor.userId);
+    }
     response.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) { duplicateError(error); }
 }
@@ -88,10 +106,12 @@ export async function listContacts(request: Request, response: Response): Promis
   const { search, limit, offset } = request.validated!.query as z.infer<typeof listQuery>;
   const pattern = search ? `%${search}%` : null;
   const result = await pool.query(
-    `SELECT *, COUNT(*) OVER()::int AS total FROM contacts
-     WHERE tenant_id = $1 AND ($2::text IS NULL OR name ILIKE $2 OR phone_number ILIKE $2
+    `SELECT c.*, p.status AS consent_status, COUNT(*) OVER()::int AS total FROM contacts c
+     LEFT JOIN recipient_preferences p ON p.tenant_id = c.tenant_id
+       AND p.phone_number = regexp_replace(c.phone_number, '[^0-9]', '', 'g')
+     WHERE c.tenant_id = $1 AND ($2::text IS NULL OR c.name ILIKE $2 OR c.phone_number ILIKE $2
        OR EXISTS (SELECT 1 FROM unnest(tags) AS tag WHERE tag ILIKE $2))
-     ORDER BY created_at DESC LIMIT $3 OFFSET $4`,
+     ORDER BY c.created_at DESC LIMIT $3 OFFSET $4`,
     [request.tenant!.id, pattern, limit, offset],
   );
   const total = Number((result.rows[0] as { total?: number } | undefined)?.total ?? 0);
@@ -236,8 +256,26 @@ export async function setContactConsent(request: Request, response: Response): P
   response.status(200).json({ success: true, data });
 }
 
+/** Called by a customer's own signup flow only after the person actively accepts WhatsApp messages. */
+export async function recordSignupConsent(request: Request, response: Response): Promise<void> {
+  const actor = request.actor;
+  if (!actor || actor.kind !== 'api_key' || !actor.keyId) {
+    throw new ServiceError(403, 'API_KEY_REQUIRED', 'Use a scoped API key from the signup integration');
+  }
+  const input = request.validated!.body as z.infer<typeof signupConsentBody>;
+  const data = await recordApiSignupConsent(
+    request.tenant!.id, input.phone_number, input.consent_text, input.evidence_ref, actor.keyId,
+  );
+  response.status(200).json({ success: true, data });
+}
+
 export async function importContacts(request: Request, response: Response): Promise<void> {
-  const contacts = parseContactsCsv((request.validated!.body as z.infer<typeof importContactsSchema>).csv);
+  const input = request.validated!.body as z.infer<typeof importContactsSchema>;
+  const contacts = parseContactsCsv(input.csv);
+  const actor = request.actor;
+  if (input.consent_source_note && (!actor || actor.kind !== 'user')) {
+    throw new ServiceError(403, 'CONSENT_ACTOR_REQUIRED', 'A signed-in workspace member must record manual consent');
+  }
   const imported = await transaction(async (client) => {
     let count = 0;
     for (const contact of contacts) {
@@ -251,11 +289,24 @@ export async function importContacts(request: Request, response: Response): Prom
     }
     return count;
   });
+  if (input.consent_source_note && actor?.kind === 'user') {
+    const phoneNumbers = [...new Set(contacts.map((contact) => contact.phone_number.replace(/\D/g, '')))];
+    const rows = await pool.query<{ id: string; phone_number: string }>(
+      `SELECT id, regexp_replace(phone_number, '[^0-9]', '', 'g') AS phone_number
+       FROM contacts WHERE tenant_id = $1
+         AND regexp_replace(phone_number, '[^0-9]', '', 'g') = ANY($2::text[])`,
+      [request.tenant!.id, phoneNumbers],
+    );
+    for (const contact of rows.rows) {
+      await recordManualContactConsent(request.tenant!.id, contact.id, 'opted_in', input.consent_source_note, actor.userId);
+    }
+  }
   response.status(201).json({ success: true, data: { imported } });
 }
 
 router.post('/contacts/import', validate({ body: importContactsSchema }), importContacts);
-router.post('/contacts', validate({ body: contactBody }), createContact);
+router.post('/contacts/signup-consent', validate({ body: signupConsentBody }), recordSignupConsent);
+router.post('/contacts', validate({ body: createContactBody }), createContact);
 router.get('/contacts', validate({ query: listQuery }), listContacts);
 router.get('/contacts/:id/consent', validate({ params: idParams }), readContactConsent);
 router.put('/contacts/:id/consent', validate({ params: idParams, body: consentBody }), setContactConsent);

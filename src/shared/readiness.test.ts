@@ -30,7 +30,7 @@ test('a mature, consented, engaged number scores 100', () => {
   assert.equal(report.confidence, 'high');
 });
 
-test('maturity follows the anti-ban warm-up stage boundaries', () => {
+test('device age contributes only the existing internal indicator score', () => {
   const at = (ageDays: number) => factor(computeReadiness(inputs({ ageDays, warmupCompleted: false })), 'maturity').score;
   assert.deepEqual([at(0), at(1), at(2), at(3), at(4), at(6), at(7)], [0, 0, 6, 6, 12, 12, 20]);
 });
@@ -69,13 +69,12 @@ test('banned numbers always score 0; paused and offline score lower on stability
   assert.deepEqual([stability('online'), stability('offline'), stability('paused'), stability('error')], [15, 8, 3, 0]);
 });
 
-test('recommendations point at the weakest proven factors', () => {
+test('recommendations avoid volume and engagement optimization and preserve opt-out guidance', () => {
   const report = computeReadiness(inputs({ maturedDelivered: 40, engagedRecipients: 0, unsolicitedRecipients: 39, optOuts: 3 }));
   const text = report.recommendations.join(' | ');
-  assert.match(text, /Delivery rendah/);
-  assert.match(text, /Balasan rendah/);
-  assert.match(text, /opt-in/);
-  assert.match(text, /3 penerima yang meminta berhenti/);
+  assert.match(text, /permintaan berhenti/);
+  assert.match(text, /opt-out/);
+  assert.doesNotMatch(text, /kirim pesan|naikkan volume|balasan rendah|delivery rendah/i);
 });
 
 test('hasRecipientOptedOut normalises the number and reads inbound history', async () => {

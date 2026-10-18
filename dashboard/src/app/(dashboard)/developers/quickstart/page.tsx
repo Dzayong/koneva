@@ -20,7 +20,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { CreateKeyDialog } from "@/components/developers/create-key-dialog";
 import { SecretReveal } from "@/components/developers/secret-reveal";
-import { useDeviceHealth } from "@/hooks/use-device-health";
 import { useDevices } from "@/hooks/use-devices";
 import { usePermissions } from "@/hooks/use-me";
 import { api } from "@/lib/api";
@@ -107,8 +106,6 @@ export default function QuickstartPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const selected = deviceKey || online[0]?.device_key || "";
-  const health = useDeviceHealth(selected);
-  const warming = health.data ? !health.data.warmup_completed && health.data.warmup_day <= 2 : false;
   const digits = to.replace(/\D/g, "");
   const validTo = digits.length >= 8 && digits.length <= 15;
 
@@ -149,18 +146,12 @@ export default function QuickstartPage() {
           <div className="space-y-1.5 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
             <p className="font-medium text-foreground">Device baru? Urutan yang benar:</p>
             <p>1. Pindai QR di halaman Device sampai statusnya <strong>online</strong>.</p>
-            <p>2. Minta penerima uji kirim <strong>MULAI</strong> atau <strong>START</strong> ke nomor ini dari WhatsApp mereka sendiri.</p>
-            <p>3. Baru kirim di bawah — tanpa langkah 2, pesan promosi ditolak (bukan bug).</p>
+            <p>2. Untuk uji nyata, gunakan nomor Anda sendiri atau penerima yang secara eksplisit menyetujui uji tersebut.</p>
+            <p>3. Catat persetujuan dan hormati opt-out sebelum menggunakan fitur pengiriman.</p>
           </div>
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
             <strong>Perhatian:</strong> tombol di bawah mengirim pesan WhatsApp sungguhan ke nomor yang Anda tulis. Bukan simulasi.
           </div>
-          {warming && (
-            <p role="note" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
-              Nomor ini masih di hari ke-{health.data?.warmup_day} masa pemanasan. Sampai hari ke-3, nomor hanya boleh membalas orang yang menghubunginya dalam 24 jam terakhir.
-              Untuk mencoba sekarang: kirim pesan WhatsApp dari HP lain ke nomor ini, lalu balas ke nomor pengirim itu dari sini.
-            </p>
-          )}
           {online.length === 0 ? (
             <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
               Belum ada device yang online. <Link href="/devices" className="font-medium text-primary underline underline-offset-4">Sambungkan device</Link> dulu, lalu kembali ke sini.

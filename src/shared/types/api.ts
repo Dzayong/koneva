@@ -43,6 +43,8 @@ export interface SendMessageRequest {
   media_url?: string | undefined;
   media_type?: 'image' | 'video' | 'document' | undefined;
   external_id?: string | undefined;
+  /** Inbound message being answered; limits this no-START path to a recent customer-initiated chat. */
+  reply_to_message_id?: string | undefined;
   /** Accepted for backward compatibility but ignored as a trust signal. Server-verified transactional messages
    * receive urgent routing; caller-supplied `urgent` never bypasses consent, quota, or pacing controls. */
   priority?: 'normal' | 'urgent' | undefined;

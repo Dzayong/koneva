@@ -27,13 +27,13 @@ export default function InvoiceDetailPage(props: { params: Promise<{ id: string 
   return (
     <div className="space-y-6">
       <Link href="/operator/payments" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" aria-hidden />Kembali ke pembayaran</Link>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3"><h1 className="font-mono text-2xl font-semibold">{i.number}</h1><InvoiceStatusBadge status={i.status} /></div>
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3"><h1 className="break-all font-mono text-xl font-semibold sm:text-2xl">{i.number}</h1><InvoiceStatusBadge status={i.status} /></div>
         {i.status === "unpaid" && can("payments:confirm") && (
           // Acting is allowed only on a status that was just read: a cached copy (e.g. after a reload or a lost dialog) is refreshed first.
-          <div className="flex items-center gap-3">
+          <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
             {invoice.isFetching && <span role="status" className="text-xs text-muted-foreground">Memeriksa status terbaru…</span>}
-            <Button disabled={invoice.isFetching} onClick={() => setOpen(true)}>Konfirmasi pembayaran</Button>
+            <Button className="w-full sm:w-auto" disabled={invoice.isFetching} onClick={() => setOpen(true)}>Konfirmasi pembayaran</Button>
           </div>
         )}
       </div>
@@ -58,7 +58,7 @@ export default function InvoiceDetailPage(props: { params: Promise<{ id: string 
 
       {i.timeline.length > 0 && (
         <Card title="Riwayat">
-          <ol className="space-y-1 text-sm">{i.timeline.map((t, n) => <li key={n} className="flex gap-3"><span className="w-44 shrink-0 text-muted-foreground">{formatDate(t.at)}</span><span>{t.event}</span></li>)}</ol>
+          <ol className="space-y-3 text-sm">{i.timeline.map((t, n) => <li key={n} className="flex flex-col gap-0.5 sm:flex-row sm:gap-3"><span className="text-xs text-muted-foreground sm:w-44 sm:shrink-0 sm:text-sm">{formatDate(t.at)}</span><span className="break-words">{t.event}</span></li>)}</ol>
         </Card>
       )}
 

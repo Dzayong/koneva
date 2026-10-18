@@ -1,31 +1,25 @@
 "use client";
 
-import { useState } from "react";
 import {
   Shield,
   Timer,
-  Flame,
   Send,
-  MessageCircle,
   Ban,
   AlertTriangle,
   CheckCircle2,
   Lock,
-  ChevronDown,
-  Trophy,
   Target,
-  Star,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDeviceHealth } from "@/hooks/use-device-health";
-import type { HealthBreakdownItem, HealthBreakdownStatus, HealthMission } from "@/lib/types";
+import type { HealthBreakdownItem, HealthBreakdownStatus } from "@/lib/types";
 
 const BREAKDOWN_ICONS: Record<string, React.ReactNode> = {
   age: <Timer className="h-4 w-4" />,
-  warmup: <Flame className="h-4 w-4" />,
+  maturity: <Timer className="h-4 w-4" />,
   delivery: <Send className="h-4 w-4" />,
-  reply: <MessageCircle className="h-4 w-4" />,
+  engagement: <Target className="h-4 w-4" />,
   block: <Ban className="h-4 w-4" />,
   report: <AlertTriangle className="h-4 w-4" />,
 };
@@ -125,48 +119,6 @@ function BreakdownRow({ item }: { item: HealthBreakdownItem }) {
   );
 }
 
-function MissionCard({ mission, index }: { mission: HealthMission; index: number }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <button
-      type="button"
-      onClick={() => setOpen(!open)}
-      className={cn(
-        "w-full rounded-xl border px-3.5 py-3 text-left transition-colors",
-        mission.completed
-          ? "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/40 dark:bg-emerald-950/30"
-          : "border-border bg-card hover:bg-muted/50",
-      )}
-    >
-      <div className="flex items-center gap-3">
-        <div
-          className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-            mission.completed
-              ? "bg-emerald-500 text-white"
-              : "bg-muted text-muted-foreground",
-          )}
-        >
-          {mission.completed ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
-        </div>
-        <div className="min-w-0 flex-1">
-          <span className={cn("text-sm font-medium", mission.completed && "line-through text-muted-foreground")}>
-            {mission.label}
-          </span>
-          <p className="text-[11px] text-muted-foreground">{mission.description}</p>
-        </div>
-        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
-      </div>
-      {open && (
-        <div className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Cara:</span> {mission.requirement}
-        </div>
-      )}
-    </button>
-  );
-}
-
 export function HealthDetail({ deviceKey }: { deviceKey: string }) {
   const { data, isLoading } = useDeviceHealth(deviceKey);
 
@@ -183,16 +135,14 @@ export function HealthDetail({ deviceKey }: { deviceKey: string }) {
     );
   }
 
-  const completedMissions = data.missions.filter((m) => m.completed).length;
-
   return (
     <div className="space-y-8">
-      {/* Score ring */}
+      <p className="rounded-lg border border-sky-300/50 bg-sky-50/70 p-3 text-xs text-sky-950 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-100">
+        Indikator internal berbasis data yang tercatat. Ini bukan penilaian WhatsApp/Meta, prediksi penerimaan, atau jaminan bebas pembatasan; jangan gunakan untuk menaikkan volume pengiriman.
+      </p>
       <div className="flex flex-col items-center gap-2">
         <ScoreRing score={data.health_score} />
-        <p className="text-sm text-muted-foreground">
-          Hari ke-{data.warmup_day} {data.warmup_completed ? "" : "· Warmup aktif"}
-        </p>
+        <p className="text-sm text-muted-foreground">Skor indikator internal · bukan metrik resmi platform</p>
       </div>
 
       {/* Breakdown */}
@@ -208,24 +158,6 @@ export function HealthDetail({ deviceKey }: { deviceKey: string }) {
         </div>
       </section>
 
-      {/* Missions */}
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Trophy className="h-4 w-4 text-amber-500" />
-            Misi kesiapan
-          </h3>
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Star className="h-3 w-3" />
-            {completedMissions}/{data.missions.length}
-          </span>
-        </div>
-        <div className="space-y-1.5">
-          {data.missions.map((mission, i) => (
-            <MissionCard key={mission.id} mission={mission} index={i} />
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

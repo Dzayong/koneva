@@ -55,7 +55,26 @@ function WorkspaceList() {
       ) : (
         <>
           {list.error && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
-          <div className="overflow-x-auto rounded-xl border">
+          <div className="space-y-3 md:hidden">
+            {list.data.items.map((w) => (
+              <article key={w.id} className="rounded-xl border bg-card p-4 shadow-sm">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link href={`/operator/insights/workspaces/${w.id}`} className="break-words font-medium text-primary underline underline-offset-2">{w.name}</Link>
+                    <p className="mt-1 truncate text-sm text-muted-foreground">{w.owner?.name ?? "Pemilik belum tersedia"}</p>
+                  </div>
+                  <Badge className="shrink-0" variant={w.status === "active" ? "default" : w.status === "suspended" ? "destructive" : "secondary"}>{w.status || "—"}</Badge>
+                </div>
+                <p className="mt-3 text-sm text-muted-foreground">{w.subscription?.plan ?? "Paket belum tersedia"}</p>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                  <div><dt className="text-xs text-muted-foreground">Pesan 30 hari</dt><dd className="mt-1 tabular-nums">{fmt(w.messages_30d)}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Device · Anggota</dt><dd className="mt-1 tabular-nums">{w.device_count} · {w.member_count}</dd></div>
+                  <div className="col-span-2"><dt className="text-xs text-muted-foreground">Aktivitas sistem terakhir yang tercatat</dt><dd className="mt-1">{w.last_activity ? formatDate(w.last_activity) : "Belum ada aktivitas"}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto rounded-xl border md:block">
             <Table>
               <TableHeader>
                 <TableRow>

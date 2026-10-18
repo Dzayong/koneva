@@ -99,11 +99,11 @@ function workspaceDto(row: Record<string, any>) {
 }
 export async function listWorkspaces(db: Pool, filter: PageFilter) {
   const result = await page(db, WORKSPACE_COLUMNS, WORKSPACE_FROM,
-    "($1::text IS NULL OR t.name ILIKE '%' || $1 || '%')", 't.created_at DESC,t.id DESC', [filter.q ?? null], filter);
+    "t.is_system=false AND ($1::text IS NULL OR t.name ILIKE '%' || $1 || '%')", 't.created_at DESC,t.id DESC', [filter.q ?? null], filter);
   return { ...result, data: result.data.map(workspaceDto) };
 }
 export async function workspaceDetail(db: Pool, id: string) {
-  const row = (await db.query(`SELECT ${WORKSPACE_COLUMNS} ${WORKSPACE_FROM} WHERE t.id=$1`, [id])).rows[0];
+  const row = (await db.query(`SELECT ${WORKSPACE_COLUMNS} ${WORKSPACE_FROM} WHERE t.id=$1 AND t.is_system=false`, [id])).rows[0];
   if (!row) throw new OperatorError(404, 'WORKSPACE_NOT_FOUND', 'Workspace tidak ditemukan.');
   return workspaceDto(row);
 }

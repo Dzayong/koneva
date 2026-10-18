@@ -51,6 +51,7 @@ export default function ContactsPage() {
   const [legacy, setLegacy] = useState<LegacyContact[]>([]);
   const [groupName, setGroupName] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [confirmInPersonConsentForImport, setConfirmInPersonConsentForImport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data, isLoading, isPlaceholderData } = useContacts({
@@ -100,7 +101,7 @@ export default function ContactsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-heading">Kontak</h2>
-          <p className="text-muted-foreground">Daftar pelanggan Anda, sekaligus daftar penerima untuk Broadcast.</p>
+          <p className="text-muted-foreground">Nama dan label disimpan di KONEVA; tidak mengubah buku alamat di HP atau nama kontak WhatsApp.</p>
         </div>
         <div className="flex gap-2">
           <input
@@ -111,17 +112,36 @@ export default function ContactsPage() {
             onChange={async (e) => {
               const file = e.target.files?.[0];
               e.target.value = "";
-              if (file) importContacts.mutate(await file.text());
+              if (file) {
+                const csv = await file.text();
+                importContacts.mutate(
+                  confirmInPersonConsentForImport
+                    ? { csv, consent_source_note: "Pemilik mengonfirmasi persetujuan pesan WhatsApp diterima saat bertemu langsung (impor CSV)." }
+                    : csv,
+                  { onSuccess: () => setConfirmInPersonConsentForImport(false) },
+                );
+              }
             }}
           />
-          <Button
-            variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importContacts.isPending}
-          >
-            <Upload className="mr-2 h-4 w-4" />
-            Impor CSV
-          </Button>
+          <div className="flex flex-col items-start gap-1">
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importContacts.isPending}
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Impor CSV
+            </Button>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={confirmInPersonConsentForImport}
+                onChange={(event) => setConfirmInPersonConsentForImport(event.target.checked)}
+                className="h-3.5 w-3.5 accent-primary"
+              />
+              Semua nomor di CSV sudah menyetujui pesan WhatsApp
+            </label>
+          </div>
           <Button onClick={() => setAddOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Tambah kontak
@@ -157,7 +177,7 @@ export default function ContactsPage() {
       <Card>
         <CardHeader><CardTitle>Grup kontak</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">Buat grup dan tambahkan kontak yang sedang terlihat pada halaman ini. Campaign hanya menyertakan kontak dengan consent opt-in.</p>
+          <p className="text-sm text-muted-foreground">Grup ini adalah daftar penerima internal KONEVA untuk Campaign, bukan grup WhatsApp. Tambahkan kontak yang terlihat pada halaman ini. Campaign hanya menyertakan kontak dengan consent opt-in.</p>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input aria-label="Nama grup baru" placeholder="Nama grup baru" value={groupName} onChange={(event) => setGroupName(event.target.value)} maxLength={100} />
             <Button disabled={!groupName.trim() || groups.createGroup.isPending} onClick={() => groups.createGroup.mutate(groupName.trim(), { onSuccess: (group) => { setSelectedGroupId(group.id); setGroupName(""); } })}>Buat grup</Button>
@@ -167,17 +187,28 @@ export default function ContactsPage() {
               <option value="">Pilih grup</option>
               {(groups.data ?? []).map((group) => <option key={group.id} value={group.id}>{group.name} ({group.member_count})</option>)}
             </select>
-            <Button variant="outline" disabled={!selectedGroupId || !contacts.length || groups.saveMembers.isPending || groupMembers.isLoading} onClick={() => {
+            <Button variant="outline" disabled={!selectedGroupId || !contacts.length || groups.saveMembers.isPending || groupMembers.isLoading || groupMembers.isError} onClick={() => {
               const ids = new Set((groupMembers.data ?? []).map((member) => member.id));
               for (const contact of contacts) ids.add(contact.id);
               groups.saveMembers.mutate({ id: selectedGroupId, contact_ids: [...ids] });
             }}>Tambahkan {contacts.length} kontak halaman ini</Button>
-            <Button variant="outline" disabled={!selectedGroupId || !contacts.length || groups.saveMembers.isPending || groupMembers.isLoading} onClick={() => {
+            <Button variant="outline" disabled={!selectedGroupId || !contacts.length || groups.saveMembers.isPending || groupMembers.isLoading || groupMembers.isError} onClick={() => {
               const visibleIds = new Set(contacts.map((contact) => contact.id));
               const ids = (groupMembers.data ?? []).map((member) => member.id).filter((id) => !visibleIds.has(id));
               groups.saveMembers.mutate({ id: selectedGroupId, contact_ids: ids });
             }}>Keluarkan kontak halaman ini</Button>
           </div>
+          {selectedGroupId && groupMembers.isError && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-destructive" role="alert">
+              <span>Anggota grup gagal dimuat. Muat ulang sebelum mengubah daftar agar anggota lama tidak tertimpa.</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => groupMembers.refetch()}>Coba lagi</Button>
+            </div>
+          )}
+          {selectedGroupId && groupMembers.data && (
+            <p className="text-sm text-muted-foreground" aria-live="polite">
+              {groupMembers.data.length} kontak tersimpan di grup ini.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -187,6 +218,7 @@ export default function ContactsPage() {
             <TableRow>
               <TableHead className="text-label">Nama</TableHead>
               <TableHead className="text-label">Telepon</TableHead>
+              <TableHead className="text-label hidden md:table-cell">Izin pesan</TableHead>
               <TableHead className="text-label hidden sm:table-cell">Label</TableHead>
               <TableHead className="w-12" />
             </TableRow>
@@ -195,14 +227,14 @@ export default function ContactsPage() {
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  <TableCell colSpan={4}>
+                  <TableCell colSpan={5}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : contacts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="h-40 text-center">
+                <TableCell colSpan={5} className="h-40 text-center">
                   <div className="flex flex-col items-center gap-2">
                     <Users className="h-8 w-8 text-muted-foreground" />
                     <p className="text-muted-foreground">
@@ -226,6 +258,13 @@ export default function ContactsPage() {
                     </div>
                   </TableCell>
                   <TableCell className="tabular-nums">{formatPhoneNumber(contact.phone_number)}</TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    {contact.consent_status === "opted_in" ? (
+                      <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-700 dark:text-emerald-300">Diizinkan</span>
+                    ) : contact.consent_status === "opted_out" ? (
+                      <span className="rounded-full border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">Berhenti</span>
+                    ) : <span className="text-xs text-muted-foreground">Belum dicatat</span>}
+                  </TableCell>
                   <TableCell className="hidden sm:table-cell">
                     <div className="flex flex-wrap gap-1.5">
                       {contact.tags.map((tag) => (
@@ -300,6 +339,7 @@ function AddContactDialog({
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [tags, setTags] = useState("");
+  const [inPersonConsent, setInPersonConsent] = useState(false);
 
   const normalizedPhone = useMemo(() => phone.replace(/[\s-]/g, ""), [phone]);
 
@@ -310,12 +350,14 @@ function AddContactDialog({
         phone_number: normalizedPhone,
         name: name.trim() || undefined,
         tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+        ...(inPersonConsent ? { consent_source_note: "Pemilik mengonfirmasi persetujuan pesan WhatsApp diterima saat bertemu langsung." } : {}),
       },
       {
         onSuccess: () => {
           setPhone("");
           setName("");
           setTags("");
+          setInPersonConsent(false);
           onOpenChange(false);
         },
       },
@@ -326,7 +368,10 @@ function AddContactDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) createContact.reset();
+        if (!next) {
+          createContact.reset();
+          setInPersonConsent(false);
+        }
         onOpenChange(next);
       }}
     >
@@ -354,6 +399,19 @@ function AddContactDialog({
             <Label htmlFor="contact-tags">Label (opsional, pisahkan dengan koma)</Label>
             <Input id="contact-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="vip, jakarta" />
           </div>
+          <label htmlFor="contact-in-person-consent" className="flex items-start gap-3 rounded-lg border p-3 text-sm">
+            <input
+              id="contact-in-person-consent"
+              type="checkbox"
+              checked={inPersonConsent}
+              onChange={(event) => setInPersonConsent(event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-primary"
+            />
+            <span>
+              <span className="font-medium">Penerima sudah menyetujui pesan WhatsApp</span>
+              <span className="mt-1 block text-muted-foreground">Persetujuan dan waktu pencatatannya akan disimpan. Centang hanya jika izin memang sudah diberikan.</span>
+            </span>
+          </label>
           {createContact.isError && (
             <p className="text-sm text-destructive">
               {isDuplicate(createContact.error)

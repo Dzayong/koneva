@@ -65,17 +65,16 @@ function stability(status: string): ReadinessFactor {
   return { id: 'stability', label: 'Stabilitas Koneksi', score: 8, max, status: 'partial', description: `Belum online (${status})`, proven: true };
 }
 
-// Boundaries match the anti-ban warm-up stages (day 3, 5 and 8).
 function maturity(ageDays: number, warmupCompleted: boolean): ReadinessFactor {
   const max = 20;
   const day = ageDays + 1;
   if (warmupCompleted || ageDays >= 7) {
-    return { id: 'maturity', label: 'Kematangan Nomor', score: max, max, status: 'complete', description: 'Warm-up 8 hari selesai', proven: true };
+    return { id: 'maturity', label: 'Usia Device', score: max, max, status: 'complete', description: `Device tercatat aktif selama ${ageDays + 1} hari`, proven: true };
   }
   const score = ageDays >= 4 ? 12 : ageDays >= 2 ? 6 : 0;
   return {
-    id: 'maturity', label: 'Kematangan Nomor', score, max, status: score > 0 ? 'partial' : 'locked',
-    description: `Hari ke-${day}/8 — batas kirim naik bertahap`, proven: true,
+    id: 'maturity', label: 'Usia Device', score, max, status: score > 0 ? 'partial' : 'locked',
+    description: `Device tercatat pada hari ke-${day}`, proven: true,
   };
 }
 
@@ -84,7 +83,7 @@ function delivery(i: ReadinessInputs): ReadinessFactor {
   if (i.maturedSent < MIN_MATURED_SENDS) {
     return {
       id: 'delivery', label: 'Delivery Rate', score: 13, max, status: 'partial', proven: false,
-      description: `Belum cukup data (${i.maturedSent}/${MIN_MATURED_SENDS} pesan berumur >24 jam)`,
+      description: `Sampel tercatat: ${i.maturedSent} pesan berumur lebih dari 24 jam`,
     };
   }
   const rate = i.maturedDelivered / i.maturedSent;
@@ -92,7 +91,7 @@ function delivery(i: ReadinessInputs): ReadinessFactor {
   return {
     id: 'delivery', label: 'Delivery Rate', score, max, proven: true,
     status: score === max ? 'complete' : score > 0 ? 'partial' : 'danger',
-    description: `${pct(rate)} terdelivery setelah 24 jam — target ≥97%`,
+    description: `${i.maturedDelivered} dari ${i.maturedSent} pesan tercatat delivered setelah 24 jam (${pct(rate)})`,
   };
 }
 
@@ -101,7 +100,7 @@ function engagement(i: ReadinessInputs): ReadinessFactor {
   if (i.uniqueRecipients < MIN_RECIPIENTS) {
     return {
       id: 'engagement', label: 'Balasan Penerima', score: 10, max, status: 'partial', proven: false,
-      description: `Belum cukup data (${i.uniqueRecipients}/${MIN_RECIPIENTS} penerima dalam 7 hari)`,
+      description: `Sampel tercatat: ${i.uniqueRecipients} penerima dalam 7 hari`,
     };
   }
   const rate = i.engagedRecipients / i.uniqueRecipients;
@@ -109,7 +108,7 @@ function engagement(i: ReadinessInputs): ReadinessFactor {
   return {
     id: 'engagement', label: 'Balasan Penerima', score, max, proven: true,
     status: score === max ? 'complete' : score > 0 ? 'partial' : 'locked',
-    description: `${pct(rate)} penerima membalas (7 hari) — target ≥25%`,
+    description: `${i.engagedRecipients} dari ${i.uniqueRecipients} penerima membalas dalam 7 hari (${pct(rate)})`,
   };
 }
 
@@ -118,7 +117,7 @@ function consent(i: ReadinessInputs): ReadinessFactor {
   if (i.uniqueRecipients < MIN_RECIPIENTS) {
     return {
       id: 'consent', label: 'Izin Penerima', score: 10, max, status: 'partial', proven: false,
-      description: `Belum cukup data (${i.uniqueRecipients}/${MIN_RECIPIENTS} penerima dalam 7 hari)`,
+      description: `Sampel tercatat: ${i.uniqueRecipients} penerima dalam 7 hari`,
     };
   }
   const unsolicited = i.unsolicitedRecipients / i.uniqueRecipients;
@@ -129,7 +128,7 @@ function consent(i: ReadinessInputs): ReadinessFactor {
   return {
     id: 'consent', label: 'Izin Penerima', score, max, proven: true,
     status: optOutHigh ? 'danger' : score === max ? 'complete' : score > 0 ? 'partial' : 'locked',
-    description: `${pct(unsolicited)} penerima belum pernah menghubungi lebih dulu; ${i.optOuts} permintaan berhenti`,
+    description: `${pct(unsolicited)} penerima belum tercatat menghubungi lebih dulu; ${i.optOuts} permintaan berhenti tercatat`,
   };
 }
 
@@ -144,19 +143,10 @@ function tierFor(score: number): ReadinessTier {
 function recommend(i: ReadinessInputs, factors: ReadinessFactor[]): string[] {
   const byId = Object.fromEntries(factors.map((f) => [f.id, f])) as Record<FactorId, ReadinessFactor>;
   const out: string[] = [];
-  if (byId.stability.status !== 'complete') out.push('Pastikan device online dan tidak dijeda sebelum mengirim.');
-  if (byId.maturity.status !== 'complete') out.push(`Selesaikan warm-up: hari ke-${i.ageDays + 1}/8. Jangan menaikkan volume lebih cepat dari batas harian.`);
-  if (byId.delivery.proven && byId.delivery.status !== 'complete') {
-    out.push('Delivery rendah: bersihkan daftar dari nomor yang tidak aktif atau tidak terdaftar di WhatsApp. Pesan yang tak pernah terkirim bisa berarti Anda diblokir.');
-  }
-  if (byId.engagement.proven && byId.engagement.status !== 'complete') {
-    out.push('Balasan rendah: kirim pesan yang relevan dan personal kepada orang yang memang menantikannya, bukan broadcast satu arah.');
-  }
-  if (byId.consent.proven && i.unsolicitedRecipients / i.uniqueRecipients > 0.2) {
-    out.push('Banyak penerima belum pernah menghubungi Anda. Kirim hanya ke kontak yang sudah opt-in atau menghubungi lebih dulu.');
-  }
-  if (i.optOuts > 0) out.push(`Ada ${i.optOuts} penerima yang meminta berhenti. Nomor mereka otomatis diblokir dari pengiriman proaktif; hentikan pesan kepada mereka.`);
-  if (out.length === 0) out.push('Pertahankan pola saat ini: kirim ke kontak yang berizin dan jaga volume tetap wajar.');
+  if (byId.stability.status !== 'complete') out.push(`Status device saat ini: ${i.status}. Periksa halaman Device untuk status dan event yang tercatat.`);
+  if (!byId.delivery.proven || !byId.engagement.proven || !byId.consent.proven) out.push('Data historis belum cukup untuk beberapa indikator; jangan menafsirkan skor ini sebagai prediksi hasil pengiriman.');
+  if (i.optOuts > 0) out.push(`${i.optOuts} permintaan berhenti tercatat. Hormati status opt-out dan jangan menghubungi penerima tersebut secara proaktif.`);
+  if (out.length === 0) out.push('Periksa status dan sumber data indikator ini secara berkala. Skor tidak menunjukkan persetujuan platform atau jaminan pengiriman.');
   return out;
 }
 

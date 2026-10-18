@@ -135,9 +135,11 @@ test('message list applies direction and search and returns standard pagination'
     return call++ === 0 ? { rows: [{ total: 21 }] } : { rows: [{ id: 'message-1' }] };
   };
   const result = await listMessages(tenant.id, {
-    direction: 'inbound', search: 'halo', limit: 20, offset: 0,
+    direction: 'inbound', created_today: true, search: 'halo', limit: 20, offset: 0,
   });
   assert.match(sql[0]!, /direction = \$2/);
+  assert.match(sql[0]!, /date_trunc\('day', now\(\) AT TIME ZONE 'Asia\/Jakarta'\)/);
+  assert.match(sql[0]!, /interval '1 day'/);
   assert.match(sql[0]!, /content ILIKE \$3/);
   assert.deepEqual(result.pagination, { total: 21, limit: 20, offset: 0, has_more: true });
   assert.equal(result.success, true);

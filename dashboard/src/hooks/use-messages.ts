@@ -12,3 +12,11 @@ export function useMessages(params: MessageListParams) {
     placeholderData: keepPreviousData,
   });
 }
+
+export function useDashboardStats() {
+  return useQuery({
+    queryKey: ["dashboard-stats"],
+    queryFn: () => api.getDashboardStats(),
+    refetchInterval: MESSAGES_REFETCH_INTERVAL_MS,
+  });
+}

@@ -25,6 +25,7 @@ interface RuleRow {
 
 export interface IncomingForAutoReply {
   id: string; tenantId: string; deviceId: string; deviceKey: string; from: string; content: string;
+  consentCommand?: 'stop' | 'start';
   replyJid?: string; isGroup?: boolean; key?: WAMessageKey;
 }
 
@@ -150,8 +151,10 @@ export async function processAutoReply(
   if (!rule) return false;
 
   const storedConsent = await getStoredRecipientConsent(queryFn, message.tenantId, message.from);
-  if (storedConsent !== 'opted_in') {
-    const reason = storedConsent === 'opted_out' ? 'recipient_opted_out' : 'recipient_consent_required';
+  // This rule answers the inbound message that just started the chat. It is not a proactive send;
+  // still honor an explicit STOP and let the dedicated STOP confirmation run separately.
+  if (storedConsent === 'opted_out' || message.consentCommand === 'stop') {
+    const reason = 'recipient_opted_out';
     await logActivity(queryFn, rule, message, rule.response.content, 'blocked', reason, null);
     log.warn('Auto-reply blocked by recipient consent', {
       tenantId: message.tenantId, recipientLast4: message.from.replace(/\D/g, '').slice(-4), reason,
@@ -221,7 +224,7 @@ export async function processAutoReply(
     const lock = dependencies.consentLock ?? withRecipientConsentLock;
     const result = await lock(message.tenantId, message.from, async () => {
       const consent = await getStoredRecipientConsent(queryFn, message.tenantId, message.from);
-      if (consent !== 'opted_in') return { blocked: consent === 'opted_out' ? 'recipient_opted_out' : 'recipient_consent_required' };
+      if (consent === 'opted_out') return { blocked: 'recipient_opted_out' };
       const last = await guard(message.deviceKey);
       if (!last.allowed) return { blocked: last.reason ?? 'blocked' };
       return { sent: await sock.sendMessage(jid, { text: content }) };

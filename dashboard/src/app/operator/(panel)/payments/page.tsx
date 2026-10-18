@@ -30,7 +30,7 @@ function PaymentsList() {
     <div className="space-y-5">
       <div><h1 className="text-2xl font-semibold tracking-tight">Pembayaran</h1><p className="text-sm text-muted-foreground">Konfirmasi pembayaran manual. Buka invoice untuk memeriksa lalu mengonfirmasi.</p></div>
       <div className="flex flex-wrap items-center gap-3">
-        <div role="group" aria-label="Filter status" className="inline-flex rounded-lg border bg-muted p-1">
+        <div role="group" aria-label="Filter status" className="inline-flex max-w-full flex-wrap rounded-lg border bg-muted p-1">
           {STATUSES.map(([value, label]) => (
             <button key={label} type="button" aria-pressed={status === value} onClick={() => set({ status: value === "unpaid" ? undefined : value, offset: 0 })}
               className={`rounded-md px-3 py-1.5 text-sm font-medium ${status === value ? "bg-background shadow-sm" : "text-muted-foreground"}`}>{label}</button>
@@ -43,7 +43,26 @@ function PaymentsList() {
       ) : (
         <>
           {list.error && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
-          <div className="overflow-x-auto rounded-xl border">
+          <div className="space-y-3 md:hidden">
+            {list.data.items.map((i) => (
+              <article key={i.id} className="rounded-xl border bg-card p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link href={`/operator/payments/${i.id}`} className="break-all font-mono text-sm text-primary underline underline-offset-2">{i.number}</Link>
+                    <p className="mt-1 truncate text-sm text-muted-foreground">{i.workspace.name}</p>
+                  </div>
+                  <InvoiceStatusBadge status={i.status} />
+                </div>
+                <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                  <div><dt className="text-xs text-muted-foreground">Paket</dt><dd className="mt-1">{i.plan.name} · {i.cycle === "yearly" ? "tahunan" : "bulanan"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Jumlah</dt><dd className="mt-1 font-medium tabular-nums">{rupiah(i.amount_idr)}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Dibuat</dt><dd className="mt-1">{formatDate(i.created_at)}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Jatuh tempo</dt><dd className="mt-1">{formatDate(i.due_at)}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto rounded-xl border md:block">
             <Table>
               <TableHeader><TableRow><TableHead>Invoice</TableHead><TableHead>Workspace</TableHead><TableHead>Paket</TableHead><TableHead className="text-right">Jumlah</TableHead><TableHead>Status</TableHead><TableHead>Dibuat</TableHead><TableHead>Jatuh tempo</TableHead></TableRow></TableHeader>
               <TableBody>

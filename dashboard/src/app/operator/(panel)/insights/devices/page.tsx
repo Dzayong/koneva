@@ -71,24 +71,38 @@ function DeviceList() {
         {attention && <p role="status" className="text-sm text-warning">Filter: device yang memerlukan perhatian</p>}
         {list.dataUpdatedAt > 0 && <p className="text-xs text-muted-foreground">Diperbarui: {new Date(list.dataUpdatedAt).toLocaleString("id-ID")} · auto-refresh 60 detik</p>}
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <div role="group" aria-label="Filter status" className="inline-flex flex-wrap rounded-lg border bg-muted p-1">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:flex md:flex-wrap md:items-center">
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground md:hidden">
+          Status device
+          <select value={status} onChange={(e) => set({ status: e.target.value || undefined, offset: 0 })} aria-label="Filter status" className="h-10 w-full rounded-lg border bg-background px-3 text-sm font-normal text-foreground">
+            {STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </label>
+        <div role="group" aria-label="Filter status" className="hidden rounded-lg border bg-muted p-1 md:inline-flex">
           {STATUSES.map((s) => (
             <button key={s.value} type="button" aria-pressed={status === s.value} onClick={() => set({ status: s.value || undefined, offset: 0 })}
               className={`rounded-md px-3 py-1.5 text-sm font-medium ${status === s.value ? "bg-background shadow-sm" : "text-muted-foreground"}`}>{s.label}</button>
           ))}
         </div>
-        <select value={workspace} onChange={(e) => set({ workspace: e.target.value || undefined, offset: 0 })} aria-label="Filter workspace" className="rounded-lg border bg-muted px-3 py-1.5 text-sm">
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground md:block">
+          Workspace
+          <select value={workspace} onChange={(e) => set({ workspace: e.target.value || undefined, offset: 0 })} aria-label="Filter workspace" className="h-10 w-full rounded-lg border bg-background px-3 text-sm font-normal text-foreground md:h-auto md:w-auto md:bg-muted md:py-1.5">
           <option value="">Semua workspace</option>
           {workspaces.data?.items.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-        </select>
-        <label className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">Terdaftar sejak: <input type="date" value={since} onChange={(e) => set({ since: e.target.value || undefined, offset: 0 })} aria-label="Filter tanggal terdaftar" className="rounded-lg border bg-muted px-3 py-1.5 text-sm" /></label>
-        <span className="text-sm text-muted-foreground">Per halaman:</span>
-        <div role="group" aria-label="Jumlah per halaman" className="inline-flex rounded-lg border bg-muted p-1">
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Terdaftar sejak
+          <input type="date" value={since} onChange={(e) => set({ since: e.target.value || undefined, offset: 0 })} aria-label="Filter tanggal terdaftar" className="h-10 w-full rounded-lg border bg-background px-3 text-sm font-normal text-foreground md:h-auto md:w-auto md:bg-muted md:py-1.5" />
+        </label>
+        <div className="flex items-center justify-between gap-3 sm:col-span-2 md:col-span-1 md:justify-start">
+          <span className="text-sm text-muted-foreground">Per halaman</span>
+          <div role="group" aria-label="Jumlah per halaman" className="inline-flex shrink-0 rounded-lg border bg-muted p-1">
           {LIMITS.map((v) => (
             <button key={v} type="button" aria-pressed={limit === v} onClick={() => set({ limit: v === 10 ? undefined : v, offset: 0 })}
               className={`rounded-md px-3 py-1.5 text-sm font-medium ${limit === v ? "bg-background shadow-sm" : "text-muted-foreground"}`}>{v}</button>
           ))}
+          </div>
         </div>
       </div>
       {list.isLoading ? <LoadingBlock label="Memuat daftar device..." /> : list.error && !list.data ? <ErrorState error={list.error} onRetry={() => void list.refetch()} /> : !list.data || list.data.items.length === 0 ? (
@@ -96,7 +110,26 @@ function DeviceList() {
       ) : (
         <>
           {list.error && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
-          <div className="overflow-x-auto rounded-xl border">
+          <div className="space-y-3 md:hidden">
+            {list.data.items.map((d) => (
+              <article key={d.id} className="rounded-xl border bg-card p-4 shadow-sm">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link href={`/operator/insights/devices/${d.id}`} className="break-all font-medium text-primary underline underline-offset-2">{d.label}</Link>
+                    <p className="mt-1 truncate text-sm text-muted-foreground">{d.workspace.name}</p>
+                  </div>
+                  <Badge className="shrink-0" variant={d.status === "online" ? "default" : d.status === "error" || d.status === "banned" ? "destructive" : "secondary"}>{d.status_label}</Badge>
+                </div>
+                <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                  <div><dt className="text-xs text-muted-foreground">Kesehatan</dt><dd className="mt-1"><Badge variant={healthVariant(d.health_badge)}>{d.health_badge}</Badge></dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Telepon</dt><dd className="mt-1 font-mono">{d.phone_masked ?? "—"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Terdaftar sejak</dt><dd className="mt-1">{d.created_at ? formatDate(d.created_at) : "—"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Durasi status</dt><dd className="mt-1">{d.status_since ? timeSince(d.status_since) : "—"}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto rounded-xl border md:block">
             <Table>
               <TableHeader>
                 <TableRow>

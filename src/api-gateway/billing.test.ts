@@ -174,7 +174,7 @@ test('student verification asks for a school or campus email', async () => {
   const seen: unknown[][] = [];
   withTransaction((text, v) => {
     if (text.startsWith('SELECT id FROM tenants')) return { rows: [{ id: 't1' }] };
-    if (text.startsWith('INSERT INTO student_requests')) seen.push(v ?? []);
+    if (text.startsWith('INSERT INTO student_requests')) { seen.push(v ?? []); return { rows: [{ id: 'student-request-1' }] }; }
     return { rows: [] };
   });
   await assert.doesNotReject(() => requestStudentVerification('t1', 'me@mhs.ui.ac.id', 'x'.repeat(900)));
@@ -254,7 +254,7 @@ test('marking an invoice paid activates the plan even while student proof is pen
   const seen: string[] = [];
   const build = (over: { invoiceStatus?: string; plan?: Partial<PlanRow>; verified?: boolean }) => withTransaction((text) => {
     seen.push(text);
-    if (text.includes('FROM invoices')) return { rows: [{ id: 'i1', tenant_id: 't1', number: 'INV-1', plan_id: 'umkm', cycle: 'monthly', status: over.invoiceStatus ?? 'unpaid' }] };
+    if (text.includes('FROM invoices')) return { rows: [{ id: 'i1', tenant_id: 't1', number: 'INV-1', amount_idr: 99000, plan_id: 'umkm', cycle: 'monthly', status: over.invoiceStatus ?? 'unpaid' }] };
     if (text.includes('FROM plans')) return { rows: [planRow(over.plan)] };
     if (text.includes('student_verified_at')) return { rows: [{ student_verified_at: over.verified ? new Date() : null }] };
     return { rows: [] };

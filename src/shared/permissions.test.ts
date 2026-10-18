@@ -56,6 +56,20 @@ test('routes map to the intended permission', () => {
   assert.equal(permissionFor('POST', '/templates/abc/render'), 'messages:read');
   assert.equal(permissionFor('POST', '/templates'), 'content:write');
   assert.equal(permissionFor('GET', '/devices/WAPI-1/'), 'devices:read');
+  assert.equal(permissionFor('GET', '/contact-groups'), 'messages:read');
+  assert.equal(permissionFor('GET', '/contact-groups/abc/members'), 'messages:read');
+  assert.equal(permissionFor('POST', '/contact-groups'), 'content:write');
+  assert.equal(permissionFor('POST', '/contacts/signup-consent'), 'content:write');
+  assert.equal(permissionFor('PUT', '/contact-groups/abc/members'), 'content:write');
+  assert.equal(permissionFor('GET', '/campaigns'), 'messages:read');
+  assert.equal(permissionFor('POST', '/campaigns'), 'messages:send');
+  assert.equal(permissionFor('POST', '/campaigns/abc/cancel'), 'messages:send');
+  assert.equal(permissionFor('GET', '/readiness/levels'), 'devices:read');
+  assert.equal(permissionFor('POST', '/readiness/missions/risk_reviewed/confirm'), 'team:manage');
+  assert.equal(permissionFor('POST', '/readiness/levels/bypass'), 'team:manage');
+  assert.equal(can('owner', 'team:manage'), true);
+  assert.equal(can('developer', 'team:manage'), false);
+  assert.equal(can('viewer', 'devices:read'), true);
 });
 
 test('unknown routes and methods are denied by default', () => {

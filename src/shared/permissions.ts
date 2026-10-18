@@ -70,7 +70,15 @@ const RULES: readonly Rule[] = [
   [['GET', 'POST'], /^\/tenant\/webhook(\/[^/]+)?$/, 'webhooks:manage'],
   [['POST'], /^\/templates\/[^/]+\/render$/, 'messages:read'],
   [['GET'], /^\/(contacts|templates|auto-reply-rules|analytics|dashboard)(\/[^/]+)*$/, 'messages:read'],
+  [['GET'], /^\/readiness\/levels$/, 'devices:read'],
+  [['POST'], /^\/readiness\/missions\/[^/]+\/confirm$/, 'team:manage'],
+  [['POST'], /^\/readiness\/missions\/[^/]+\/run$/, 'team:manage'],
+  [['POST'], /^\/readiness\/levels\/bypass$/, 'team:manage'],
   [ANY_WRITE, /^\/(contacts|templates|auto-reply-rules)(\/[^/]+)*$/, 'content:write'],
+  [['GET'], /^\/contact-groups(\/[^/]+(\/members)?)?$/, 'messages:read'],
+  [ANY_WRITE, /^\/contact-groups(\/[^/]+(\/members)?)?$/, 'content:write'],
+  [['GET'], /^\/campaigns$/, 'messages:read'],
+  [['POST'], /^\/campaigns(\/[^/]+\/cancel)?$/, 'messages:send'],
 ];
 
 /** Permission required for a request on /api/v1, or undefined when the route is unknown (denied). */

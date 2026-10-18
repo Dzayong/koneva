@@ -43,6 +43,21 @@ export function useCreateContact() {
   });
 }
 
+export function useSetContactConsent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status, source_note }: { id: string; status: "opted_in" | "opted_out"; source_note: string }) =>
+      api.setContactConsent(id, status, source_note),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      toast.success("Persetujuan penerima dicatat");
+    },
+    onError: (error) => toast.error("Kontak tersimpan, tetapi persetujuan gagal dicatat", {
+      description: apiErrorMessage(error, "Buka kembali kontak lalu catat persetujuannya."),
+    }),
+  });
+}
+
 export function useDeleteContact() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -57,7 +72,8 @@ export function useDeleteContact() {
 export function useImportContacts() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (csv: string) => api.importContacts(csv),
+    mutationFn: (input: string | { csv: string; consent_source_note?: string }) =>
+      typeof input === "string" ? api.importContacts(input) : api.importContacts(input.csv, input.consent_source_note),
     onSuccess: ({ imported }) => {
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
       toast.success(`${imported} kontak diimpor`);
@@ -83,7 +99,19 @@ export function useContactGroups() {
   const queryClient = useQueryClient();
   const groups = useQuery({ queryKey: ["contact-groups"], queryFn: () => api.getContactGroups() });
   const create = useMutation({ mutationFn: (name: string) => api.createContactGroup(name), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["contact-groups"] }) });
-  const members = useMutation({ mutationFn: ({ id, contact_ids }: { id: string; contact_ids: string[] }) => api.replaceContactGroupMembers(id, contact_ids), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["contact-groups"] }) });
+  const members = useMutation({
+    mutationFn: ({ id, contact_ids }: { id: string; contact_ids: string[] }) => api.replaceContactGroupMembers(id, contact_ids),
+    onSuccess: async (_, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["contact-groups"] }),
+        queryClient.invalidateQueries({ queryKey: ["contact-group-members", variables.id] }),
+      ]);
+      toast.success("Anggota grup disimpan");
+    },
+    onError: (error) => toast.error("Gagal menyimpan anggota grup", {
+      description: apiErrorMessage(error, "Coba lagi beberapa saat."),
+    }),
+  });
   return { ...groups, createGroup: create, saveMembers: members };
 }
 

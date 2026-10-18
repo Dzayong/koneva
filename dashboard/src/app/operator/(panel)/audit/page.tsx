@@ -46,7 +46,26 @@ function AuditList() {
       ) : (
         <>
           {list.error && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
-          <div className="overflow-x-auto rounded-xl border">
+          <div className="space-y-3 md:hidden">
+            {list.data.items.map((a) => {
+              const link = a.target ? targetLink(a.target) : null;
+              return (
+                <article key={a.id} className="rounded-xl border bg-card p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0"><p className="break-all font-mono text-xs font-medium">{a.action}</p><p className="mt-1 truncate text-sm text-muted-foreground">{a.operator?.name ?? "—"}</p></div>
+                    <time className="shrink-0 text-right text-xs text-muted-foreground">{formatDate(a.at)}</time>
+                  </div>
+                  <dl className="mt-4 space-y-3 text-sm">
+                    <div><dt className="text-xs text-muted-foreground">Target</dt><dd className="mt-1 break-words">{a.target ? (link ? <Link href={link} className="text-primary underline underline-offset-2">{a.target.label ?? a.target.id}</Link> : (a.target.label ?? a.target.id)) : "—"}</dd></div>
+                    {a.reason && <div><dt className="text-xs text-muted-foreground">Alasan</dt><dd className="mt-1 break-words">{a.reason}</dd></div>}
+                    {can("owner:insights") && <div><dt className="text-xs text-muted-foreground">Alamat IP</dt><dd className="mt-1 break-all font-mono text-xs">{a.client_ip ?? "—"}</dd></div>}
+                    <div><dt className="text-xs text-muted-foreground">Perubahan</dt><dd className="mt-1">{Object.keys(a.changes).length === 0 ? "—" : <ul className="space-y-1">{Object.entries(a.changes).map(([k, v]) => <li key={k} className="break-words"><span className="font-medium">{k}</span>: {clip(v.from)} → {clip(v.to)}</li>)}</ul>}</dd></div>
+                  </dl>
+                </article>
+              );
+            })}
+          </div>
+          <div className="hidden overflow-x-auto rounded-xl border md:block">
             <Table>
               <TableHeader><TableRow><TableHead>Waktu</TableHead><TableHead>Operator</TableHead><TableHead>Aksi</TableHead><TableHead>Target</TableHead><TableHead>Alamat IP</TableHead><TableHead>Alasan</TableHead><TableHead>Perubahan</TableHead></TableRow></TableHeader>
               <TableBody>

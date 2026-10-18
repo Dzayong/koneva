@@ -43,7 +43,7 @@ export default function OwnerInsightsPage() {
           <StatsCard title="Workspace suspend" value={number(d.kpis.suspended_workspaces)} icon={CirclePause} description="Berstatus suspend" index={2} />
           <StatsCard title="Pesan terkirim · 24 jam" value={number(d.kpis.messages_sent_24h)} icon={MessageSquare} description="Terkirim, delivered, atau read" index={3} />
           <StatsCard title="Pesan terkirim · 30 hari" value={number(d.kpis.messages_sent_30d)} icon={MessageSquare} description="Terkirim, delivered, atau read" index={4} />
-          <StatsCard title="Email OTP · hari ini (WIB)" value={number(d.kpis.otp_sender_today)} icon={Mail} description={`Sisa batas internal: ${number(d.kpis.otp_sender_remaining_internal)} dari ${number(d.kpis.otp_sender_daily_cap)}; bukan kuota Gmail Google.`} index={5} />
+          <StatsCard title="Permintaan OTP tercatat · hari ini (WIB)" value={number(d.kpis.otp_sender_today)} icon={Mail} description={`Gabungan kanal email dan WhatsApp; bukan bukti pesan berhasil terkirim. Sisa batas internal: ${number(d.kpis.otp_sender_remaining_internal)} dari ${number(d.kpis.otp_sender_daily_cap)}.`} index={5} />
         </StatGrid>
       </section>
 

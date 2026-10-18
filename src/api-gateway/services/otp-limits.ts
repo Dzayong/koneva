@@ -4,6 +4,7 @@ import config from '../../shared/config';
 import { transaction } from '../../shared/database/connection';
 import logger from '../../shared/utils/logger';
 import { ServiceError } from './service-error';
+import { recordSystemNotification } from './system-notification-outbox';
 
 /**
  * Limits on OTP sends (email and signup WhatsApp), shared by every API process through PostgreSQL.
@@ -78,10 +79,15 @@ async function violated(client: PoolClient, rules: Rule[]): Promise<{ rule: Rule
 
 async function recordThreshold(client: PoolClient, kind: 'sender_70_percent' | 'sender_cap_reached', count: number, cap: number): Promise<void> {
   // Once per 24 h per kind. Counts only: no email, address, IP or person.
-  const inserted = await client.query(
+  const inserted = await client.query<{ id: string }>(
     `INSERT INTO otp_threshold_events (kind, window_count, cap)
-     SELECT $1, $2, $3 WHERE NOT EXISTS (SELECT 1 FROM otp_threshold_events WHERE kind = $1 AND at > now() - interval '24 hours')`, [kind, count, cap]);
-  if (inserted.rowCount) logger.warn('OTP sender budget threshold', { kind, count, cap });
+     SELECT $1, $2, $3 WHERE NOT EXISTS (SELECT 1 FROM otp_threshold_events WHERE kind = $1 AND at > now() - interval '24 hours') RETURNING id`, [kind, count, cap]);
+  if (inserted.rowCount) {
+    logger.warn('OTP sender budget threshold', { kind, count, cap });
+    const event = inserted.rows[0]!;
+    await recordSystemNotification(client, `otp.threshold:${event.id}`, 'otp.threshold',
+      `Peringatan kapasitas OTP KONEVA: ${kind === 'sender_70_percent' ? 'pemakaian mencapai 70%' : 'batas harian tercapai'} (${count}/${cap}).`);
+  }
 }
 
 /** Cheap first line of defence, checked before any invitation lookup: OTP requests per source address. */

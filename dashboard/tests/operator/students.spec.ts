@@ -10,7 +10,7 @@ test.describe("student verification (UI evidence, API faked)", () => {
     await page.goto("/operator/students");
     await expect(page.getByRole("link", { name: "Uji Pelajar" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Kelas Contoh" })).toHaveCount(0);
-    await expect(page.getByText("m***1@kampus.example.ac.id")).toBeVisible();
+    await expect(page.getByRole("cell", { name: "m***1@kampus.example.ac.id" })).toBeVisible();
     await expect(page.getByText("mahasiswa1@kampus.example.ac.id")).toHaveCount(0); // full address is detail-only
     await page.getByRole("button", { name: "Disetujui" }).click();
     await expect(page.getByRole("link", { name: "Kelas Contoh" })).toBeVisible();

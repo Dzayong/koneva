@@ -88,6 +88,10 @@ export function createDeviceManagerApp(orchestrator: BotOrchestrator): express.E
 
   app.use(requireAdmin);
 
+  app.get('/resources', asyncRoute(async (_request, response) => {
+    response.json({ success: true, data: await orchestrator.getResourceSnapshot() });
+  }));
+
   app.post('/devices', asyncRoute(async (request, response) => {
     const parsed = createDeviceSchema.safeParse(request.body);
     if (!parsed.success) {

@@ -44,11 +44,28 @@ export class DeviceStatusNotifier {
     this.last = next;
     const reason = next === 'online' ? undefined : state.lastDisconnectReason;
     try {
-      await this.queryFn(
+      const event = await this.queryFn(
         `INSERT INTO device_events (device_id, tenant_id, device_key, status, previous_status, reason, code)
-         VALUES ($1::uuid, $2::uuid, $3::varchar, $4::varchar, $5::varchar, $6::varchar, $7::int)`,
+         VALUES ($1::uuid, $2::uuid, $3::varchar, $4::varchar, $5::varchar, $6::varchar, $7::int) RETURNING id`,
         [this.device.id, this.device.tenantId, this.deviceKey, next, previous ?? null, reason ?? null, state.disconnectCode ?? null],
       );
+      const eventId = (event.rows[0] as { id?: string } | undefined)?.id;
+      if (eventId) {
+        try {
+          await this.queryFn(
+            `INSERT INTO system_notification_outbox(event_key,event_type,content)
+             SELECT $1,'device.status_changed',$2 WHERE EXISTS (
+               SELECT 1 FROM system_whatsapp_otp_sender WHERE singleton=true AND notifications_enabled=true
+                 AND notification_recipient_phone IS NOT NULL)
+             ON CONFLICT(event_key) DO NOTHING`,
+            [`device.status_changed:${eventId}`, `Status device ${this.deviceKey} berubah menjadi ${next}${previous ? ` dari ${previous}` : ''}.`],
+          );
+        } catch (error) {
+          this.log.warn('Could not queue system notification for device status change', {
+            deviceKey: this.deviceKey, error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       await this.dispatch(this.device.tenantId, {
         event: 'device.status_changed',
         device_key: this.deviceKey,

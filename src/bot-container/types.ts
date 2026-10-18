@@ -76,5 +76,9 @@ export interface MessageRecord {
   quotaExempt?: boolean;
   /** Platform signup OTP; terminal sends erase the stored recipient and body. */
   systemOtp?: boolean;
+  /** Platform operator notification; terminal sends erase the stored recipient and body. */
+  systemNotification?: boolean;
+  /** Outbound reply is tied to this recent inbound customer message. */
+  replyToMessageId?: string | null;
   createdAt: Date;
 }

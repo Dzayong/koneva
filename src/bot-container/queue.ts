@@ -124,6 +124,8 @@ interface MessageRow {
   priority: MessageRecord['priority'];
   quota_exempt: boolean;
   system_otp: boolean;
+  system_notification: boolean;
+  reply_to_message_id: string | null;
   created_at: Date;
 }
 
@@ -143,6 +145,8 @@ function mapMessageRow(row: MessageRow): MessageRecord {
     priority: row.quota_exempt ? 'urgent' : 'normal',
     quotaExempt: row.quota_exempt,
     ...(row.system_otp ? { systemOtp: true } : {}),
+    ...(row.system_notification ? { systemNotification: true } : {}),
+    ...(row.reply_to_message_id ? { replyToMessageId: row.reply_to_message_id } : {}),
     createdAt: row.created_at,
   };
 }
@@ -151,12 +155,26 @@ async function getMessageById(id: string, queryFn: QueryFn): Promise<MessageReco
   const { rows } = await queryFn(
     `SELECT id, tenant_id, device_id, device_key, to_number, content, media_url, type, status,
             whatsapp_message_id, error_message, priority, COALESCE(quota_exempt, false) AS quota_exempt,
-            COALESCE(system_otp, false) AS system_otp, created_at
+            COALESCE(system_otp, false) AS system_otp, COALESCE(system_notification, false) AS system_notification,
+            reply_to_message_id, created_at
      FROM messages WHERE id = $1`,
     [id],
   );
   const row = rows[0] as unknown as MessageRow | undefined;
   return row ? mapMessageRow(row) : undefined;
+}
+
+async function hasValidReplyContext(message: MessageRecord, queryFn: QueryFn, now = new Date()): Promise<boolean> {
+  if (!message.replyToMessageId) return false;
+  const result = await queryFn(
+    `SELECT 1 FROM messages
+     WHERE id = $1 AND tenant_id = $2 AND device_id = $3 AND direction = 'inbound'
+       AND regexp_replace(COALESCE(from_number, ''), '[^0-9]', '', 'g') = $4
+       AND created_at >= $5 AND created_at <= $6`,
+    [message.replyToMessageId, message.tenantId, message.deviceId,
+      message.to.replace(/\D/g, ''), new Date(now.getTime() - 24 * 60 * 60_000), now],
+  );
+  return result.rows.length > 0;
 }
 
 interface UpdateMessageStatusFields {
@@ -189,8 +207,8 @@ async function updateMessageStatus(
     sets.push(`${fields.timestampColumn} = now()`);
   }
   if (['sent', 'failed', 'blocked'].includes(fields.status)) {
-    sets.push("content = CASE WHEN system_otp THEN '[redacted]' ELSE content END");
-    sets.push("to_number = CASE WHEN system_otp THEN '[redacted]' ELSE to_number END");
+    sets.push("content = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE content END");
+    sets.push("to_number = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE to_number END");
   }
 
   await queryFn(`UPDATE messages SET ${sets.join(', ')} WHERE id = $1`, params);
@@ -403,7 +421,8 @@ async function processJobBody(
   }
 
   const initialConsent = await getStoredRecipientConsent(queryFn, message.tenantId, message.to);
-  if (!message.quotaExempt && initialConsent !== 'opted_in') {
+  const initialReplyContext = await hasValidReplyContext(message, queryFn, deps.now?.() ?? new Date());
+  if (!message.quotaExempt && (initialConsent === 'opted_out' || (initialConsent !== 'opted_in' && !initialReplyContext))) {
     const code = initialConsent === 'opted_out' ? 'RECIPIENT_OPTED_OUT' : 'RECIPIENT_CONSENT_REQUIRED';
     await updateMessageStatus(message.id, { status: 'blocked', errorMessage: code.toLocaleLowerCase() }, queryFn);
     log.warn('Queued message blocked by recipient consent', {
@@ -538,7 +557,8 @@ async function processJobBody(
   try {
     sendResult = await withRecipientConsentLock(message.tenantId, message.to, async () => {
       const currentConsent = await getStoredRecipientConsent(queryFn, message.tenantId, message.to);
-      if (!message.quotaExempt && currentConsent !== 'opted_in') {
+      const currentReplyContext = await hasValidReplyContext(message, queryFn, deps.now?.() ?? new Date());
+      if (!message.quotaExempt && (currentConsent === 'opted_out' || (currentConsent !== 'opted_in' && !currentReplyContext))) {
         throw new RecipientConsentDenied(currentConsent === 'opted_out' ? 'RECIPIENT_OPTED_OUT' : 'RECIPIENT_CONSENT_REQUIRED');
       }
       const last = await checkTransmission(message.deviceKey, queryFn, deps.now?.());
@@ -621,25 +641,26 @@ export async function failStuckMessages(
   dispatch: typeof dispatchWebhook = dispatchWebhook,
 ): Promise<number> {
   const { rows } = await queryFn(
-    `SELECT id, tenant_id, device_key, to_number, COALESCE(system_otp, false) AS system_otp FROM messages
+    `SELECT id, tenant_id, device_key, to_number, COALESCE(system_otp, false) AS system_otp,
+       COALESCE(system_notification, false) AS system_notification FROM messages
      WHERE device_key = $1 AND direction = 'outbound' AND status = 'queued'
        AND created_at < now() - CASE WHEN priority = 'urgent' THEN interval '2 minutes' ELSE interval '15 minutes' END`,
     [deviceKey],
   );
   let failed = 0;
-  for (const row of rows as { id: string; tenant_id: string; device_key: string; to_number: string; system_otp: boolean }[]) {
+  for (const row of rows as { id: string; tenant_id: string; device_key: string; to_number: string; system_otp: boolean; system_notification: boolean }[]) {
     if (liveMessageIds.has(row.id)) continue;
     const updated = await queryFn(
       `UPDATE messages SET status = 'failed', error_message = 'lost_in_queue',
-         content = CASE WHEN system_otp THEN '[redacted]' ELSE content END,
-         to_number = CASE WHEN system_otp THEN '[redacted]' ELSE to_number END
+         content = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE content END,
+         to_number = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE to_number END
        WHERE id = $1 AND status = 'queued' RETURNING id`,
       [row.id],
     );
     if (updated.rows.length === 0) continue;
     failed += 1;
     log.error('Queued message had no live job; marked failed', { messageId: row.id, deviceKey });
-    if (!row.system_otp) {
+    if (!row.system_otp && !row.system_notification) {
       await dispatch(row.tenant_id, {
         event: 'message.failed', device_key: row.device_key, message_id: row.id,
         to: row.to_number, status: 'failed', reason: 'lost_in_queue', timestamp: nowIso(),
@@ -759,11 +780,12 @@ export async function handleReceiptUpdate(
     `UPDATE messages
      SET status = $1, ${timestampColumn} = COALESCE(${timestampColumn}, now())
      WHERE whatsapp_message_id = $2 AND status = ANY($3::varchar[])
-     RETURNING id, tenant_id, device_key, to_number, COALESCE(system_otp, false) AS system_otp`,
+     RETURNING id, tenant_id, device_key, to_number, COALESCE(system_otp, false) AS system_otp,
+       COALESCE(system_notification, false) AS system_notification`,
     [newStatus, key.id, allowedStatuses],
   );
   const row = rows[0] as
-    | { id: string; tenant_id: string; device_key: string; to_number: string; system_otp: boolean }
+    | { id: string; tenant_id: string; device_key: string; to_number: string; system_otp: boolean; system_notification: boolean }
     | undefined;
   if (!row) {
     log.warn('WhatsApp receipt did not match an updatable message', {
@@ -773,7 +795,7 @@ export async function handleReceiptUpdate(
     return;
   }
 
-  if (!row.system_otp) {
+  if (!row.system_otp && !row.system_notification) {
     await webhookDispatcher(
       row.tenant_id,
       {

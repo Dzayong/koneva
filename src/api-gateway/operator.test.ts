@@ -573,6 +573,63 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     assert.ok(typeof d.device_counts.attention === 'number');
   });
 
+  await t.test('system WhatsApp notifications store a masked operator recipient and require a queued test before enable', async () => {
+    const owner = phaseAOwner;
+    const recipient = '081234567890';
+    const saved = await call('/system/whatsapp-otp-sender/notifications', {
+      session: owner, method: 'PUT', body: { recipient_phone: recipient, enabled: false },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    assert.equal(saved.body.data.recipient_last4, '7890');
+    assert.equal(JSON.stringify(saved.body).includes('081234567890'), false, 'the full recipient never returns to the operator client');
+    const row = (await pool.query<{ notification_recipient_phone: string; notifications_enabled: boolean; notification_test_queued_at: Date | null }>(
+      'SELECT notification_recipient_phone,notifications_enabled,notification_test_queued_at FROM system_whatsapp_otp_sender WHERE singleton=true',
+    )).rows[0]!;
+    assert.equal(row.notification_recipient_phone, '6281234567890');
+    assert.equal(row.notifications_enabled, false);
+    assert.equal(row.notification_test_queued_at, null);
+    const prematureEnable = await call('/system/whatsapp-otp-sender/notifications', {
+      session: owner, method: 'PUT', body: { enabled: true },
+    });
+    assert.equal(prematureEnable.status, 409, prematureEnable.text);
+    assert.equal(prematureEnable.body.error.code, 'NOTIFICATION_TEST_REQUIRED');
+
+    const userId = randomUUID(), verificationId = randomUUID(), messageId = randomUUID();
+    const senderTenant = (await pool.query<{ tenant_id: string }>(
+      'SELECT tenant_id FROM system_whatsapp_otp_sender WHERE singleton=true',
+    )).rows[0]!.tenant_id;
+    await pool.query(
+      "INSERT INTO users(id,email,name,password_hash,status) VALUES ($1,$2,'OTP Signup Uji',$3,'pending_email')",
+      [userId, `${userId}@example.test`, passwordHash],
+    );
+    await pool.query(
+      `INSERT INTO messages(id,tenant_id,to_number,content,status,external_id,system_otp,sent_at,delivered_at)
+       VALUES ($1,$2,'[redacted]','[redacted]','delivered',$3,true,now()-interval '1 minute',now())`,
+      [messageId, senderTenant, `signup_otp_${verificationId}`],
+    );
+    await pool.query(
+      `INSERT INTO signup_phone_verifications(id,user_id,code_hash,phone_last4,message_id,send_status,expires_at)
+       VALUES ($1,$2,$3,'7890',$4,'queued',now()+interval '10 minutes')`,
+      [verificationId, userId, 'a'.repeat(64), messageId],
+    );
+    const activity = await call('/system/whatsapp-otp-sender', { session: owner });
+    assert.equal(activity.status, 200, activity.text);
+    const otp = activity.body.data.recent_otps.find((entry: { id: string }) => entry.id === verificationId);
+    assert.ok(otp, 'the operator response includes recent signup OTP activity');
+    assert.equal(otp.phone_last4, '7890');
+    assert.equal(otp.message_status, 'delivered');
+    assert.equal(otp.verification_status, 'pending', 'delivery is distinct from code verification');
+    const serialized = JSON.stringify(activity.body);
+    assert.equal(serialized.includes('to_number'), false);
+    assert.equal(serialized.includes('content'), false);
+    assert.equal(serialized.includes(`${userId}@example.test`), false);
+    await pool.query('UPDATE users SET phone_verified_at=now() WHERE id=$1', [userId]);
+    await pool.query('UPDATE signup_phone_verifications SET consumed_at=now() WHERE id=$1', [verificationId]);
+    const verifiedActivity = await call('/system/whatsapp-otp-sender', { session: owner });
+    const verifiedOtp = verifiedActivity.body.data.recent_otps.find((entry: { id: string }) => entry.id === verificationId);
+    assert.equal(verifiedOtp.verification_status, 'used');
+  });
+
   await t.test('Phase A: staff without owner:insights is denied on all Phase A endpoints', async () => {
     const staff = await operator(['payments:read']);
     for (const route of ['/insights/devices', '/insights/devices/' + randomUUID(), '/insights/health', '/insights/workspaces', '/insights/workspaces/' + randomUUID()]) {

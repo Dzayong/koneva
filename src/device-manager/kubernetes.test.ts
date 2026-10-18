@@ -130,6 +130,15 @@ test('getBotPodStatus maps Kubernetes readiness and pod metadata', async () => {
   });
 });
 
+test('Kubernetes resource usage stays explicitly unavailable until Metrics Server is configured', async () => {
+  const fixture = manager();
+  const snapshot = await fixture.manager.getResourceSnapshot();
+  assert.equal(snapshot.available, false);
+  if (snapshot.available) assert.fail('Kubernetes resource metrics must not be inferred from pod requests');
+  assert.equal(snapshot.reason, 'container_metrics_not_configured');
+  assert.equal(snapshot.source, 'unavailable');
+});
+
 test('scaleBotStatefulSet changes replicas while retaining resource identity', async () => {
   const fixture = manager({
     apps: {

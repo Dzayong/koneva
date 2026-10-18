@@ -10,6 +10,7 @@ import { operatorTransaction, OperatorError, type Actor } from './core';
 import { confirmPayment, decideStudent } from './mutations';
 import { otpAlerts } from './alerts';
 import { ownerInsights, ownerDeviceList, ownerDeviceDetail, ownerSystemHealth, ownerWorkspaceList, ownerWorkspaceDetail } from './insights';
+import { getSystemWhatsappOtpSender, pairSystemWhatsappOtpSender, queueSystemWhatsappNotificationTest, saveSystemWhatsappNotificationSettings } from './system-whatsapp-otp';
 import { invoiceDetail, listAudit, listInvoices, listStudents, listWorkspaces, studentDetail, workspaceDetail } from './reads';
 
 const uuid = z.string().uuid().transform((v) => v.toLowerCase());
@@ -159,6 +160,21 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
   });
   router.get('/insights/health', permit('owner:insights'), async (request, response) => {
     response.json({ success: true, data: await ownerSystemHealth(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown') });
+  });
+  router.get('/system/whatsapp-otp-sender', permit('owner:insights'), async (request, response) => {
+    const query = z.object({ include_qr: z.enum(['1']).optional() }).strict().parse(request.query);
+    response.json({ success: true, data: await getSystemWhatsappOtpSender(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown', query.include_qr === '1') });
+  });
+  router.post('/system/whatsapp-otp-sender/pair', permit('owner:insights'), async (_request, response) => {
+    response.json({ success: true, data: await pairSystemWhatsappOtpSender(db, actorOf(response), response.locals['requestId'] as string, _request.ip ?? 'unknown') });
+  });
+  router.put('/system/whatsapp-otp-sender/notifications', permit('owner:insights'), async (request, response) => {
+    const input = z.object({ recipient_phone: z.string().trim().max(30).nullable().optional(), enabled: z.boolean() }).strict().parse(request.body);
+    response.json({ success: true, data: await saveSystemWhatsappNotificationSettings(db, actorOf(response), response.locals['requestId'] as string,
+      request.ip ?? 'unknown', { ...(input.recipient_phone !== undefined ? { recipientPhone: input.recipient_phone } : {}), enabled: input.enabled }) });
+  });
+  router.post('/system/whatsapp-otp-sender/notifications/test', permit('owner:insights'), async (request, response) => {
+    response.json({ success: true, data: await queueSystemWhatsappNotificationTest(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown') });
   });
   router.get('/insights/workspaces', permit('owner:insights'), async (request, response) => {
     const { limit, offset, q } = ownerPageSchema.parse(request.query);

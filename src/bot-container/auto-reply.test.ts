@@ -48,14 +48,36 @@ test('matched inbound message sends and records an auto-reply', async () => {
   assert.equal(queries.some((sql) => sql.includes('INSERT INTO messages')), true);
 });
 
-test('auto-reply refuses a non-opted-in recipient and writes a blocked activity row', async () => {
+test('auto-reply answers an inbound chat without a prior START opt-in', async () => {
   const queries: string[] = [];
-  const queryFn: QueryFn = async (sql) => { queries.push(sql); return { rows: [] } as never; };
+  const queryFn: QueryFn = async (sql) => {
+    queries.push(sql);
+    if (sql.includes('INSERT INTO messages')) return { rows: [{ id: 'reply-1' }] } as never;
+    return { rows: [] } as never;
+  };
+  let sends = 0;
+  const sock = { sendMessage: async () => { sends += 1; return { key: { id: 'reply-wa-1' } }; } } as unknown as WASocket;
+  const silent = { info() {}, warn() {}, error() {} } as unknown as Logger;
+  const sent = await processAutoReply(
+    { id: 'in-no-consent', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?' },
+    [baseRule], sock, queryFn, silent,
+    { wait: async () => undefined, guard: async () => ({ allowed: true }), canSend: async () => ({ allowed: true, delayMs: 0,
+      typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }),
+      consentLock: async (_tenant, _recipient, work) => work() },
+  );
+  assert.equal(sent, true);
+  assert.equal(sends, 1);
+  assert.equal(queries.some((sql) => sql.includes('INSERT INTO auto_reply_logs')), true);
+});
+
+test('auto-reply still respects an explicit STOP', async () => {
+  const queries: string[] = [];
+  const queryFn: QueryFn = async (sql) => { queries.push(sql); return { rows: [{ status: 'opted_out' }] } as never; };
   let sends = 0;
   const sock = { sendMessage: async () => { sends += 1; return { key: { id: 'unexpected' } }; } } as unknown as WASocket;
   const silent = { info() {}, warn() {}, error() {} } as unknown as Logger;
   const sent = await processAutoReply(
-    { id: 'in-no-consent', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?' },
+    { id: 'in-opted-out', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?' },
     [baseRule], sock, queryFn, silent,
     { consentLock: async (_tenant, _recipient, work) => work() },
   );

@@ -1,5 +1,5 @@
 import type * as Kubernetes from '@kubernetes/client-node';
-import type { BotPodStatus, BotStatefulSetSpec, KubernetesConfig } from './types';
+import type { BotPodStatus, BotResourceSnapshot, BotStatefulSetSpec, KubernetesConfig } from './types';
 
 type AppsApi = Pick<
   Kubernetes.AppsV1Api,
@@ -104,6 +104,15 @@ export class KubernetesBotManager {
 
   async listBots(): Promise<BotPodStatus[]> {
     return this.listBotPods();
+  }
+
+  async getResourceSnapshot(): Promise<BotResourceSnapshot> {
+    return {
+      available: false,
+      source: 'unavailable',
+      sampledAt: new Date().toISOString(),
+      reason: 'container_metrics_not_configured',
+    };
   }
 
   async scaleBot(deviceKey: string, replicas: number): Promise<void> {

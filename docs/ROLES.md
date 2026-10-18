@@ -36,9 +36,9 @@ email verified. Email verification remains available after sign-in and is still 
 recovery continues to use email. The phone and signup code are not exposed in tenant message history or webhooks, and the message
 body/recipient are erased after the send reaches a terminal state. Codes are stored as keyed hashes and expire after 10 minutes.
 
-Set `SIGNUP_OTP_DEVICE_KEY` to an online device key belonging to a dedicated platform/admin workspace to enable this channel.
-The device's tenant must be able to send. If the key is absent or the device is offline, the API returns a 503 and never falls
-back to email. The sender is subject to shared IP, recipient, and daily OTP limits.
+An owner pairs the dedicated KONEVA system sender from Operator → OTP WhatsApp by scanning its QR code. The sender is stored
+separately from customer workspaces. If it is not paired or is offline, the API returns a 503 and never falls back to email.
+The sender is subject to shared IP, recipient, and daily OTP limits.
 
 ### Email sender: state (updated 2026-09-27)
 

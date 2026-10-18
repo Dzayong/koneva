@@ -116,27 +116,27 @@ router.get('/tenants', async (_request, response) => {
     SELECT t.id, t.name, t.email, t.status, t.max_devices, t.quota_messages, t.used_messages, t.created_at,
       COUNT(DISTINCT d.id)::int AS device_count, COUNT(DISTINCT m.id)::int AS message_count
     FROM tenants t LEFT JOIN devices d ON d.tenant_id = t.id
-    LEFT JOIN messages m ON m.tenant_id = t.id AND m.system_otp=false GROUP BY t.id ORDER BY t.created_at DESC`);
+    LEFT JOIN messages m ON m.tenant_id = t.id AND m.system_otp=false AND system_notification=false WHERE t.is_system=false GROUP BY t.id ORDER BY t.created_at DESC`);
   response.json({ success: true, data: rows.rows });
 });
 
 router.get('/devices', async (request, response) => {
   const status = typeof request.query.status === 'string' ? request.query.status : undefined;
   const rows = status
-    ? await pool.query('SELECT id, tenant_id, device_key, label, status, health_score, created_at, updated_at FROM devices WHERE status = $1 ORDER BY created_at DESC', [status])
-    : await pool.query('SELECT id, tenant_id, device_key, label, status, health_score, created_at, updated_at FROM devices ORDER BY created_at DESC');
+    ? await pool.query('SELECT d.id, d.tenant_id, d.device_key, d.label, d.status, d.health_score, d.created_at, d.updated_at FROM devices d JOIN tenants t ON t.id=d.tenant_id WHERE t.is_system=false AND d.status = $1 ORDER BY d.created_at DESC', [status])
+    : await pool.query('SELECT d.id, d.tenant_id, d.device_key, d.label, d.status, d.health_score, d.created_at, d.updated_at FROM devices d JOIN tenants t ON t.id=d.tenant_id WHERE t.is_system=false ORDER BY d.created_at DESC');
   response.json({ success: true, data: rows.rows });
 });
 
 router.get('/stats', async (_request, response) => {
   const result = await pool.query(`
     SELECT
-      (SELECT COUNT(*)::int FROM tenants WHERE status = 'active') AS total_tenants,
-      (SELECT COUNT(*)::int FROM devices) AS total_devices,
-      (SELECT COUNT(*)::int FROM messages WHERE system_otp=false AND created_at >= CURRENT_DATE) AS messages_today,
+      (SELECT COUNT(*)::int FROM tenants WHERE is_system=false AND status = 'active') AS total_tenants,
+      (SELECT COUNT(*)::int FROM devices d JOIN tenants t ON t.id=d.tenant_id WHERE t.is_system=false) AS total_devices,
+      (SELECT COUNT(*)::int FROM messages WHERE system_otp=false AND system_notification=false AND created_at >= CURRENT_DATE) AS messages_today,
       COALESCE((SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE status IN ('sent','delivered','read')) /
         NULLIF(COUNT(*) FILTER (WHERE status NOT IN ('queued','sending')), 0), 2)
-        FROM messages WHERE system_otp=false AND created_at >= CURRENT_DATE), 0) AS success_rate`);
+        FROM messages WHERE system_otp=false AND system_notification=false AND created_at >= CURRENT_DATE), 0) AS success_rate`);
   response.json({ success: true, data: result.rows[0] });
 });
 

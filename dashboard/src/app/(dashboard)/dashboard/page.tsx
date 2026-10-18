@@ -3,7 +3,6 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, MessageSquare, QrCode, ShieldCheck, Smartphone } from "lucide-react";
-import { isToday } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeviceStatusBadge } from "@/components/devices/device-status-badge";
@@ -14,16 +13,13 @@ import { QuickActions } from "@/components/dashboard/quick-actions";
 import { SetupChecklist } from "@/components/dashboard/setup-checklist";
 import { usePermissions } from "@/hooks/use-me";
 import { useDevices } from "@/hooks/use-devices";
-import { useMessages } from "@/hooks/use-messages";
+import { useDashboardStats } from "@/hooks/use-messages";
 import { formatDate, getHealthConfig } from "@/lib/utils";
-
-const DELIVERED_STATUSES = new Set(["sent", "delivered", "read"]);
-const TERMINAL_STATUSES = new Set(["sent", "delivered", "read", "failed", "blocked"]);
 
 export default function DashboardPage() {
   const { user } = usePermissions();
   const { data: devices, isLoading: devicesLoading } = useDevices();
-  const { data: messages, isLoading: messagesLoading } = useMessages({ limit: 100, offset: 0 });
+  const { data: stats, isLoading: statsLoading, isError: statsError } = useDashboardStats();
 
   const pendingQr = useMemo(
     () => devices?.filter((d) => d.status === "pending_qr").length ?? 0,
@@ -41,21 +37,6 @@ export default function DashboardPage() {
       .slice(0, 5),
     [devices],
   );
-
-  // api-gateway has no "messages today" or "success rate" endpoint yet —
-  // approximated from the latest page of messages, not a true daily total.
-  const messagesToday = useMemo(
-    () => messages?.data.filter((m) => isToday(new Date(m.created_at))).length ?? 0,
-    [messages],
-  );
-
-  const successRate = useMemo(() => {
-    const sample = messages?.data ?? [];
-    const terminal = sample.filter((m) => TERMINAL_STATUSES.has(m.status));
-    if (terminal.length === 0) return 0;
-    const delivered = terminal.filter((m) => DELIVERED_STATUSES.has(m.status)).length;
-    return (delivered / terminal.length) * 100;
-  }, [messages]);
 
   return (
     <div className="space-y-8 md:space-y-10">
@@ -81,18 +62,18 @@ export default function DashboardPage() {
         <StatsCard
           title="Pesan hari ini"
           index={1}
-          value={messagesToday}
+          value={statsError ? "—" : stats?.messages_today ?? 0}
           icon={MessageSquare}
-          description="Perkiraan dari 100 pesan terbaru"
-          isLoading={messagesLoading}
+          description="Masuk + keluar, semua status, sejak 00.00 WIB"
+          isLoading={statsLoading}
         />
         <StatsCard
-          title="Tingkat sukses"
+          title="Tingkat pengantaran"
           index={2}
-          value={`${successRate.toFixed(1)}%`}
+          value={statsError ? "—" : `${(stats?.delivery_rate ?? 0).toFixed(1)}%`}
           icon={CheckCircle2}
-          description="Dari pesan keluar yang dicek"
-          isLoading={messagesLoading}
+          description="Pesan keluar berstatus akhir · seluruh riwayat"
+          isLoading={statsLoading}
         />
         <StatsCard
           title="Menunggu QR"

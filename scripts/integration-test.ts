@@ -296,6 +296,14 @@ class FakeOrchestrator implements BotOrchestrator {
     const rows = await Promise.all([...this.resources.keys()].map((key) => this.getBotStatus(key)));
     return rows.filter((row): row is BotPodStatus => row !== null);
   }
+  async getResourceSnapshot() {
+    return {
+      available: false as const,
+      source: 'unavailable' as const,
+      sampledAt: new Date().toISOString(),
+      reason: 'container_metrics_not_configured' as const,
+    };
+  }
 }
 
 async function listen(server: Server, port: number): Promise<void> {

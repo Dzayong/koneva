@@ -44,6 +44,22 @@ export async function assertRecipientConsent(
   }
 }
 
+/** A customer-started chat can receive a contextual reply without an opt-in command, but STOP still wins. */
+export async function assertReplyRecipientAllowed(
+  db: ConsentQuery,
+  tenantId: string,
+  recipient: string,
+): Promise<void> {
+  const phoneNumber = normalizeRecipientNumber(recipient);
+  const result = await db.query(
+    'SELECT status FROM recipient_preferences WHERE tenant_id = $1 AND phone_number = $2',
+    [tenantId, phoneNumber],
+  );
+  if (result.rows[0]?.status === 'opted_out') {
+    throw new ServiceError(409, 'RECIPIENT_OPTED_OUT', 'Recipient has opted out of messages');
+  }
+}
+
 export async function getContactConsent(tenantId: string, contactId: string): Promise<Record<string, unknown>> {
   const contact = await pool.query<{ phone_number: string; preference_status: string | null; source: string | null; source_note: string | null; evidence_ref: string | null; decided_at: Date | null; decided_by: string | null }>(
     `SELECT regexp_replace(c.phone_number, '[^0-9]', '', 'g') AS phone_number,
@@ -121,4 +137,70 @@ export async function recordManualContactConsent(
     }
     return preference.rows[0] ?? {};
   }));
+}
+
+/**
+ * Record opt-in captured by a customer's own signup/checkout flow. The API key holder attests that
+ * the recipient saw the stated WhatsApp notice and actively accepted it. evidenceRef should point
+ * to that customer's immutable signup/consent record; it is idempotent within a workspace.
+ */
+export async function recordApiSignupConsent(
+  tenantId: string,
+  recipient: string,
+  consentText: string,
+  evidenceRef: string,
+  apiKeyId: string,
+): Promise<Record<string, unknown>> {
+  const phoneNumber = normalizeRecipientNumber(recipient);
+  const trimmedText = consentText.trim();
+  const trimmedRef = evidenceRef.trim();
+  if (phoneNumber.length < 7 || phoneNumber.length > 20) {
+    throw new ServiceError(400, 'INVALID_PHONE_NUMBER', 'Recipient phone number is invalid');
+  }
+  if (trimmedText.length < 10) {
+    throw new ServiceError(400, 'CONSENT_TEXT_REQUIRED', 'Provide the WhatsApp consent wording shown to the recipient');
+  }
+  if (!trimmedRef) throw new ServiceError(400, 'CONSENT_EVIDENCE_REQUIRED', 'Provide an immutable signup or consent record ID');
+
+  try {
+    return await withRecipientConsentLock(tenantId, phoneNumber, () => transaction(async (client: PoolClient) => {
+    const priorEvent = await client.query<{ phone_number: string; source_note: string | null; status: string }>(
+      `SELECT phone_number, source_note, status FROM recipient_consent_events
+       WHERE tenant_id = $1 AND source = 'signup_api' AND evidence_ref = $2`, [tenantId, trimmedRef],
+    );
+    if (priorEvent.rows[0]) {
+      const prior = priorEvent.rows[0];
+      if (prior.phone_number !== phoneNumber || prior.source_note !== trimmedText || prior.status !== 'opted_in') {
+        throw new ServiceError(409, 'CONSENT_EVIDENCE_CONFLICT', 'This evidence ID is already linked to different consent data');
+      }
+      const current = await client.query(
+        `SELECT tenant_id, phone_number, status, source, source_note, evidence_ref, decided_at
+         FROM recipient_preferences WHERE tenant_id = $1 AND phone_number = $2`, [tenantId, phoneNumber],
+      );
+      return current.rows[0] ?? { tenant_id: tenantId, phone_number: phoneNumber, status: prior.status, source: 'signup_api', source_note: trimmedText, evidence_ref: trimmedRef };
+    }
+
+    await client.query(
+      `INSERT INTO recipient_consent_events
+         (tenant_id, phone_number, status, source, source_note, evidence_ref, actor_kind, actor_id)
+       VALUES ($1, $2, 'opted_in', 'signup_api', $3, $4, 'api_key', $5)`,
+      [tenantId, phoneNumber, trimmedText, trimmedRef, apiKeyId],
+    );
+    const preference = await client.query(
+      `INSERT INTO recipient_preferences (tenant_id, phone_number, status, source, source_note, evidence_ref, decided_by, decided_at, updated_at)
+       VALUES ($1, $2, 'opted_in', 'signup_api', $3, $4, NULL, now(), now())
+       ON CONFLICT (tenant_id, phone_number) DO UPDATE SET
+         status = 'opted_in', source = 'signup_api', source_note = EXCLUDED.source_note,
+         evidence_ref = EXCLUDED.evidence_ref, decided_by = NULL, decided_at = now(), updated_at = now()
+       RETURNING tenant_id, phone_number, status, source, source_note, evidence_ref, decided_at`,
+      [tenantId, phoneNumber, trimmedText, trimmedRef],
+    );
+    return preference.rows[0] ?? {};
+    }));
+  } catch (error) {
+    if ((error as { code?: string }).code === '23505') {
+      throw new ServiceError(409, 'CONSENT_EVIDENCE_CONFLICT', 'This evidence ID is already linked to another consent record');
+    }
+    throw error;
+  }
 }

@@ -65,6 +65,7 @@ export interface Message {
   type: "text" | "image" | "document" | "video" | "audio";
   status: MessageStatus;
   external_id: string | null;
+  reply_to_message_id?: string | null;
   error_message: string | null;
   created_at: string;
   sent_at: string | null;
@@ -100,19 +101,26 @@ export interface SendMessageRequest {
   media_url?: string;
   media_type?: "image" | "video" | "document";
   external_id?: string;
+  reply_to_message_id?: string;
 }
 
 export interface SendMessageResponse {
   success: true;
   message_id: string;
-  status: "queued";
+  status: "queued" | "quota_hold";
 }
 
 export interface MessageListParams {
   device_key?: string;
   status?: MessageStatus;
+  created_today?: boolean;
   limit?: number;
   offset?: number;
+}
+
+export interface DashboardStats {
+  messages_today: number;
+  delivery_rate: number;
 }
 
 export interface QRCodeResponse {
@@ -160,6 +168,7 @@ export interface ContactRecord {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  consent_status?: "opted_in" | "opted_out" | null;
 }
 
 export interface CreateContactRequest {
@@ -167,6 +176,8 @@ export interface CreateContactRequest {
   name?: string;
   tags?: string[];
   notes?: string;
+  /** Records an owner-confirmed offline grant in the consent audit trail. */
+  consent_source_note?: string;
 }
 
 export interface ContactListParams {
@@ -264,19 +275,8 @@ export interface HealthBreakdownItem {
   description: string;
 }
 
-export interface HealthMission {
-  id: string;
-  label: string;
-  description: string;
-  completed: boolean;
-  requirement: string;
-}
-
 export interface DeviceHealthData {
   health_score: number;
-  device_age_days: number;
-  warmup_completed: boolean;
-  warmup_day: number;
   metrics: {
     total_sent: number;
     delivered: number;
@@ -291,7 +291,34 @@ export interface DeviceHealthData {
     report: number;
   };
   breakdown: HealthBreakdownItem[];
-  missions: HealthMission[];
+}
+
+export type WorkspaceMissionStatus = "completed" | "needs_action" | "not_applicable";
+export interface WorkspaceMission {
+  id: string;
+  level: number;
+  title: string;
+  description: string;
+  kind: "automatic" | "manual" | "test";
+  source: string;
+  status: WorkspaceMissionStatus;
+  reason: string | null;
+  confirmed_at: string | null;
+  observed_at: string;
+}
+export interface WorkspaceReadinessLevel {
+  level: number;
+  name: string;
+  missions: WorkspaceMission[];
+  completed: number;
+  total: number;
+}
+export interface WorkspaceReadiness {
+  recommended_level: number | null;
+  selected_level: number | null;
+  selected_by_owner: boolean;
+  evaluated_at: string;
+  levels: WorkspaceReadinessLevel[];
 }
 
 // ---- Accounts, roles, keys, team, audit ------------------------------------

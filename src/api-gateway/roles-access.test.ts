@@ -155,6 +155,64 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
     noEmail();
   });
 
+  await t.test('WhatsApp signup OTP is correlated to its system message and activates only after the matching code', {
+    skip: process.env['OPERATOR_TEST_REDIS'] !== '1',
+  }, async () => {
+    newClient();
+    const email = randomUUID() + '@example.test';
+    const deviceKey = 'WAPI-' + randomUUID().slice(0, 8).toUpperCase();
+    const systemTenant = (await pool.query<{ tenant_id: string }>(
+      'SELECT tenant_id FROM system_whatsapp_otp_sender WHERE singleton=true',
+    )).rows[0]!.tenant_id;
+    await pool.query(
+      "INSERT INTO devices (tenant_id,device_key,label,status) VALUES ($1,$2,'OTP test sender','online')",
+      [systemTenant, deviceKey],
+    );
+    await pool.query(
+      'UPDATE system_whatsapp_otp_sender SET device_key=$1 WHERE singleton=true', [deviceKey],
+    );
+
+    const signup = await call('/auth/signup', { method: 'POST', body: {
+      email, password, name: 'Pendaftar OTP Uji', workspace_name: 'Workspace OTP Uji',
+      verification_method: 'whatsapp', phone_number: '081234567890', accept_terms: true,
+    } });
+    assert.equal(signup.status, 202, signup.text);
+    assert.equal(signup.body.data.verification_method, 'whatsapp');
+
+    const proof = (await pool.query<{
+      phone_last4: string; send_status: string; message_id: string; status: string; content: string; system_otp: boolean;
+    }>(
+      `SELECT v.phone_last4,v.send_status,v.message_id,m.status,m.content,m.system_otp
+       FROM signup_phone_verifications v JOIN messages m ON m.id=v.message_id
+       WHERE v.user_id=(SELECT id FROM users WHERE lower(email)=lower($1)) ORDER BY v.created_at DESC LIMIT 1`,
+      [email],
+    )).rows[0];
+    assert.ok(proof, 'OTP request must point to its queued system message');
+    assert.equal(proof.phone_last4, '7890');
+    assert.equal(proof.send_status, 'queued');
+    assert.equal(proof.status, 'queued');
+    assert.equal(proof.system_otp, true);
+    const code = proof.content.match(/^([0-9]{6}) /)?.[1];
+    assert.ok(code, 'queued synthetic test message contains the OTP until delivery');
+
+    const confirmed = await call('/auth/signup/verification/confirm', { method: 'POST', body: {
+      email, code, channel: 'whatsapp',
+    } });
+    assert.equal(confirmed.status, 200, confirmed.text);
+    const user = (await pool.query<{ status: string; phone_verified: boolean }>(
+      'SELECT status,phone_verified_at IS NOT NULL AS phone_verified FROM users WHERE lower(email)=lower($1)', [email],
+    )).rows[0];
+    assert.deepEqual(user, { status: 'active', phone_verified: true });
+    const tracking = (await pool.query<{ consumed: boolean; message_id: string }>(
+      `SELECT consumed_at IS NOT NULL AS consumed,message_id FROM signup_phone_verifications
+       WHERE user_id=(SELECT id FROM users WHERE lower(email)=lower($1)) ORDER BY created_at DESC LIMIT 1`,
+      [email],
+    )).rows[0];
+    assert.ok(tracking);
+    assert.equal(tracking.consumed, true);
+    assert.equal(tracking.message_id, proof.message_id);
+  });
+
   await t.test('database: one owner per workspace; no new admin/viewer memberships; invitations Developer+Gmail only; system admin is not a customer role', async () => {
     newClient();
     const o = await owner();

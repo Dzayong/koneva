@@ -35,6 +35,7 @@ export interface MockState {
   /** Data of GET /alerts/otp. The default is the empty state. */
   otpAlerts: Json;
   ownerInsights: Json;
+  systemOtpSender: Json;
   effects: { confirm: number; decide: number };
   seenKeys: string[];
   requests: Array<{ method: string; path: string; query: string; headers: Record<string, string>; body: unknown }>;
@@ -64,6 +65,7 @@ export function freshState(over: Partial<MockState> = {}): MockState {
     audit: [{ id: "a-1", at: now, operator: { id: "op-1", name: "Operator Uji" }, action: "invoice.confirm_payment", target: { type: "invoice", id: "inv-3", label: "INV-202609-0003" }, reason: null, changes: { status: { from: "unpaid", to: "paid" } }, request_id: "req-EXAMPLE" }],
     otpAlerts: { events: [], has_active: false, history_days: 30, current: { scope: "sender_daily", window_hours: 24, usage: 12, cap: 200, percent: 6, measured_at: "2026-09-26T03:00:00Z" } },
     ownerInsights: { measured_at: now, kpis: { registered_accounts: 42, active_workspaces: 17, suspended_workspaces: 2, messages_sent_24h: 800, messages_sent_30d: 12000, otp_sender_today: 12, otp_sender_daily_cap: 200, otp_sender_remaining_internal: 188 }, device_counts: { total: 3, online: 1, offline: 1, attention: 1 }, health: { api: "responding", database: "connected", queue: { queued: 4, sending: 2 }, message_delivery_24h: { attempted: 100, failed: 3, error_rate_percent: 3 }, devices: [{ id: "device-1", label: "Toko utama", status: "online", updated_at: now, workspace_name: "Warung Contoh" }] }, activity: [{ id: "signup-1", kind: "signup", at: now, title: "Akun baru terdaftar", detail: null }, { id: "stop-1", kind: "opt_out", at: now, title: "Permintaan STOP diterima", detail: "Warung Contoh" }], alerts: { otp_thresholds: [], stop_events_last_hour: 1, consent_blocked_messages_last_hour: 0, break_glass_validation: { configured: false, last_validated_at: null, due: false } }, data_limits: ["Sisa batas OTP merupakan hitungan internal, bukan kuota Google Gmail."] },
+    systemOtpSender: { configured: false, device_key: null, status: "not_configured", phone_last4: null, updated_at: now },
     effects: { confirm: 0, decide: 0 }, seenKeys: [], requests: [], idempotency: new Map(), ...over,
   };
 }
@@ -169,6 +171,18 @@ export async function installOperatorMock(page_: Page, state: MockState): Promis
     if (path === "/insights/health" && method === "GET") {
       if (!state.permissions.includes("owner:insights")) return route.fulfill(fail(403, "FORBIDDEN", "x"));
       return route.fulfill(ok({ measured_at: now, api_status: "responding", db_status: "connected", queue: { queued: 4, sending: 2, oldest_queued_at: null }, error_rate_24h: { attempted: 100, failed: 3, percent: 3 }, error_rate_1h: { attempted: 20, failed: 0, percent: 0 }, email_transport: "dev-outbox", otp: { today: 12, daily_cap: 200, remaining: 188 }, otp_alerts: [], thresholds: { reconnect_24h: 5, stream_error_24h: 10, fail_ratio_percent: 15, fail_ratio_min_messages: 20, offline_hours: 24 }, threshold_devices: { reconnect_exceeded: 0, error_exceeded: 0, offline_exceeded: 0 }, container_status: "unavailable", downtime_history: "unavailable" }));
+    }
+    if (path === "/system/whatsapp-otp-sender" && method === "GET") {
+      if (!state.permissions.includes("owner:insights")) return route.fulfill(fail(403, "FORBIDDEN", "x"));
+      const sender = { ...state.systemOtpSender };
+      if (url.searchParams.get("include_qr") === "1" && sender.status === "pending_qr") sender.qr_code = "SYNTHETIC-QR-DATA";
+      return route.fulfill(ok(sender));
+    }
+    if (path === "/system/whatsapp-otp-sender/pair" && method === "POST") {
+      if (!state.permissions.includes("owner:insights")) return route.fulfill(fail(403, "FORBIDDEN", "x"));
+      if (!state.recentAuth) return route.fulfill(fail(401, "REAUTH_REQUIRED", "x"));
+      state.systemOtpSender = { configured: true, device_key: "WAPI-SYNTHETIC", status: "pending_qr", phone_last4: null, updated_at: now };
+      return route.fulfill(ok(state.systemOtpSender));
     }
     if (path === "/insights/workspaces" && method === "GET") {
       if (!state.permissions.includes("owner:insights")) return route.fulfill(fail(403, "FORBIDDEN", "x"));

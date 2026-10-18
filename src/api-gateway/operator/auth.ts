@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { Request, Response, CookieOptions } from 'express';
 import type { Pool } from 'pg';
@@ -7,6 +7,7 @@ import { hash, operatorTransaction, OperatorError, type Actor } from './core';
 import logger from '../../shared/utils/logger';
 import { sendNoticeEmail } from '../services/mailer';
 import { recordSecurityEventIn, recordSecurityEvent } from './security-events';
+import { recordSystemNotification } from '../services/system-notification-outbox';
 
 const requestIdOf = (request: Request): string | undefined => {
   const id = (request.res?.locals as Record<string, unknown> | undefined)?.['requestId'];
@@ -127,6 +128,8 @@ export async function login(db: Pool, config: OperatorConfig, request: Request, 
     if (account.is_break_glass) {
       await client.query('UPDATE operators SET break_glass_validated_at=now() WHERE id=$1 AND is_break_glass', [account.id]);
       await recordSecurityEventIn(client, { event: 'break_glass_login', operatorId: account.id, ip: request.ip, requestId: requestIdOf(request) });
+      await recordSystemNotification(client, `operator.break_glass:${requestIdOf(request) ?? randomUUID()}`, 'operator.break_glass',
+        `Peringatan keamanan KONEVA: akun operator darurat ${account.name.replace(/[\r\n\x00-\x1f\x7f]/g, ' ').slice(0, 100)} berhasil masuk.`);
     }
   });
   return { status: 'authenticated' as const, ...me(actor, token) };

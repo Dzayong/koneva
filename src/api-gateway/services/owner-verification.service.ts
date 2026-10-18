@@ -6,6 +6,7 @@ import { requireEmail, sendInvitationOtp } from './mailer';
 import { reserveIpRequest, reserveOtpSend, reserveWhatsappOtpSend } from './otp-limits';
 import { ServiceError } from './service-error';
 import { queueSystemOtp } from './message.service';
+import logger from '../../shared/utils/logger';
 
 /**
  * Email verification for people who own a workspace (any email domain). It is required before inviting someone, changing the
@@ -72,7 +73,11 @@ export async function requestSignupEmailVerification(email: string, ip?: string)
 /** Request signup verification through the platform-owned WhatsApp device. No email transport is involved. */
 export async function requestSignupWhatsAppVerification(email: string, ip?: string): Promise<{ sent: true; expires_in: number; resend_after: number }> {
   await reserveIpRequest(ip);
-  const deviceKey = config.signup.whatsappOtpDeviceKey;
+  const sender = (await pool.query<{ device_key: string | null; tenant_id: string }>(
+    `SELECT s.device_key, s.tenant_id FROM system_whatsapp_otp_sender s
+     JOIN tenants t ON t.id=s.tenant_id AND t.is_system=true WHERE s.singleton=true`,
+  )).rows[0];
+  const deviceKey = sender?.device_key;
   if (!deviceKey) throw new ServiceError(503, 'WHATSAPP_OTP_NOT_CONFIGURED', 'Verifikasi WhatsApp belum dikonfigurasi.');
   const user = (await pool.query<{ id: string; phone_number: string }>(
     `SELECT id, pending_signup_phone_number AS phone_number FROM users
@@ -82,7 +87,7 @@ export async function requestSignupWhatsAppVerification(email: string, ip?: stri
   if (!user) return { sent: true, expires_in: VERIFY_MINUTES * 60, resend_after: VERIFY_RESEND_SECONDS };
   const phone = normalizeSignupPhone(user.phone_number);
   const device = (await pool.query<{ tenant_id: string }>(
-    `SELECT tenant_id FROM devices WHERE device_key=$1 AND status='online'`, [deviceKey],
+    `SELECT tenant_id FROM devices WHERE device_key=$1 AND tenant_id=$2 AND status='online'`, [deviceKey, sender!.tenant_id],
   )).rows[0];
   if (!device) throw new ServiceError(503, 'WHATSAPP_OTP_SENDER_OFFLINE', 'Nomor pengirim verifikasi WhatsApp sedang tidak terhubung.');
   await reserveWhatsappOtpSend(phone);
@@ -103,22 +108,44 @@ export async function requestSignupWhatsAppVerification(email: string, ip?: stri
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
     const id = randomUUID();
     await client.query(
-      `INSERT INTO signup_phone_verifications(id,user_id,code_hash,expires_at) VALUES($1,$2,$3,now()+make_interval(mins=>$4))`,
-      [id, user.id, phoneCodeHash(id, code), VERIFY_MINUTES],
+      `INSERT INTO signup_phone_verifications(id,user_id,code_hash,expires_at,phone_last4)
+       VALUES($1,$2,$3,now()+make_interval(mins=>$4),$5)`,
+      [id, user.id, phoneCodeHash(id, code), VERIFY_MINUTES, phone.slice(-4)],
     );
     return { id, code, phone };
   });
   if (!issued) return { sent: true, expires_in: VERIFY_MINUTES * 60, resend_after: VERIFY_RESEND_SECONDS };
+  let queued: Awaited<ReturnType<typeof queueSystemOtp>>;
   try {
-    const queued = await queueSystemOtp(device.tenant_id, {
+    queued = await queueSystemOtp(device.tenant_id, {
       device_key: deviceKey, to: phone,
+      external_id: `signup_otp_${issued.id}`,
       message: `${issued.code} adalah kode verifikasi KONEVA Anda. Berlaku ${VERIFY_MINUTES} menit. Jangan bagikan kode ini kepada siapa pun.`,
     });
     if (queued.status !== 'queued') throw new ServiceError(503, 'WHATSAPP_OTP_QUEUE_FAILED', 'Kode verifikasi WhatsApp tidak dapat dimasukkan ke antrean.');
   } catch (error) {
-    await pool.query('UPDATE signup_phone_verifications SET consumed_at=now() WHERE id=$1', [issued.id]);
+    const code = error instanceof ServiceError ? error.code : 'QUEUE_FAILED';
+    await pool.query(
+      `UPDATE signup_phone_verifications v SET consumed_at=now(),send_status='failed',send_error_code=$2,
+         message_id=(SELECT m.id FROM messages m WHERE m.external_id=$3 AND m.system_otp=true LIMIT 1)
+       WHERE v.id=$1`, [issued.id, code.slice(0, 50), `signup_otp_${issued.id}`],
+    );
     if (error instanceof ServiceError) throw error;
     throw new ServiceError(503, 'WHATSAPP_OTP_SEND_FAILED', 'Kode verifikasi WhatsApp gagal dikirim.');
+  }
+  // Queueing succeeded. Keep the code valid even if only this observability update fails: the
+  // operator view can still correlate the deterministic external_id, and a retry must not strand
+  // an OTP that may already be on its way to WhatsApp.
+  try {
+    await pool.query(
+      `UPDATE signup_phone_verifications SET message_id=$2,send_status='queued',send_error_code=NULL WHERE id=$1`,
+      [issued.id, queued.id],
+    );
+  } catch (error) {
+    logger.error('Signup WhatsApp OTP queued but delivery tracking link could not be saved', {
+      verificationId: issued.id, messageId: queued.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   return { sent: true, expires_in: VERIFY_MINUTES * 60, resend_after: VERIFY_RESEND_SECONDS };
 }

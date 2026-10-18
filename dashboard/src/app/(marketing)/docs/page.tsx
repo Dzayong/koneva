@@ -35,6 +35,22 @@ res = requests.post(
 print(res.json())` },
 ];
 
+const SIGNUP_CONSENT: CodeTab[] = [
+  { id: "curl", label: "cURL", code: `curl -X POST ${BASE}/api/v1/contacts/signup-consent \\
+  -H "Authorization: Bearer wgk_KUNCI_ANDA" \\
+  -H "Content-Type: application/json" \\
+  -d '{"phone_number":"6281234567890","consent_text":"Saya setuju menerima notifikasi status pesanan Toko Contoh melalui WhatsApp.","evidence_ref":"signup:order-123"}'` },
+  { id: "node", label: "Node.js", code: `await fetch("${BASE}/api/v1/contacts/signup-consent", {
+  method: "POST",
+  headers: { Authorization: "Bearer " + process.env.KONEVA_API_KEY, "Content-Type": "application/json" },
+  body: JSON.stringify({
+    phone_number: "6281234567890",
+    consent_text: "Saya setuju menerima notifikasi status pesanan Toko Contoh melalui WhatsApp.",
+    evidence_ref: "signup:order-123"
+  })
+});` },
+];
+
 const TOC = [["mulai", "Mulai"], ["autentikasi", "Autentikasi"], ["kirim", "Kirim pesan"], ["status", "Status pesan"], ["pemanasan", "Pemanasan dan batas"], ["webhook", "Webhook"], ["kesalahan", "Kode kesalahan"]];
 
 function H2({ id, children }: { id: string; children: React.ReactNode }) {
@@ -77,17 +93,21 @@ export default function DocsPage() {
               <tr><td><code>media_type</code></td><td><code>image</code> (bawaan), <code>video</code>, atau <code>document</code>. Nomor yang masih masa pemanasan belum boleh mengirim media sampai hari ke-5.</td></tr>
               <tr><td><code>priority</code></td><td>Nilai dari pemanggil tidak memberi pengecualian atau jalur khusus. OTP yang lolos pemeriksaan server memakai antrean cepat secara otomatis.</td></tr>
               <tr><td><code>external_id</code></td><td>Opsional, penanda dari sistem Anda (maks 64 karakter).</td></tr>
+              <tr><td><code>reply_to_message_id</code></td><td>Opsional. ID pesan masuk pelanggan yang sedang dibalas. Balasan harus merujuk pesan dari nomor dan device yang sama, maksimal 24 jam, dan tetap ditolak jika penerima sudah mengirim STOP.</td></tr>
             </tbody>
           </table>
           <div className="mt-4"><CodeBlock tabs={SEND} /></div>
-          <p className="mt-4">Penerima dapat mengirim pesan mandiri <code>START</code> atau <code>MULAI</code> untuk opt-in, dan <code>STOP</code> atau <code>BERHENTI</code> untuk berhenti. Tanpa consent tersimpan, API mengembalikan <code>409 RECIPIENT_CONSENT_REQUIRED</code>; setelah opt-out, API mengembalikan <code>409 RECIPIENT_OPTED_OUT</code>. Broadcast melaporkan penolakan per penerima.</p>
+          <p className="mt-4">Balasan yang menanggapi pesan masuk pelanggan dapat memakai <code>reply_to_message_id</code> tanpa perintah <code>START</code>. Jalur ini hanya berlaku untuk chat langsung yang sama, dalam 24 jam sejak pesan masuk, dan tetap menghormati <code>STOP</code>. Pesan proaktif dan campaign tetap memerlukan bukti opt-in; tanpa consent tersimpan, API mengembalikan <code>409 RECIPIENT_CONSENT_REQUIRED</code>, sedangkan setelah opt-out API mengembalikan <code>409 RECIPIENT_OPTED_OUT</code>. Broadcast melaporkan penolakan per penerima.</p>
+          <p className="mt-4">Penerima tidak harus mengirim <code>START</code> bila persetujuan WhatsApp sudah dikumpulkan di alur signup/checkout Anda. Setelah pengguna secara aktif menyetujui pemberitahuan WhatsApp, panggil endpoint berikut dari server Anda (bukan browser) dengan API key berscope <code>content:write</code>. Endpoint ini hanya mencatat bukti izin; pengiriman pesan tetap dilakukan lewat endpoint pesan. Jangan panggil hanya karena Anda memiliki nomor telepon.</p>
+          <div className="mt-4"><CodeBlock tabs={SIGNUP_CONSENT} /></div>
+          <p className="mt-3">Kirim permintaan ini hanya jika pengguna memang mencentang persetujuan tersebut. <code>evidence_ref</code> harus ID catatan signup/consent yang stabil dan tidak berisi rahasia. Pemanggilan ulang dengan ID bukti dan data yang sama aman; ID yang sama dengan data berbeda ditolak. Jika pengguna berhenti, status opt-out tetap berlaku sampai ada persetujuan baru yang benar-benar diberikan.</p>
 
           <H2 id="status">Status pesan</H2>
           <p><code>GET /api/v1/messages/&#123;id&#125;</code> mengembalikan status dan riwayatnya. Urutan normal: <code>queued</code> → <code>sending</code> → <code>sent</code> → <code>delivered</code> → <code>read</code>. Status akhir gagal: <code>failed</code> atau <code>blocked</code> (ditolak aturan keamanan nomor). <code>POST /api/v1/messages/&#123;id&#125;/retry</code> mencoba ulang pesan yang gagal.</p>
           <p>Centang biru (<code>read</code>) hanya muncul jika penerima mengaktifkan tanda baca di WhatsApp-nya.</p>
 
           <H2 id="pemanasan">Pemanasan dan batas</H2>
-          <p>Nomor baru dilatih bertahap. Pesan masuk tidak otomatis menjadi consent promosi; balasan otomatis dan pesan promosi tetap memerlukan opt-in tercatat.</p>
+          <p>Nomor baru dilatih bertahap. Pesan masuk tidak otomatis menjadi consent untuk promosi atau campaign. Balasan manual yang merujuk pesan masuk dan balasan otomatis untuk chat langsung dapat dilakukan tanpa <code>START</code> selama jendela 24 jam; instruksi <code>STOP</code> tetap memblokir balasan.</p>
           <table>
             <thead><tr><th>Hari</th><th>Batas kirim per hari</th><th>Catatan</th></tr></thead>
             <tbody>

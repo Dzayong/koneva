@@ -5,9 +5,30 @@ import type { TenantContext } from '../../shared/types/api';
 import { validate } from '../middleware/validate';
 import { ServiceError } from '../services/service-error';
 import { computeReadiness, getReadinessInputs } from '../../shared/readiness';
+import { bypassWorkspaceReadiness, confirmWorkspaceMission, getWorkspaceReadiness, READINESS_COPY_VERSION, runWorkspaceTestMission } from '../services/workspace-readiness.service';
 
 const router = Router();
 const deviceParams = z.object({ key: z.string().min(1).max(32) });
+const missionParams = z.object({ missionId: z.string().min(1).max(64) });
+const missionConfirmBody = z.object({ status: z.literal('completed') }).strict();
+const missionRunBody = z.object({ answer: z.enum(['pause_and_escalate', 'resume_worker', 'retry_queue']).optional() }).strict();
+const readinessBypassBody = z.object({
+  target_level: z.number().int().min(0).max(4),
+  reason: z.string().trim().min(5).max(500),
+  dialog_version: z.literal(READINESS_COPY_VERSION),
+  idempotency_key: z.string().uuid(),
+}).strict();
+
+function signedInUser(request: Request): { userId: string; role: string } {
+  if (request.actor?.kind !== 'user') throw new ServiceError(403, 'USER_SESSION_REQUIRED', 'Fitur ini hanya tersedia untuk pengguna yang masuk ke dashboard.');
+  return request.actor;
+}
+
+function workspaceOwner(request: Request): { userId: string } {
+  const actor = signedInUser(request);
+  if (actor.role !== 'owner') throw new ServiceError(403, 'OWNER_REQUIRED', 'Hanya Owner workspace yang dapat mengonfirmasi misi atau memilih level.');
+  return actor;
+}
 
 function number(value: unknown): number {
   return Number(value) || 0;
@@ -24,7 +45,7 @@ export async function dashboardStats(request: Request, response: Response): Prom
        COUNT(*) FILTER (WHERE status='failed')::int AS failed_messages,
        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE direction='outbound' AND status IN ('delivered','read')) /
          NULLIF(COUNT(*) FILTER (WHERE direction='outbound' AND status IN ('sent','delivered','read','failed')), 0), 2), 0) AS delivery_rate
-       FROM messages WHERE tenant_id=$1 AND system_otp=false`, [request.tenant!.id],
+       FROM messages WHERE tenant_id=$1 AND system_otp=false AND system_notification=false`, [request.tenant!.id],
     ),
     pool.query(
       `SELECT COUNT(*)::int AS total_devices,
@@ -54,7 +75,7 @@ export async function deviceStats(request: Request, response: Response): Promise
      COUNT(*) FILTER (WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta') AT TIME ZONE 'Asia/Jakarta'))::int AS messages_today,
      COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE direction='outbound' AND status IN ('delivered','read')) /
        NULLIF(COUNT(*) FILTER (WHERE direction='outbound' AND status IN ('sent','delivered','read','failed')), 0), 2), 0) AS delivery_rate
-     FROM messages WHERE tenant_id=$1 AND device_key=$2 AND system_otp=false`,
+     FROM messages WHERE tenant_id=$1 AND device_key=$2 AND system_otp=false AND system_notification=false`,
     [request.tenant!.id, key],
   );
   const metrics = Object.fromEntries(Object.entries(result.rows[0] ?? {}).map(([name, value]) => [name, number(value)]));
@@ -79,8 +100,6 @@ export async function deviceHealthBreakdown(request: Request, response: Response
   }, (text, params) => pool.query(text, params));
   const report = computeReadiness(inputs);
   const rate = (part: number, whole: number): number => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : 0);
-  const unproven = (id: string): boolean => !report.factors.find((f) => f.id === id)?.proven;
-
   response.json({
     success: true,
     data: {
@@ -88,9 +107,6 @@ export async function deviceHealthBreakdown(request: Request, response: Response
       tier: report.tier,
       confidence: report.confidence,
       recommendations: report.recommendations,
-      device_age_days: inputs.ageDays,
-      warmup_completed: inputs.warmupCompleted,
-      warmup_day: inputs.ageDays + 1,
       // `blocked` = sends still undelivered after 24h (possible block or invalid number);
       // `reported` = recipients who asked us to stop. WhatsApp never reveals real blocks/reports.
       metrics: {
@@ -109,18 +125,6 @@ export async function deviceHealthBreakdown(request: Request, response: Response
       breakdown: report.factors.map(({ id, label, score, max, status, description }) => ({
         id, label, score, max, status, description,
       })),
-      missions: [
-        { id: 'first_reply', label: 'Percakapan Pertama', description: 'Ada penerima yang membalas', completed: inputs.engagedRecipients >= 1, requirement: 'Minta seseorang mengirim pesan ke nomor ini dan biarkan auto-reply membalas' },
-        { id: 'five_conversations', label: '5 Percakapan', description: 'Bangun 5 percakapan 2 arah', completed: inputs.engagedRecipients >= 5, requirement: 'Pastikan 5 orang berbeda membalas dalam 7 hari' },
-        { id: 'warmup_complete', label: 'Warmup Selesai', description: 'Selesaikan 8 hari warmup', completed: inputs.warmupCompleted, requirement: 'Gunakan nomor secara konsisten selama 8 hari' },
-        { id: 'week_old', label: 'Nomor 1 Minggu', description: 'Device aktif lebih dari 7 hari', completed: inputs.ageDays > 7, requirement: 'Tunggu sampai device berumur 7+ hari' },
-        { id: 'month_old', label: 'Nomor 1 Bulan', description: 'Device aktif lebih dari 30 hari', completed: inputs.ageDays > 30, requirement: 'Tunggu sampai device berumur 30+ hari' },
-        { id: 'high_delivery', label: 'Delivery Rate 97%+', description: 'Minimal 97% pesan terdelivery setelah 24 jam', completed: !unproven('delivery') && inputs.maturedDelivered / inputs.maturedSent >= 0.97, requirement: 'Kirim ke nomor aktif yang terdaftar di WhatsApp' },
-        { id: 'high_reply', label: 'Balasan 25%+', description: 'Minimal 25% penerima membalas', completed: !unproven('engagement') && inputs.engagedRecipients / inputs.uniqueRecipients >= 0.25, requirement: 'Kirim pesan personal yang mengundang balasan, bukan broadcast satu arah' },
-        { id: 'consented', label: 'Penerima Berizin', description: 'Maksimal 20% penerima belum pernah menghubungi lebih dulu', completed: !unproven('consent') && inputs.unsolicitedRecipients / inputs.uniqueRecipients <= 0.2, requirement: 'Kirim hanya ke kontak yang sudah opt-in atau menghubungi lebih dulu' },
-        { id: 'zero_optouts', label: 'Tanpa Permintaan Berhenti', description: 'Tidak ada penerima yang meminta berhenti (7 hari)', completed: !unproven('consent') && inputs.optOuts === 0, requirement: 'Kirim konten relevan dengan frekuensi wajar' },
-        { id: 'perfect_score', label: 'Skor Sempurna', description: 'Capai skor kesiapan 100', completed: report.score >= 100, requirement: 'Selesaikan semua misi di atas' },
-      ],
     },
   });
 }
@@ -128,4 +132,31 @@ export async function deviceHealthBreakdown(request: Request, response: Response
 router.get('/dashboard/stats', dashboardStats);
 router.get('/devices/:key/stats', validate({ params: deviceParams }), deviceStats);
 router.get('/devices/:key/health', validate({ params: deviceParams }), deviceHealthBreakdown);
+router.get('/readiness/levels', async (request: Request, response: Response) => {
+  signedInUser(request);
+  response.json({ success: true, data: await getWorkspaceReadiness(request.tenant!.id) });
+});
+router.post('/readiness/missions/:missionId/confirm', validate({ params: missionParams, body: missionConfirmBody }), async (request: Request, response: Response) => {
+  const actor = workspaceOwner(request);
+  const { missionId } = request.validated!.params as z.infer<typeof missionParams>;
+  await confirmWorkspaceMission({ tenantId: request.tenant!.id, actorId: actor.userId, missionId, status: 'completed' });
+  response.json({ success: true, data: await getWorkspaceReadiness(request.tenant!.id) });
+});
+router.post('/readiness/missions/:missionId/run', validate({ params: missionParams, body: missionRunBody }), async (request: Request, response: Response) => {
+  const actor = workspaceOwner(request);
+  const { missionId } = request.validated!.params as z.infer<typeof missionParams>;
+  const { answer } = request.validated!.body as z.infer<typeof missionRunBody>;
+  const run = await runWorkspaceTestMission({ tenantId: request.tenant!.id, actorId: actor.userId, missionId, ...(answer ? { answer } : {}) });
+  response.status(201).json({ success: true, data: { ...run, readiness: await getWorkspaceReadiness(request.tenant!.id) } });
+});
+router.post('/readiness/levels/bypass', validate({ body: readinessBypassBody }), async (request: Request, response: Response) => {
+  const actor = workspaceOwner(request);
+  const body = request.validated!.body as z.infer<typeof readinessBypassBody>;
+  const data = await bypassWorkspaceReadiness({
+    tenantId: request.tenant!.id, actorId: actor.userId,
+    targetLevel: body.target_level, reason: body.reason,
+    idempotencyKey: body.idempotency_key, dialogVersion: body.dialog_version,
+  });
+  response.status(data.idempotent_replay ? 200 : 201).json({ success: true, data: { ...data, readiness: await getWorkspaceReadiness(request.tenant!.id) } });
+});
 export default router;

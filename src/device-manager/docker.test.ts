@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { DockerBotManager } from './docker';
+import { DockerBotManager, parseDockerResourceSnapshot } from './docker';
 import type { DeviceManagerConfig } from './types';
 
 const config: DeviceManagerConfig = {
@@ -103,4 +103,74 @@ test('proxy URL is forwarded to the bot only when configured', async () => {
   await new DockerBotManager({ ...config, botProxyUrl: 'socks5://u:p@10.0.0.1:1080' }, withProxy.runner)
     .createBot({ deviceKey: 'WAPI-TEST1', tenantId: 't' });
   assert.ok(withProxy.calls.find((args) => args[0] === 'run')!.includes('WA_PROXY_URL=socks5://u:p@10.0.0.1:1080'));
+});
+
+test('resource snapshot parses device and shared container CPU/RAM, ignoring unselected containers', () => {
+  const selected = new Map<string, { kind: 'device' | 'shared'; service: string | null; deviceKey: string | null }>([
+    ['wa-bot-wapi-a1', { kind: 'device', service: null, deviceKey: 'WAPI-A1' }],
+    ['wa-personal-api-gateway-1', { kind: 'shared', service: 'api-gateway', deviceKey: null }],
+  ]);
+  const result = parseDockerResourceSnapshot([
+    JSON.stringify({ Name: 'wa-bot-wapi-a1', CPUPerc: '12.50%', MemUsage: '128MiB / 512MiB' }),
+    JSON.stringify({ Name: 'wa-personal-api-gateway-1', CPUPerc: '90.00%', MemUsage: '1GiB / 2GiB' }),
+    JSON.stringify({ Name: 'unrelated-container', CPUPerc: '10.00%', MemUsage: '1MiB / 2GiB' }),
+  ].join('\n'), selected, '2026-10-17T00:00:00.000Z');
+  assert.deepEqual(result, {
+    available: true,
+    source: 'docker-stats',
+    sampledAt: '2026-10-17T00:00:00.000Z',
+    containers: [
+      { name: 'wa-bot-wapi-a1', kind: 'device', service: null, deviceKey: 'WAPI-A1', cpuPercent: 12.5, memoryUsageBytes: 134_217_728, memoryLimitBytes: 536_870_912 },
+      { name: 'wa-personal-api-gateway-1', kind: 'shared', service: 'api-gateway', deviceKey: null, cpuPercent: 90, memoryUsageBytes: 1_073_741_824, memoryLimitBytes: 2_147_483_648 },
+    ],
+  });
+});
+
+test('resource snapshot fails closed on malformed Docker stats instead of reporting partial zeros', () => {
+  assert.throws(() => parseDockerResourceSnapshot(
+    JSON.stringify({ Name: 'wa-bot-wapi-a1', CPUPerc: 'n/a', MemUsage: '128MiB / 512MiB' }),
+    new Map([['wa-bot-wapi-a1', { kind: 'device' as const, service: null, deviceKey: 'WAPI-A1' }]]),
+  ), /invalid format/);
+});
+
+test('resource snapshot includes managed device and shared Compose containers, excluding unrelated containers', async () => {
+  const calls: string[][] = [];
+  const runner = async (_file: string, args: readonly string[]) => {
+    calls.push([...args]);
+    if (args[0] === 'ps') return { stdout: [
+      'wa-bot-wapi-a1|docker_default|WAPI-A1|<no value>|<no value>',
+      'wa-personal-postgres-1|<no value>|<no value>|postgres|wa-personal',
+      'wa-personal-redis-1|<no value>|<no value>|redis|wa-personal',
+      'wa-personal-api-gateway-1|<no value>|<no value>|api-gateway|wa-personal',
+      'wa-personal-device-manager-1|<no value>|<no value>|device-manager|wa-personal',
+      'wa-personal-dashboard-1|<no value>|<no value>|dashboard|wa-personal',
+      'unrelated-container|docker_default|<no value>|<no value>|<no value>',
+      'other-compose-postgres-1|<no value>|<no value>|postgres|other-project',
+    ].join('\n'), stderr: '' };
+    if (args[0] === 'stats') return { stdout: args.slice(4).map((name) => JSON.stringify({
+      Name: name, CPUPerc: '1.00%', MemUsage: '1MiB / 512MiB',
+    })).join('\n'), stderr: '' };
+    throw new Error('unexpected docker command');
+  };
+  const result = await new DockerBotManager(config, runner).getResourceSnapshot();
+  assert.equal(result.available, true);
+  assert.deepEqual(calls[0], [
+    'ps', '--filter', 'network=docker_default', '--format',
+    '{{.Names}}|{{.Label "wa.gateway.network"}}|{{.Label "wa.gateway.device"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project"}}',
+  ]);
+  assert.equal(calls[1]?.[0], 'stats');
+  assert.ok(calls[1]?.includes('--no-stream'));
+  assert.deepEqual(calls[1]?.slice(4), [
+    'wa-bot-wapi-a1', 'wa-personal-postgres-1', 'wa-personal-redis-1', 'wa-personal-api-gateway-1',
+    'wa-personal-device-manager-1', 'wa-personal-dashboard-1',
+  ]);
+  if (!result.available) throw new Error('expected Docker metrics');
+  assert.deepEqual(result.containers.map((row) => [row.name, row.kind, row.service, row.deviceKey]), [
+    ['wa-bot-wapi-a1', 'device', null, 'WAPI-A1'],
+    ['wa-personal-postgres-1', 'shared', 'postgres', null],
+    ['wa-personal-redis-1', 'shared', 'redis', null],
+    ['wa-personal-api-gateway-1', 'shared', 'api-gateway', null],
+    ['wa-personal-device-manager-1', 'shared', 'device-manager', null],
+    ['wa-personal-dashboard-1', 'shared', 'dashboard', null],
+  ]);
 });
