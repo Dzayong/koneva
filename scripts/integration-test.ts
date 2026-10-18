@@ -277,6 +277,9 @@ class FakeOrchestrator implements BotOrchestrator {
     this.resources.set(spec.deviceKey, { replicas: 1, tenantId: spec.tenantId });
     return { resourceName: `bot-${spec.deviceKey.toLowerCase()}` };
   }
+  async restartBot(spec: { deviceKey: string; tenantId: string }): Promise<{ resourceName: string }> {
+    return this.createBot(spec);
+  }
   async deleteBot(deviceKey: string): Promise<void> { this.resources.delete(deviceKey); }
   async scaleBot(deviceKey: string, replicas: number): Promise<void> {
     const resource = this.resources.get(deviceKey);

@@ -56,6 +56,17 @@ test('existing container with JWT_SECRET is just started', async () => {
   assert.ok(!calls.some((args) => args[0] === 'run'));
 });
 
+test('reconnect restarts an existing container without deleting its session', async () => {
+  const calls: string[][] = [];
+  const runner = async (_file: string, args: readonly string[]) => {
+    calls.push([...args]);
+    return { stdout: 'wa-bot-wapi-test1\n', stderr: '' };
+  };
+  const result = await new DockerBotManager(config, runner).restartBot({ deviceKey: 'WAPI-TEST1', tenantId: 'tenant' });
+  assert.equal(result.resourceName, 'wa-bot-wapi-test1');
+  assert.deepEqual(calls, [['restart', 'wa-bot-wapi-test1']]);
+});
+
 test('localhost in DATABASE_URL (with credentials) and REDIS_URL is rewritten to the host', async () => {
   const { calls, runner } = fakeRunner(null);
   await new DockerBotManager(config, runner).createBot({ deviceKey: 'WAPI-TEST1', tenantId: 't' });

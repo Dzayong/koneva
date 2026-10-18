@@ -151,6 +151,18 @@ export class DockerBotManager implements BotOrchestrator {
     if (sessionDir.startsWith(root + path.sep)) rmSync(sessionDir, { recursive: true, force: true });
   }
 
+  async restartBot(spec: BotStatefulSetSpec): Promise<{ resourceName: string }> {
+    const name = `wa-bot-${spec.deviceKey.toLowerCase()}`;
+    try {
+      await this.runner('docker', ['restart', name]);
+      return { resourceName: name };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes('No such container')) throw error;
+      return this.createBot(spec);
+    }
+  }
+
   async getBotStatus(deviceKey: string): Promise<BotPodStatus | null> {
     const name = `wa-bot-${deviceKey.toLowerCase()}`;
     try {

@@ -114,7 +114,6 @@ export async function deleteDevice(request: Request, response: Response): Promis
     });
     return;
   }
-
   const managerResponse = await fetch(
     `${config.deviceManager.url}/devices/${encodeURIComponent(deviceKey)}`,
     { method: 'DELETE', headers: { 'x-admin-key': config.adminApiKey } },
@@ -133,6 +132,41 @@ export async function deleteDevice(request: Request, response: Response): Promis
   response.json({ success: true, data: null });
 }
 
+export async function reconnectDevice(request: Request, response: Response): Promise<void> {
+  const { deviceKey } = request.validated!.params as { deviceKey: string };
+  const device = await pool.query<{ id: string; status: string }>(
+    'SELECT id, status FROM devices WHERE device_key = $1 AND tenant_id = $2 LIMIT 1',
+    [deviceKey, request.tenant!.id],
+  );
+  if (!device.rows[0]) {
+    response.status(404).json({ success: false, error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found' } });
+    return;
+  }
+  if (device.rows[0].status !== 'offline' && device.rows[0].status !== 'error') {
+    response.status(409).json({ success: false, error: { code: 'DEVICE_NOT_RECOVERABLE', message: 'Device hanya bisa dipulihkan saat offline atau error.' } });
+    return;
+  }
+
+  const managerResponse = await fetch(
+    `${config.deviceManager.url}/devices/${encodeURIComponent(deviceKey)}/reconnect`,
+    { method: 'POST', headers: { 'x-admin-key': config.adminApiKey } },
+  );
+  const result = await managerResponse.json() as Record<string, unknown>;
+  if (!managerResponse.ok) {
+    const upstreamError = result.error as { code?: unknown; message?: unknown } | undefined;
+    response.status(managerResponse.status).json({
+      success: false,
+      error: {
+        code: typeof upstreamError?.code === 'string' ? upstreamError.code : 'DEVICE_MANAGER_ERROR',
+        message: typeof upstreamError?.message === 'string' ? upstreamError.message : 'Device Manager request failed',
+      },
+    });
+    return;
+  }
+  response.json({ success: true, data: { device_key: deviceKey, status: 'starting' } });
+}
+
 router.delete('/devices/:deviceKey', validate({ params: deviceParams }), deleteDevice);
+router.post('/devices/:deviceKey/reconnect', validate({ params: deviceParams }), reconnectDevice);
 
 export default router;

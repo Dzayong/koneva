@@ -171,6 +171,32 @@ export function createDeviceManagerApp(orchestrator: BotOrchestrator): express.E
     response.json({ success: true, device_key: deviceKey.data, replicas: body.data.replicas });
   }));
 
+  app.post('/devices/:deviceKey/reconnect', asyncRoute(async (request, response) => {
+    const parsed = deviceKeySchema.safeParse(request.params.deviceKey);
+    if (!parsed.success) {
+      response.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid device key' } });
+      return;
+    }
+    const device = (await pool.query<{ tenant_id: string; phone_number: string | null; status: string }>(
+      'SELECT tenant_id, phone_number, status FROM devices WHERE device_key = $1', [parsed.data],
+    )).rows[0];
+    if (!device) {
+      response.status(404).json({ success: false, error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found' } });
+      return;
+    }
+    if (device.status !== 'offline' && device.status !== 'error') {
+      response.status(409).json({ success: false, error: { code: 'DEVICE_NOT_RECOVERABLE', message: 'Only offline or error devices can be reconnected' } });
+      return;
+    }
+    const workload = await orchestrator.restartBot({
+      deviceKey: parsed.data,
+      tenantId: device.tenant_id,
+      phoneNumber: device.phone_number ?? undefined,
+    });
+    await pool.query(`UPDATE devices SET status = 'starting', qr_code = NULL WHERE device_key = $1`, [parsed.data]);
+    response.json({ success: true, device_key: parsed.data, resource_name: workload.resourceName, status: 'starting' });
+  }));
+
   app.delete('/devices/:deviceKey', asyncRoute(async (request, response) => {
     const parsed = deviceKeySchema.safeParse(request.params.deviceKey);
     if (!parsed.success) {

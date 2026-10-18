@@ -2,7 +2,7 @@
 
 import { use, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Pause, Play, QrCode } from "lucide-react";
+import { ArrowLeft, Pause, Play, QrCode, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,7 +17,7 @@ import { MessageDetail, MessageRow, messageNumber } from "@/components/messages/
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useContactNames } from "@/hooks/use-contacts";
 import { useDevice } from "@/hooks/use-device";
-import { usePauseDevice, useResumeDevice } from "@/hooks/use-devices";
+import { usePauseDevice, useReconnectDevice, useResumeDevice } from "@/hooks/use-devices";
 import { usePermissions } from "@/hooks/use-me";
 import { useMessages } from "@/hooks/use-messages";
 import { useUrlFlag } from "@/hooks/use-url-flag";
@@ -37,6 +37,7 @@ export default function DeviceDetailPage(props: {
   const contactNames = useContactNames();
   const pauseDevice = usePauseDevice();
   const resumeDevice = useResumeDevice();
+  const reconnectDevice = useReconnectDevice();
   const [manualQrOpen, setManualQrOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const openMessage = messages?.data.find((m) => m.id === openId) ?? null;
@@ -65,6 +66,7 @@ export default function DeviceDetailPage(props: {
   const canWrite = can("devices:write");
   const actions: Array<{ label: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean; show: boolean }> = [
     { label: "Pindai QR", icon: <QrCode className="h-4 w-4" />, onClick: () => setQrOpen(true), show: canWrite && device?.status === "pending_qr" },
+    { label: "Coba sambungkan", icon: <RefreshCw className="h-4 w-4" />, onClick: () => reconnectDevice.mutate(deviceKey, { onSuccess: () => setQrOpen(true) }), disabled: reconnectDevice.isPending, show: canWrite && (device?.status === "offline" || device?.status === "error") },
     { label: "Jeda", icon: <Pause className="h-4 w-4" />, onClick: () => pauseDevice.mutate(deviceKey), disabled: pauseDevice.isPending, show: canWrite && device?.status === "online" },
     { label: "Lanjutkan", icon: <Play className="h-4 w-4" />, onClick: () => resumeDevice.mutate(deviceKey), disabled: resumeDevice.isPending, show: canWrite && device?.status === "paused" },
   ];

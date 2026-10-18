@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
-import { MoreHorizontal, Pause, Play, QrCode, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pause, Play, QrCode, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -14,7 +14,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { DeviceStatusBadge } from "@/components/devices/device-status-badge";
 import { usePermissions } from "@/hooks/use-me";
-import { useDeleteDevice, usePauseDevice, useResumeDevice } from "@/hooks/use-devices";
+import { useDeleteDevice, usePauseDevice, useReconnectDevice, useResumeDevice } from "@/hooks/use-devices";
 import { cn, formatDate, formatPhoneNumber, getHealthConfig } from "@/lib/utils";
 import type { Device } from "@/lib/types";
 
@@ -59,6 +59,7 @@ export function DeviceCard({
   const reduceMotion = useReducedMotion();
   const pauseDevice = usePauseDevice();
   const resumeDevice = useResumeDevice();
+  const reconnectDevice = useReconnectDevice();
   const deleteDevice = useDeleteDevice();
   const { can } = usePermissions();
   const canWrite = can("devices:write"), canDelete = can("devices:delete");
@@ -107,6 +108,16 @@ export function DeviceCard({
           <Button size="sm" onClick={() => onShowQr(device.device_key)}>
             <QrCode className="mr-2 h-4 w-4" />
             Pindai QR
+          </Button>
+        )}
+        {(device.status === "offline" || device.status === "error") && canWrite && (
+          <Button
+            size="sm"
+            disabled={reconnectDevice.isPending}
+            onClick={() => reconnectDevice.mutate(device.device_key, { onSuccess: () => onShowQr(device.device_key) })}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Coba sambungkan
           </Button>
         )}
         {(canWrite || canDelete) && <DropdownMenu>

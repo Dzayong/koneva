@@ -3,6 +3,7 @@
 import { getMessageStatusConfig } from "@/lib/utils";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, MessageSquare, Search } from "lucide-react";
@@ -29,7 +30,7 @@ import type { Message, MessageStatus } from "@/lib/types";
 const PAGE_SIZE = 20;
 const ALL = "all";
 
-function ReplyComposer({ message }: { message: Message }) {
+function ReplyComposer({ message, devices }: { message: Message; devices: NonNullable<ReturnType<typeof useDevices>["data"]> }) {
   const [text, setText] = useState("");
   const [now, setNow] = useState<number | null>(null);
   const queryClient = useQueryClient();
@@ -40,6 +41,8 @@ function ReplyComposer({ message }: { message: Message }) {
     return () => window.clearInterval(timer);
   }, [message.id]);
   const replyWindowOpen = now !== null && now - new Date(message.created_at).getTime() <= 24 * 60 * 60 * 1000;
+  const sourceDevice = devices.find((device) => device.device_key === message.device_key);
+  const canReply = sourceDevice?.status === "online";
   const send = useMutation({
     mutationFn: () => api.sendMessage({
       device_key: message.device_key,
@@ -59,6 +62,12 @@ function ReplyComposer({ message }: { message: Message }) {
   if (message.direction !== "inbound" || !message.from_number) return null;
   if (!replyWindowOpen) {
     return <p className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">Waktu untuk membalas pesan ini sudah lewat 24 jam. Minta pelanggan menghubungi Anda kembali sebelum membalas.</p>;
+  }
+  if (!sourceDevice) {
+    return <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">Device yang menerima pesan ini sudah dihapus, jadi sesi WhatsApp dan jalur balas aslinya tidak tersedia lagi. Pesan baru harus dikirim dari device yang masih tersambung.</p>;
+  }
+  if (!canReply) {
+    return <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"><p>Device penerima sedang {sourceDevice.status}. Pulihkan koneksinya dari halaman Device untuk membalas melalui nomor yang sama.</p><Button asChild variant="link" className="h-auto px-0 pt-2 text-amber-950 dark:text-amber-100"><Link href={`/devices/${encodeURIComponent(sourceDevice.device_key)}`}>Buka device {sourceDevice.label || sourceDevice.device_key}</Link></Button></div>;
   }
 
   return (
@@ -227,7 +236,7 @@ export default function MessagesPage() {
                 message={selected}
                 contactName={contactNames.get(messageNumber(selected).replace(/\D/g, ""))}
               />
-              <ReplyComposer key={selected.id} message={selected} />
+              <ReplyComposer key={selected.id} message={selected} devices={devices ?? []} />
             </div>
           ) : (
             <p className="py-16 text-center text-sm text-muted-foreground">Pilih pesan untuk membacanya.</p>
@@ -244,7 +253,7 @@ export default function MessagesPage() {
                 message={selected}
                 contactName={contactNames.get(messageNumber(selected).replace(/\D/g, ""))}
               />
-              <ReplyComposer key={selected.id} message={selected} />
+              <ReplyComposer key={selected.id} message={selected} devices={devices ?? []} />
             </div>
           )}
         </SheetContent>

@@ -38,6 +38,19 @@ export function useResumeDevice() {
   });
 }
 
+export function useReconnectDevice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (deviceKey: string) => api.reconnectDevice(deviceKey),
+    onSuccess: (device: Device) => {
+      queryClient.invalidateQueries({ queryKey: ["devices"] });
+      queryClient.invalidateQueries({ queryKey: ["devices", device.device_key] });
+      toast.success("Pemulihan koneksi dimulai", { description: "Sesi WhatsApp dipertahankan. Jika perlu, pindai QR baru." });
+    },
+    onError: () => toast.error("Gagal memulai pemulihan koneksi"),
+  });
+}
+
 export function useCreateDevice() {
   const queryClient = useQueryClient();
   return useMutation({

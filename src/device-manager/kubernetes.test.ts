@@ -130,6 +130,23 @@ test('getBotPodStatus maps Kubernetes readiness and pod metadata', async () => {
   });
 });
 
+test('restartBot deletes only the Pod so the StatefulSet and session PVC are preserved', async () => {
+  const deleted: string[] = [];
+  const fixture = manager({
+    apps: {
+      readNamespacedStatefulSet: async () => ({ metadata: { name: 'bot-wapi-test01', resourceVersion: '1' }, spec: { replicas: 1, volumeClaimTemplates: [{ metadata: { name: 'session' } }] } } as Kubernetes.V1StatefulSet),
+    },
+    core: {
+      listNamespacedPod: async () => ({ items: [{ metadata: { name: 'bot-wapi-test01-0', labels: { 'wa-gateway.io/device-key': 'wapi-test01' } } }] } as Kubernetes.V1PodList),
+      deleteNamespacedPod: async ({ name }: { name: string }) => { deleted.push(name); return {} as Kubernetes.V1Pod; },
+    },
+  });
+  const result = await fixture.manager.restartBot({ deviceKey: 'WAPI-TEST01', tenantId: 'tenant-1' });
+  assert.equal(result.resourceName, 'bot-wapi-test01');
+  assert.deepEqual(deleted, ['bot-wapi-test01-0']);
+  assert.equal(fixture.calls.replaced.length, 0);
+});
+
 test('Kubernetes resource usage stays explicitly unavailable until Metrics Server is configured', async () => {
   const fixture = manager();
   const snapshot = await fixture.manager.getResourceSnapshot();

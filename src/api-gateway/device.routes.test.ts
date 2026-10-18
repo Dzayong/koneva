@@ -3,7 +3,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import type { Request, Response } from 'express';
 import pool from '../shared/database/connection';
 import type { TenantContext } from '../shared/types/api';
-import { createDevice, deleteDevice, getDeviceQr } from './routes/device.routes';
+import { createDevice, deleteDevice, getDeviceQr, reconnectDevice } from './routes/device.routes';
 
 const tenant: TenantContext = {
   id: '8fca6485-b3df-47c2-b87e-0c235c0a4bb9',
@@ -94,6 +94,40 @@ test('delete device removes an owned workload through Device Manager', async () 
   assert.equal(reply.statusCode, 200);
   assert.deepEqual(reply.payload, { success: true, data: null });
   assert.equal(managerMethod, 'DELETE');
+});
+
+test('reconnect forwards only an owned offline device to Device Manager', async () => {
+  database.query = async (_text, values) => {
+    assert.deepEqual(values, ['WAPI-OWN', tenant.id]);
+    return { rows: [{ id: 'device-id', status: 'offline' }] };
+  };
+  let managerUrl = '';
+  let managerMethod = '';
+  globalThis.fetch = async (input, init) => {
+    managerUrl = String(input);
+    managerMethod = init?.method ?? '';
+    return Response.json({ success: true }, { status: 200 });
+  };
+  const reply = response();
+
+  await reconnectDevice(request({ params: { deviceKey: 'WAPI-OWN' } }), reply);
+
+  assert.equal(reply.statusCode, 200);
+  assert.deepEqual(reply.payload, { success: true, data: { device_key: 'WAPI-OWN', status: 'starting' } });
+  assert.match(managerUrl, /\/devices\/WAPI-OWN\/reconnect$/);
+  assert.equal(managerMethod, 'POST');
+});
+
+test('reconnect refuses online device rather than interrupting it', async () => {
+  database.query = async () => ({ rows: [{ id: 'device-id', status: 'online' }] });
+  let managerCalled = false;
+  globalThis.fetch = async () => { managerCalled = true; return Response.json({ success: true }); };
+  const reply = response();
+
+  await reconnectDevice(request({ params: { deviceKey: 'WAPI-OWN' } }), reply);
+
+  assert.equal(reply.statusCode, 409);
+  assert.equal(managerCalled, false);
 });
 
 test('QR lookup returns 200-style payload even when a QR code is unavailable', async () => {

@@ -63,6 +63,7 @@ export interface BotOrchestrator {
   readonly mode: OrchestrationMode;
   healthCheck(): Promise<void>;
   createBot(spec: BotStatefulSetSpec): Promise<{ resourceName: string }>;
+  restartBot(spec: BotStatefulSetSpec): Promise<{ resourceName: string }>;
   deleteBot(deviceKey: string): Promise<void>;
   getBotStatus(deviceKey: string): Promise<BotPodStatus | null>;
   listBots(): Promise<BotPodStatus[]>;

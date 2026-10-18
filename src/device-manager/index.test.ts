@@ -19,6 +19,7 @@ test('resource snapshot endpoint requires the admin key and returns only the orc
     mode: 'docker',
     healthCheck: async () => {},
     createBot: async () => ({ resourceName: 'unused' }),
+    restartBot: async () => ({ resourceName: 'unused' }),
     deleteBot: async () => {},
     getBotStatus: async () => null,
     listBots: async () => [],

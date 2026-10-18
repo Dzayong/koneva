@@ -10,7 +10,7 @@ type AppsApi = Pick<
   | 'replaceNamespacedStatefulSet'
 >;
 
-type CoreApi = Pick<Kubernetes.CoreV1Api, 'listNamespacedPod'>;
+type CoreApi = Pick<Kubernetes.CoreV1Api, 'listNamespacedPod' | 'deleteNamespacedPod'>;
 
 export interface KubernetesClients {
   apps: AppsApi;
@@ -96,6 +96,47 @@ export class KubernetesBotManager {
 
   async deleteBot(deviceKey: string): Promise<void> {
     await this.deleteBotStatefulSet(deviceKey);
+  }
+
+  async restartBot(spec: import('./types').BotStatefulSetSpec): Promise<{ resourceName: string }> {
+    const name = statefulSetName(spec.deviceKey);
+    let workload: Kubernetes.V1StatefulSet;
+    try {
+      workload = await this.options.clients.apps.readNamespacedStatefulSet({
+        name,
+        namespace: this.options.config.namespace,
+      });
+    } catch (error) {
+      if (!isNotFound(error)) throw new KubernetesOperationError('read StatefulSet for restart', errorStatus(error), { cause: error });
+      return this.createBot(spec);
+    }
+    if (workload.spec?.replicas === 0) {
+      workload.spec.replicas = 1;
+      try {
+        workload = await this.options.clients.apps.replaceNamespacedStatefulSet({
+          name,
+          namespace: this.options.config.namespace,
+          body: workload,
+          fieldManager: 'wa-gateway-device-manager',
+          fieldValidation: 'Strict',
+        });
+      } catch (error) {
+        throw new KubernetesOperationError('resume StatefulSet for restart', errorStatus(error), { cause: error });
+      }
+    }
+    const pod = await this.getBotPodStatus(spec.deviceKey);
+    if (pod) {
+      try {
+        await this.options.clients.core.deleteNamespacedPod({
+          name: pod.name,
+          namespace: this.options.config.namespace,
+          gracePeriodSeconds: 0,
+        });
+      } catch (error) {
+        if (!isNotFound(error)) throw new KubernetesOperationError('restart Pod', errorStatus(error), { cause: error });
+      }
+    }
+    return { resourceName: workload.metadata?.name ?? name };
   }
 
   async getBotStatus(deviceKey: string): Promise<BotPodStatus | null> {

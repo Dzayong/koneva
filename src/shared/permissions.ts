@@ -57,7 +57,7 @@ const RULES: readonly Rule[] = [
   [['PATCH'], /^\/devices\/[^/]+\/profile$/, 'content:write'],
   [['POST', 'DELETE'], /^\/devices\/[^/]+\/profile\/picture$/, 'content:write'],
   [['POST'], /^\/devices$/, 'devices:write'],
-  [['POST'], /^\/devices\/[^/]+\/(pause|resume|preset)$/, 'devices:write'],
+  [['POST'], /^\/devices\/[^/]+\/(pause|resume|reconnect|preset)$/, 'devices:write'],
   [['GET'], /^\/presets$/, 'devices:read'],
   [['PATCH'], /^\/devices\/[^/]+\/persona$/, 'devices:write'],
   [['DELETE'], /^\/devices\/[^/]+$/, 'devices:delete'],

@@ -244,6 +244,13 @@ class ApiClient {
     return response.data.data;
   }
 
+  async reconnectDevice(deviceKey: string): Promise<Device> {
+    const response = await this.client.post<ApiSuccess<Device>>(
+      `/api/v1/devices/${deviceKey}/reconnect`,
+    );
+    return response.data.data;
+  }
+
   /** Tenant self-service device creation (POST /api/v1/devices). Errors render inline in the form. */
   async createDevice(data: CreateDeviceRequest): Promise<Device> {
     const response = await this.client.post<ApiSuccess<Device>>("/api/v1/devices", data, {
