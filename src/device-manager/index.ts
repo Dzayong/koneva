@@ -9,6 +9,7 @@ import { DockerBotManager } from './docker';
 import { createKubernetesClients, KubernetesBotManager } from './kubernetes';
 import type { BotOrchestrator, DeviceManagerConfig, OrchestrationMode } from './types';
 import { safeEqual } from '../shared/utils/secure-compare';
+import { readResourceHistory, startResourceUsageCollector } from './resource-usage';
 
 const createDeviceSchema = z.object({
   tenant_id: z.string().uuid(),
@@ -17,6 +18,11 @@ const createDeviceSchema = z.object({
 });
 const scaleSchema = z.object({ replicas: z.union([z.literal(0), z.literal(1)]) });
 const deviceKeySchema = z.string().regex(/^WAPI-[A-Z0-9-]+$/i).max(64);
+const resourceHistorySchema = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  tenant_id: z.string().uuid().optional(),
+});
 
 function resolveMode(): OrchestrationMode {
   if (config.deviceManager.orchestrator !== 'auto') return config.deviceManager.orchestrator;
@@ -90,6 +96,26 @@ export function createDeviceManagerApp(orchestrator: BotOrchestrator): express.E
 
   app.get('/resources', asyncRoute(async (_request, response) => {
     response.json({ success: true, data: await orchestrator.getResourceSnapshot() });
+  }));
+
+  app.get('/resources/history', asyncRoute(async (request, response) => {
+    const parsed = resourceHistorySchema.safeParse(request.query);
+    if (!parsed.success) {
+      response.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', details: parsed.error.flatten() } });
+      return;
+    }
+    const to = parsed.data.to ?? new Date();
+    const from = parsed.data.from ?? new Date(to.getTime() - 24 * 60 * 60_000);
+    try {
+      const data = await readResourceHistory(pool, { from, to, tenantId: parsed.data.tenant_id });
+      response.json({ success: true, data });
+    } catch (error) {
+      if (error instanceof Error && (error.message === 'Resource history range exceeds 31 days' || error.message === 'Invalid resource history range')) {
+        response.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: error.message } });
+        return;
+      }
+      throw error;
+    }
   }));
 
   app.post('/devices', asyncRoute(async (request, response) => {
@@ -245,6 +271,9 @@ export function createDeviceManagerApp(orchestrator: BotOrchestrator): express.E
 export async function main(): Promise<void> {
   const managerConfig = loadDeviceManagerConfig();
   const orchestrator = await createOrchestrator(managerConfig);
+  const stopResourceCollector = startResourceUsageCollector(orchestrator, pool, (error) => {
+    logger.warn('Unable to collect resource usage snapshot', { mode: orchestrator.mode, error });
+  });
   const server = http.createServer(createDeviceManagerApp(orchestrator));
   server.listen(managerConfig.port, () => {
     logger.info('Device Manager listening', { port: managerConfig.port, mode: orchestrator.mode });
@@ -252,6 +281,7 @@ export async function main(): Promise<void> {
 
   const shutdown = (signal: string): void => {
     logger.info('Stopping Device Manager', { signal });
+    stopResourceCollector();
     server.close(() => void pool.end().finally(() => process.exit(0)));
     setTimeout(() => process.exit(1), 10_000).unref();
   };

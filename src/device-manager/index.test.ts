@@ -41,4 +41,11 @@ test('resource snapshot endpoint requires the admin key and returns only the orc
   const allowed = await fetch(url, { headers: { 'x-admin-key': config.adminApiKey } });
   assert.equal(allowed.status, 200);
   assert.deepEqual(await allowed.json(), { success: true, data: snapshot });
+
+  const historyDenied = await fetch(`${url}/history`);
+  assert.equal(historyDenied.status, 401);
+  const invalidRange = await fetch(`${url}/history?from=2026-10-18T12:00:00.000Z&to=2026-10-18T11:00:00.000Z`, {
+    headers: { 'x-admin-key': config.adminApiKey },
+  });
+  assert.equal(invalidRange.status, 400);
 });
