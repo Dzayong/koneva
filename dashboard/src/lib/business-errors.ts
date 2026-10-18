@@ -6,7 +6,8 @@ const TEXT: Record<string, string> = {
   NOT_CONNECTED: "Nomor sedang tidak tersambung. Sambungkan dulu, lalu coba lagi.",
   DEVICE_BANNED: "Nomor ini diblokir WhatsApp, jadi tidak bisa dipakai.",
   STATUS_LIMIT: "Batas status hari ini sudah tercapai (maksimal 3 per device per hari). Coba lagi besok.",
-  NO_AUDIENCE: "Belum ada kontak yang bisa melihat status ini. Saling berkirim pesan dulu, atau isi daftar nomor.",
+  NO_AUDIENCE: "Tidak ada kontak yang cocok dengan pilihan audiens status ini.",
+  AUDIENCE_TOO_LARGE: "Audiens status melebihi batas 500 kontak. Kecilkan audiens atau gunakan pilihan kontak tertentu.",
   WA_TIMEOUT: "WhatsApp tidak menjawab dalam waktu wajar. Pastikan device online, lalu coba lagi.",
   INTERRUPTED: "Terhenti karena nomor dimulai ulang. Buat ulang bila perlu.",
 };

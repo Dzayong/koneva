@@ -15,6 +15,8 @@ test('a text status needs text; media statuses need a public https url', () => {
 test('a status to a list needs numbers, and cannot be scheduled more than a week ahead', () => {
   assert.equal(statusSchema.safeParse({ kind: 'text', text: 'x', audience: 'list' }).success, false);
   assert.equal(statusSchema.safeParse({ kind: 'text', text: 'x', audience: 'list', numbers: ['6281234567890'] }).success, true);
+  assert.equal(statusSchema.safeParse({ kind: 'text', text: 'x', audience: 'all_contacts' }).success, true);
+  assert.equal(statusSchema.safeParse({ kind: 'text', text: 'x', audience: 'contacts_except' }).success, true);
   const far = new Date(Date.now() + 10 * 86_400_000).toISOString();
   assert.equal(statusSchema.safeParse({ kind: 'text', text: 'x', send_at: far }).success, false);
 });

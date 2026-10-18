@@ -13,10 +13,11 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-export function useContacts(params: ContactListParams = {}) {
+export function useContacts(params: ContactListParams = {}, enabled = true) {
   return useQuery({
     queryKey: ["contacts", params],
     queryFn: () => api.getContacts(params),
+    enabled,
     placeholderData: keepPreviousData,
   });
 }

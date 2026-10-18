@@ -73,11 +73,25 @@ const toMinutes = (hhmm: string): string => {
   return String(Number(h) * 60 + Number(m));
 };
 
-/** JIDs that may see a status: people this number has actually exchanged messages with, or an explicit list. */
+/** Resolve status viewers from workspace contacts, conversation history, or an explicit selection. */
 export async function statusAudience(ctx: CommandContext, p: StatusPayload): Promise<string[]> {
   const numbers = new Set<string>();
   if (p.audience === 'list') {
     for (const n of p.numbers ?? []) numbers.add(n.replace(/^\+/, ''));
+  } else if (p.audience === 'all_contacts' || p.audience === 'contacts_except') {
+    const excluded = new Set((p.audience === 'contacts_except' ? p.numbers ?? [] : []).map((n) => n.replace(/\D/g, '')));
+    const { rows } = await ctx.queryFn(
+      `SELECT DISTINCT regexp_replace(c.phone_number, '[^0-9]', '', 'g') AS n
+       FROM contacts c JOIN devices d ON d.tenant_id = c.tenant_id
+       WHERE d.id = $1 AND d.device_key = $2
+         AND NOT (regexp_replace(c.phone_number, '[^0-9]', '', 'g') = ANY($3::text[]))
+       ORDER BY n LIMIT 501`, [ctx.deviceId, ctx.deviceKey, [...excluded]],
+    );
+    if (rows.length > 500) throw new CommandFailure('AUDIENCE_TOO_LARGE', 'Status hanya dapat dibagikan ke maksimal 500 kontak sekaligus.');
+    for (const r of rows) {
+      const n = String(r['n'] ?? '').replace(/\D/g, '');
+      if (/^[1-9]\d{6,14}$/.test(n) && !excluded.has(n)) numbers.add(n);
+    }
   } else {
     const { rows } = await ctx.queryFn(
       `SELECT DISTINCT CASE WHEN direction = 'outbound' THEN to_number ELSE from_number END AS n
@@ -91,7 +105,7 @@ export async function statusAudience(ctx: CommandContext, p: StatusPayload): Pro
       if (/^[1-9]\d{6,14}$/.test(n)) numbers.add(n);
     }
   }
-  if (numbers.size === 0) throw new CommandFailure('NO_AUDIENCE', 'No contacts to show this status to yet. Exchange messages first, or provide a list of numbers.');
+  if (numbers.size === 0) throw new CommandFailure('NO_AUDIENCE', 'Tidak ada kontak yang cocok dengan pilihan audiens status ini.');
   return [...numbers].map((n) => `${n}@s.whatsapp.net`);
 }
 

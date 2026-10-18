@@ -539,7 +539,7 @@ export interface StatusPost {
   media_url?: string;
   caption?: string;
   background?: string;
-  audience: "chatted" | "list";
+  audience: "chatted" | "all_contacts" | "contacts_except" | "list";
   numbers?: string[];
   send_at?: string;
 }

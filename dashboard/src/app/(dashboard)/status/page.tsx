@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { DeviceSelect } from "@/components/devices/device-select";
 import { useDevices } from "@/hooks/use-devices";
+import { useContacts } from "@/hooks/use-contacts";
 import { useCancelCommand, usePostStatus, useStatusPosts, useStatusViewers } from "@/hooks/use-business";
 import { usePermissions } from "@/hooks/use-me";
 import { businessErrorText, commandErrorText } from "@/lib/business-errors";
@@ -62,15 +63,17 @@ export default function StatusPage() {
   const [color, setColor] = useState(COLORS[0]!);
   const [mediaUrl, setMediaUrl] = useState("");
   const [caption, setCaption] = useState("");
-  const [audience, setAudience] = useState<"chatted" | "list">("chatted");
-  const [numbers, setNumbers] = useState("");
+  const [audience, setAudience] = useState<"all_contacts" | "contacts_except" | "list">("all_contacts");
+  const [contactSearch, setContactSearch] = useState("");
+  const [contactPage, setContactPage] = useState(0);
+  const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
+  const contacts = useContacts({ search: contactSearch || undefined, limit: 20, offset: contactPage * 20 }, audience !== "all_contacts" && can("messages:read"));
   const [sendAt, setSendAt] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   if (!permsLoading && !can("devices:read")) return <p className="text-muted-foreground">Peran Anda tidak bisa membuka halaman ini.</p>;
   const canPost = can("content:write");
-  const list = numbers.split(/[\s,;]+/).map((n) => n.trim()).filter(Boolean);
-  const valid = (kind === "text" ? text.trim().length > 0 : /^https:\/\//i.test(mediaUrl.trim())) && (audience === "chatted" || list.length > 0);
+  const valid = (kind === "text" ? text.trim().length > 0 : /^https:\/\//i.test(mediaUrl.trim())) && (audience !== "list" || selectedNumbers.length > 0);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,7 +81,7 @@ export default function StatusPage() {
     const body: StatusPost = {
       kind, audience,
       ...(kind === "text" ? { text: text.trim(), background: color } : { media_url: mediaUrl.trim(), ...(caption.trim() ? { caption: caption.trim() } : {}) }),
-      ...(audience === "list" ? { numbers: list } : {}),
+      ...((audience === "list" || audience === "contacts_except") ? { numbers: selectedNumbers } : {}),
       ...(sendAt ? { send_at: new Date(sendAt).toISOString() } : {}),
     };
     post.mutate(body, {
@@ -91,7 +94,7 @@ export default function StatusPage() {
     <div className="mx-auto max-w-4xl space-y-8">
       <div>
         <h1 className="text-display">Status WhatsApp</h1>
-        <p className="mt-2 text-muted-foreground">Posting status dari nomor Anda. Status hanya dilihat kontak yang sudah pernah berbalas pesan dengan nomor ini, dan diposting dalam jam aktif nomor agar terlihat wajar.</p>
+        <p className="mt-2 text-muted-foreground">Pilih audiens status dari kontak yang tersimpan di KONEVA. WhatsApp tetap menerapkan ketersediaan akun dan pengaturan privasinya.</p>
       </div>
 
       {isLoading ? <Skeleton className="h-64" /> : online.length === 0 ? (
@@ -140,10 +143,40 @@ export default function StatusPage() {
 
               <fieldset className="space-y-2">
                 <legend className="text-sm font-medium">Siapa yang melihat</legend>
-                {([["chatted", "Kontak yang pernah berbalas pesan (disarankan)"], ["list", "Daftar nomor tertentu"]] as const).map(([id, label]) => (
-                  <label key={id} className="flex items-center gap-2 text-sm"><input type="radio" name="aud" checked={audience === id} onChange={() => setAudience(id)} className="accent-[var(--primary)]" />{label}</label>
+                {([["all_contacts", "Semua kontak"], ["contacts_except", "Kontak kecuali…"], ["list", "Hanya bagikan kepada…"]] as const).map(([id, label]) => (
+                  <label key={id} className={cn("flex items-center gap-2 text-sm", id !== "all_contacts" && !can("messages:read") && "opacity-50")}><input type="radio" name="aud" checked={audience === id} disabled={id !== "all_contacts" && !can("messages:read")} onChange={() => setAudience(id)} className="accent-[var(--primary)]" />{label}</label>
                 ))}
-                {audience === "list" && <Textarea aria-label="Daftar nomor" value={numbers} onChange={(e) => setNumbers(e.target.value)} rows={3} placeholder="6281234567890, 6281298765432" />}
+                {!can("messages:read") && <p className="text-xs text-muted-foreground">Peran Anda tidak memiliki akses untuk memilih kontak tertentu.</p>}
+                {(audience === "contacts_except" || audience === "list") && (
+                  <div className="space-y-3 rounded-lg border p-3">
+                    <Label htmlFor="status-contact-search">{audience === "contacts_except" ? "Pilih kontak yang dikecualikan" : "Pilih kontak yang boleh melihat"}</Label>
+                    <Input id="status-contact-search" value={contactSearch} onChange={(e) => { setContactSearch(e.target.value); setContactPage(0); }} placeholder="Cari nama atau nomor kontak…" />
+                    {contacts.isLoading ? <p className="text-sm text-muted-foreground">Memuat kontak…</p> : (contacts.data?.data ?? []).length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Tidak ada kontak pada halaman ini. Tambahkan kontak di menu Kontak.</p>
+                    ) : (
+                      <ul className="max-h-56 space-y-2 overflow-y-auto">
+                        {contacts.data!.data.map((contact) => {
+                          const checked = selectedNumbers.includes(contact.phone_number);
+                          return <li key={contact.id}>
+                            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
+                              <input type="checkbox" checked={checked} onChange={(e) => setSelectedNumbers((current) => e.target.checked ? [...new Set([...current, contact.phone_number])] : current.filter((n) => n !== contact.phone_number))} className="accent-[var(--primary)]" />
+                              <span className="min-w-0 flex-1 truncate">{contact.name || contact.phone_number} <span className="text-muted-foreground">{contact.name ? `· ${contact.phone_number}` : ""}</span></span>
+                              {contact.consent_status !== "opted_in" && <span className="text-xs text-muted-foreground">Belum memenuhi izin kirim</span>}
+                            </label>
+                          </li>;
+                        })}
+                      </ul>
+                    )}
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{selectedNumbers.length} dipilih{contacts.data ? ` · ${contacts.data.pagination.total} kontak ditemukan` : ""}</span>
+                      <div className="flex gap-2">
+                        <Button type="button" size="sm" variant="outline" disabled={contactPage === 0} onClick={() => setContactPage((p) => Math.max(0, p - 1))}>Sebelumnya</Button>
+                        <Button type="button" size="sm" variant="outline" disabled={!contacts.data || (contacts.data.pagination.offset + contacts.data.data.length >= contacts.data.pagination.total)} onClick={() => setContactPage((p) => p + 1)}>Berikutnya</Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">Penerima yang belum memiliki persetujuan aktif atau sudah menolak tetap tidak dikirimi, apa pun pilihan audiensnya.</p>
               </fieldset>
 
               <div className="space-y-2">

@@ -88,7 +88,7 @@ export async function runCommand(
 export function commandFailure(error: string | null): ServiceError {
   const match = /^([A-Z_]+): (.*)$/s.exec(error ?? '');
   const code = match?.[1] ?? 'COMMAND_FAILED';
-  const status = code === 'NOT_BUSINESS' ? 409 : code === 'NOT_CONNECTED' ? 503 : code === 'NO_AUDIENCE' ? 400 : code === 'WA_TIMEOUT' ? 504 : 502;
+  const status = code === 'NOT_BUSINESS' ? 409 : code === 'NOT_CONNECTED' ? 503 : (code === 'NO_AUDIENCE' || code === 'AUDIENCE_TOO_LARGE') ? 400 : code === 'WA_TIMEOUT' ? 504 : 502;
   return new ServiceError(status, code, match?.[2] ?? error ?? 'Command failed');
 }
 

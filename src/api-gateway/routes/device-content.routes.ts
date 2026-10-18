@@ -15,7 +15,7 @@ export const statusSchema = z.object({
   media_url: mediaUrl.optional(),
   caption: z.string().trim().max(700).optional(),
   background: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  audience: z.enum(['chatted', 'list']).default('chatted'),
+  audience: z.enum(['chatted', 'all_contacts', 'contacts_except', 'list']).default('chatted'),
   numbers: z.array(z.string().regex(/^\+?[1-9]\d{6,19}$/)).max(500).optional(),
   send_at: z.string().datetime().optional(),
 }).strict().superRefine((v, ctx) => {

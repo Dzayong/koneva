@@ -108,6 +108,26 @@ test('status with nobody to show it to fails with NO_AUDIENCE', async () => {
   await assert.rejects(() => statusAudience(ctx().context, { kind: 'text', text: 'hi', audience: 'chatted' }), { code: 'NO_AUDIENCE' });
 });
 
+test('status audience can target all saved workspace contacts', async () => {
+  const { context } = ctx({ rows: [{ n: '+62 8111 10001' }, { n: '62811110002' }, { n: 'invalid' }] });
+  const jids = await statusAudience(context, { kind: 'text', text: 'hi', audience: 'all_contacts' });
+  assert.deepEqual(jids.sort(), ['62811110001@s.whatsapp.net', '62811110002@s.whatsapp.net']);
+});
+
+test('status audience can exclude selected saved contacts', async () => {
+  const { context } = ctx({ rows: [{ n: '62811110001' }, { n: '62811110002' }] });
+  const jids = await statusAudience(context, { kind: 'text', text: 'hi', audience: 'contacts_except', numbers: ['+62 8111 10001'] });
+  assert.deepEqual(jids, ['62811110002@s.whatsapp.net']);
+});
+
+test('status audience refuses more than 500 saved contacts instead of silently truncating', async () => {
+  const rows = Array.from({ length: 501 }, (_, i) => ({ n: `6281234${String(i).padStart(6, '0')}` }));
+  await assert.rejects(
+    () => statusAudience(ctx({ rows }).context, { kind: 'text', text: 'hi', audience: 'all_contacts' }),
+    { code: 'AUDIENCE_TOO_LARGE' },
+  );
+});
+
 test('status.post goes online, posts to status@broadcast including the owner, then lets the number rest', async () => {
   const { context, calls } = ctx({ rows: [{ n: '6281234567890' }] });
   const out = await executeCommand('status.post', { kind: 'text', text: 'Promo!', background: '#1d4ed8', audience: 'chatted' }, context) as { message_id: string; recipients: number };
@@ -130,6 +150,15 @@ test('status.post refuses the full publish when an explicit audience member lack
   const { context, calls } = ctx({ rows: [], consentStatus: 'none' });
   await assert.rejects(
     () => executeCommand('status.post', { kind: 'text', text: 'Promo!', audience: 'list', numbers: ['6281234567890'] }, context),
+    (error: unknown) => error instanceof CommandFailure && error.code === 'RECIPIENT_CONSENT_REQUIRED',
+  );
+  assert.equal(calls.some((call) => call.fn === 'sendMessage'), false);
+});
+
+test('status.post does not bypass consent when targeting all saved contacts', async () => {
+  const { context, calls } = ctx({ rows: [{ n: '6281234567890' }], consentStatus: 'none' });
+  await assert.rejects(
+    () => executeCommand('status.post', { kind: 'text', text: 'Promo!', audience: 'all_contacts' }, context),
     (error: unknown) => error instanceof CommandFailure && error.code === 'RECIPIENT_CONSENT_REQUIRED',
   );
   assert.equal(calls.some((call) => call.fn === 'sendMessage'), false);
