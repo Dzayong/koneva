@@ -2,6 +2,8 @@
 export const COMMAND_TYPES = [
   'profile.get', 'profile.update', 'profile.picture', 'status.post',
   'whatsapp.groups.list', 'whatsapp.channel.lookup',
+  'whatsapp.group.create', 'whatsapp.group.update', 'whatsapp.group.leave', 'whatsapp.group.members',
+  'whatsapp.community.create', 'whatsapp.community.update', 'whatsapp.community.leave', 'whatsapp.community.link-group',
 ] as const;
 export type CommandType = (typeof COMMAND_TYPES)[number];
 

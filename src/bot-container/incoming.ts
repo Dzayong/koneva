@@ -98,12 +98,12 @@ export async function handleIncomingMessage(
   const timestampSeconds = Number(message.messageTimestamp);
   const inserted = await queryFn(
     `INSERT INTO messages (
-       tenant_id, device_id, device_key, from_number, to_number, content, type,
+       tenant_id, device_id, device_key, from_number, to_number, chat_jid, content, type,
        status, direction, whatsapp_message_id, created_at
      )
-     SELECT $1::uuid, $2::uuid, $3::varchar, $4::varchar, $5::varchar, $6::text, $7::varchar,
-            'received', 'inbound', $8::varchar,
-            CASE WHEN $9::double precision > 0 THEN to_timestamp($9::double precision) ELSE now() END
+     SELECT $1::uuid, $2::uuid, $3::varchar, $4::varchar, $5::varchar, $6::varchar, $7::text, $8::varchar,
+            'received', 'inbound', $9::varchar,
+            CASE WHEN $10::double precision > 0 THEN to_timestamp($10::double precision) ELSE now() END
      WHERE NOT EXISTS (
        SELECT 1 FROM messages WHERE whatsapp_message_id = $8::varchar AND direction = 'inbound'
      )
@@ -113,7 +113,8 @@ export async function handleIncomingMessage(
       device.id,
       deviceKey,
       fromNumber,
-      device.phone_number ?? deviceKey,
+      remoteJid.endsWith('@g.us') ? remoteJid : device.phone_number ?? deviceKey,
+      remoteJid,
       parsed.content,
       parsed.type,
       message.key.id,
@@ -167,6 +168,8 @@ export async function handleIncomingMessage(
     message_id: row.id,
     whatsapp_message_id: message.key.id,
     from: fromNumber,
+    chat_jid: remoteJid,
+    is_group: remoteJid.endsWith('@g.us'),
     content: parsed.content,
     direction: 'inbound',
     status: 'received',

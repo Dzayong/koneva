@@ -9,6 +9,14 @@ const router = Router();
 
 const deviceParams = z.object({ key: z.string().min(1).max(32) });
 const commandParams = deviceParams.extend({ id: z.string().uuid() });
+const groupParams = deviceParams.extend({ jid: z.string().regex(/^\d{5,32}-\d{5,32}@g\.us$/) });
+const phoneList = z.array(z.string().regex(/^\+?[1-9]\d{6,19}$/)).min(1).max(50);
+const createGroupSchema = z.object({ name: z.string().trim().min(1).max(100), participants: phoneList }).strict();
+const updateGroupSchema = z.object({ name: z.string().trim().min(1).max(100).optional(), description: z.string().trim().max(512).optional() })
+  .strict().refine(v => Object.keys(v).length > 0, 'Send name or description');
+const groupMembersSchema = z.object({ action: z.enum(['add', 'remove', 'promote', 'demote']), participants: phoneList }).strict();
+const createCommunitySchema = z.object({ name: z.string().trim().min(1).max(100), description: z.string().trim().max(512).default('') }).strict();
+const linkGroupSchema = z.object({ group_jid: z.string().regex(/^\d{5,32}-\d{5,32}@g\.us$/), action: z.enum(['link', 'unlink']) }).strict();
 
 export const statusSchema = z.object({
   kind: z.enum(['text', 'image', 'video']),
@@ -95,6 +103,45 @@ router.delete('/devices/:key/profile/picture', validate({ params: deviceParams }
 
 router.get('/devices/:key/whatsapp-groups', validate({ params: deviceParams }), async (request: Request, response: Response) => {
   response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'whatsapp.groups.list', {}, 40_000) });
+});
+
+// WhatsApp group/community writes are executed by the linked number. WhatsApp
+// still enforces whether that number is an admin for each individual action.
+router.post('/devices/:key/whatsapp-groups', validate({ params: deviceParams, body: createGroupSchema }), async (request: Request, response: Response) => {
+  response.status(201).json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'whatsapp.group.create', request.validated!.body, 40_000) });
+});
+router.patch('/devices/:key/whatsapp-groups/:jid', validate({ params: groupParams, body: updateGroupSchema }), async (request: Request, response: Response) => {
+  const p = request.validated!.params as z.infer<typeof groupParams>;
+  const body = request.validated!.body as z.infer<typeof updateGroupSchema>;
+  response.json({ success: true, data: await runCommand(request.tenant!.id, p.key, 'whatsapp.group.update', { ...body, jid: p.jid }, 40_000) });
+});
+router.post('/devices/:key/whatsapp-groups/:jid/members', validate({ params: groupParams, body: groupMembersSchema }), async (request: Request, response: Response) => {
+  const p = request.validated!.params as z.infer<typeof groupParams>;
+  const body = request.validated!.body as z.infer<typeof groupMembersSchema>;
+  response.json({ success: true, data: await runCommand(request.tenant!.id, p.key, 'whatsapp.group.members', { ...body, jid: p.jid }, 40_000) });
+});
+router.delete('/devices/:key/whatsapp-groups/:jid', validate({ params: groupParams }), async (request: Request, response: Response) => {
+  const p = request.validated!.params as z.infer<typeof groupParams>;
+  response.json({ success: true, data: await runCommand(request.tenant!.id, p.key, 'whatsapp.group.leave', { jid: p.jid }, 40_000) });
+});
+
+const communityParams = deviceParams.extend({ jid: z.string().regex(/^\d{5,32}-\d{5,32}@g\.us$/) });
+router.post('/devices/:key/whatsapp-communities', validate({ params: deviceParams, body: createCommunitySchema }), async (request: Request, response: Response) => {
+  response.status(201).json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'whatsapp.community.create', request.validated!.body, 40_000) });
+});
+router.patch('/devices/:key/whatsapp-communities/:jid', validate({ params: communityParams, body: updateGroupSchema }), async (request: Request, response: Response) => {
+  const p = request.validated!.params as z.infer<typeof communityParams>;
+  const body = request.validated!.body as z.infer<typeof updateGroupSchema>;
+  response.json({ success: true, data: await runCommand(request.tenant!.id, p.key, 'whatsapp.community.update', { ...body, jid: p.jid }, 40_000) });
+});
+router.post('/devices/:key/whatsapp-communities/:jid/groups', validate({ params: communityParams, body: linkGroupSchema }), async (request: Request, response: Response) => {
+  const p = request.validated!.params as z.infer<typeof communityParams>;
+  const body = request.validated!.body as z.infer<typeof linkGroupSchema>;
+  response.json({ success: true, data: await runCommand(request.tenant!.id, p.key, 'whatsapp.community.link-group', { ...body, community_jid: p.jid }, 40_000) });
+});
+router.delete('/devices/:key/whatsapp-communities/:jid', validate({ params: communityParams }), async (request: Request, response: Response) => {
+  const p = request.validated!.params as z.infer<typeof communityParams>;
+  response.json({ success: true, data: await runCommand(request.tenant!.id, p.key, 'whatsapp.community.leave', { jid: p.jid }, 40_000) });
 });
 
 const channelLookupSchema = z.object({ link: z.string().trim().min(1).max(500) }).strict();

@@ -75,6 +75,23 @@ test('WhatsApp channel lookup returns public channel metadata only', async () =>
   assert.equal(result['verification'], 'VERIFIED');
 });
 
+test('group and community management actions call Baileys and re-check transmission permission', async () => {
+  const { context, calls } = ctx();
+  const sock = context.sock as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  for (const name of ['groupCreate', 'groupUpdateSubject', 'groupUpdateDescription', 'groupLeave', 'groupParticipantsUpdate', 'communityCreate', 'communityLeave', 'communityLinkGroup']) {
+    sock[name] = async (...args) => { calls.push({ fn: name, args }); return { id: '120363000000-123456@g.us' }; };
+  }
+  let guards = 0;
+  context.assertMayTransmit = async () => { guards += 1; };
+  await executeCommand('whatsapp.group.create', { name: 'Tim', participants: ['+6281234567890'] }, context);
+  await executeCommand('whatsapp.group.members', { jid: '120363000000-123456@g.us', action: 'add', participants: ['6281234567890'] }, context);
+  await executeCommand('whatsapp.community.link-group', { community_jid: '120363000000-123456@g.us', group_jid: '120363000001-123456@g.us', action: 'link' }, context);
+  assert.equal(guards, 3);
+  assert.deepEqual(calls.find(call => call.fn === 'groupCreate')?.args, ['Tim', ['6281234567890@s.whatsapp.net']]);
+  assert.deepEqual(calls.find(call => call.fn === 'groupParticipantsUpdate')?.args, ['120363000000-123456@g.us', ['6281234567890@s.whatsapp.net'], 'add']);
+  assert.deepEqual(calls.find(call => call.fn === 'communityLinkGroup')?.args, ['120363000001-123456@g.us', '120363000000-123456@g.us']);
+});
+
 test('profile.get still answers when the About text or photo is unavailable', async () => {
   const { context } = ctx({ business: false });
   const sock = context.sock as unknown as Record<string, unknown>;

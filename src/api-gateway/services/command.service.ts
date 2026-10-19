@@ -6,7 +6,11 @@ import { ServiceError } from './service-error';
 import { assertSubscriptionActive } from './billing.service';
 
 /** Commands that WRITE to WhatsApp. Reads (profile.get) stay available to a suspended workspace: it keeps its numbers and data. */
-const WRITE_COMMANDS: ReadonlySet<CommandType> = new Set(['status.post', 'profile.update', 'profile.picture']);
+const WRITE_COMMANDS: ReadonlySet<CommandType> = new Set([
+  'status.post', 'profile.update', 'profile.picture',
+  'whatsapp.group.create', 'whatsapp.group.update', 'whatsapp.group.leave', 'whatsapp.group.members',
+  'whatsapp.community.create', 'whatsapp.community.update', 'whatsapp.community.leave', 'whatsapp.community.link-group',
+]);
 
 export interface CommandRow {
   views?: number;

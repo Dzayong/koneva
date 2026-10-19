@@ -186,7 +186,7 @@ test('a recent inbound message permits a contextual reply without START, but doe
       statements.push({ text, ...(values === undefined ? {} : { values }) });
       if (text.includes('FROM subscriptions')) return { rows: [] };
       if (text.includes('FROM devices')) return { rows: [{ id: 'device-a', status: 'online' }] };
-      if (text.includes('SELECT id FROM messages')) return { rows: [{ id: 'inbound-a' }] };
+      if (text.includes('SELECT from_number FROM messages')) return { rows: [{ id: 'inbound-a', from_number: '6281234567890' }] };
       if (text.includes('FROM recipient_preferences')) return { rows: [] };
       if (text.includes('SELECT quota_messages')) return { rows: [{ quota_messages: 10, used_messages: 10, usage_period_start: new Date() }] };
       if (text.includes('INSERT INTO messages')) return { rows: [{ id: 'reply-a', status: 'quota_hold' }] };
@@ -198,7 +198,7 @@ test('a recent inbound message permits a contextual reply without START, but doe
     device_key: 'WAPI-1', to: '6281234567890', message: 'Halo, ada yang bisa dibantu?', reply_to_message_id: 'inbound-a',
   });
   assert.equal(result.status, 'quota_hold');
-  assert.deepEqual(statements.find((s) => s.text.includes('INSERT INTO messages'))?.values?.[13], 'inbound-a');
+  assert.deepEqual(statements.find((s) => s.text.includes('INSERT INTO messages'))?.values?.[14], 'inbound-a');
   assert.equal(statements.some((s) => s.text.includes('FROM recipient_preferences')), true);
 });
 

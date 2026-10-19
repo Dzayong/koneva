@@ -2,6 +2,7 @@ import '../shared/types/api';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { pictureSchema, profileSchema, statusSchema } from './routes/device-content.routes';
+import { sendSchema } from './routes/message.routes';
 
 test('a text status needs text; media statuses need a public https url', () => {
   assert.equal(statusSchema.safeParse({ kind: 'text' }).success, false);
@@ -43,4 +44,11 @@ test('a profile picture is exactly one of a public https url or a base64 image',
   assert.equal(pictureSchema.safeParse({ image_url: 'https://cdn.example/a.jpg', image_base64: b64 }).success, false);
   assert.equal(pictureSchema.safeParse({ image_url: 'http://cdn.example/a.jpg' }).success, false);
   assert.equal(pictureSchema.safeParse({ image_base64: 'not base64 !!!'.repeat(10) }).success, false);
+});
+
+test('group sends require a reply context and only accept a group JID', () => {
+  const base = { device_key: 'WAPI-1', message: 'Terima kasih' };
+  assert.equal(sendSchema.safeParse({ ...base, to: '120363000000-123456@g.us' }).success, false);
+  assert.equal(sendSchema.safeParse({ ...base, to: 'not-a-group@g.us', reply_to_message_id: '00000000-0000-4000-8000-000000000001' }).success, false);
+  assert.equal(sendSchema.safeParse({ ...base, to: '120363000000-123456@g.us', reply_to_message_id: '00000000-0000-4000-8000-000000000001' }).success, true);
 });

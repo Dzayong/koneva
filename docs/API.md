@@ -39,6 +39,13 @@ fields on send and QR responses remain temporarily for frontend compatibility.
 | GET/PATCH | `/api/v1/devices/:key/persona` | tenant | per-number pacing: 24-hour mode, fixed or random delay |
 | GET | `/api/v1/devices/:key/events` | tenant | timeline of status changes (online, offline, banned, logged_out, error) |
 | GET | `/api/v1/devices/:key/health` | tenant | readiness score (0-100) with per-factor breakdown and recommendations |
+| GET/POST | `/api/v1/devices/:key/whatsapp-groups` | tenant | list groups/communities or create a group |
+| PATCH/DELETE | `/api/v1/devices/:key/whatsapp-groups/:jid` | tenant | edit group name/description or leave from this linked number |
+| POST | `/api/v1/devices/:key/whatsapp-groups/:jid/members` | tenant | add, remove, promote, or demote members; WhatsApp checks admin rights |
+| POST | `/api/v1/devices/:key/whatsapp-communities` | tenant | create a community |
+| PATCH/DELETE | `/api/v1/devices/:key/whatsapp-communities/:jid` | tenant | edit community or leave it from this linked number |
+| POST | `/api/v1/devices/:key/whatsapp-communities/:jid/groups` | tenant | link or unlink an existing group |
+| GET | `/api/v1/devices/:key/whatsapp-channel?link=...` | tenant | look up channel metadata from its invite URL |
 | GET | `/api/v1/tenant` | tenant | authenticated tenant profile and quota usage |
 | PATCH | `/api/v1/tenant` | tenant | update the tenant webhook URL |
 | POST/GET | `/api/v1/contacts` | tenant | create or list tenant contacts |
@@ -54,6 +61,38 @@ fields on send and QR responses remain temporarily for frontend compatibility.
 | GET/POST | `/api/v1/auto-reply-rules` | tenant | list or create auto-reply rules |
 | GET/PATCH/DELETE | `/api/v1/auto-reply-rules/:id` | tenant | rule CRUD, tenant scoped |
 | POST | `/api/v1/auto-reply-rules/:id/toggle` | tenant | toggle a rule's active state |
+
+### WhatsApp groups and communities
+
+Group and community writes run on the linked WhatsApp number. The number must be online,
+the workspace plan must be active, and WhatsApp must grant that number permission for the
+requested admin action. `DELETE` means the linked number leaves; it does not erase the group
+for everyone. JIDs in path segments should be URL-encoded (`@` as `%40`).
+
+```bash
+curl "https://<host>/api/v1/devices/<DEVICE_KEY>/whatsapp-groups" \\
+  -H "apikey: <API_KEY>"
+
+curl -X POST "https://<host>/api/v1/devices/<DEVICE_KEY>/whatsapp-groups" \\
+  -H "apikey: <API_KEY>" -H "Content-Type: application/json" \\
+  -d '{"name":"Tim Toko","participants":["6281234567890"]}'
+
+curl -X POST "https://<host>/api/v1/message/send" \\
+  -H "apikey: <API_KEY>" -H "Content-Type: application/json" \\
+  -d '{"device_key":"<DEVICE_KEY>","to":"120363000000-123456@g.us","message":"Siap, saya bantu.","reply_to_message_id":"<INBOUND_MESSAGE_UUID>"}'
+```
+
+To reply in a group, first read `GET /api/v1/messages?device_key=<DEVICE_KEY>&direction=inbound`.
+Use the selected inbound message's `id` as `reply_to_message_id` and its `chat_jid` as `to`.
+The API accepts group sends only when they quote a recent inbound message from that same group;
+this protects the reply from being silently sent as a one-to-one message. Replies are restricted
+to the recent-message window and still honor an opt-out from the participant whose message is
+being answered. The inbox displays the group JID as its label until group names are synchronized
+into the message record.
+
+The existing saluran endpoint only looks up metadata. Channel create/update/follow/publish
+operations are not exposed yet, and a channel is a one-way publishing feed rather than a normal
+chat thread.
 | POST | `/admin/tenant/create` | admin | returns the new `api_key` |
 | POST | `/admin/device/create` | admin | proxies to Device Manager's `docker run` |
 | GET | `/admin/tenants` | admin | with device/message counts |

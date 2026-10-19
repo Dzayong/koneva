@@ -85,6 +85,25 @@ test('a direct message with participant "" is saved and returns a reply JID', as
   assert.equal(inserts[0]?.[3], '6281234567890');
 });
 
+test('group messages persist their group JID as the chat and destination context', async () => {
+  const inserts: unknown[][] = [];
+  const queryFn: QueryFn = async (sql, params) => {
+    if (sql.startsWith('SELECT id, tenant_id')) return { rows: [{ id: 'dev-1', tenant_id: 'ten-1', phone_number: '+6285624509601' }] } as never;
+    if (sql.includes('INSERT INTO messages')) { inserts.push(params ?? []); return { rows: [{ id: 'msg-group', created_at: new Date() }] } as never; }
+    return { rows: [] } as never;
+  };
+  const message = {
+    key: { remoteJid: '120363000000-123456@g.us', participant: '6281234567890@s.whatsapp.net', fromMe: false, id: 'WA-GROUP-1' },
+    message: { conversation: 'tolong dibantu' }, messageTimestamp: 1_790_000_000,
+  } as unknown as WAMessage;
+  const saved = await handleIncomingMessage(message, 'WAPI-1', queryFn, silent, async () => undefined);
+  assert.equal(saved?.isGroup, true);
+  assert.equal(saved?.replyJid, '120363000000-123456@g.us');
+  assert.equal(inserts[0]?.[3], '6281234567890');
+  assert.equal(inserts[0]?.[4], '120363000000-123456@g.us');
+  assert.equal(inserts[0]?.[5], '120363000000-123456@g.us');
+});
+
 test('own messages are never stored', async () => {
   let queried = false;
   const queryFn: QueryFn = async () => { queried = true; return { rows: [] } as never; };

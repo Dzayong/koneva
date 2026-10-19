@@ -24,6 +24,8 @@ export interface WebhookPayload {
   whatsapp_message_id?: string;
   to?: string;
   from?: string;
+  chat_jid?: string;
+  is_group?: boolean;
   content?: string;
   direction?: 'inbound' | 'outbound';
   status?: string;

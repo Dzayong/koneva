@@ -269,6 +269,54 @@ export async function executeCommand(type: CommandType, payload: unknown, ctx: C
         invite: channel.invite ?? null,
       };
     }
+    case 'whatsapp.group.create': {
+      const p = payload as { name: string; participants: string[] };
+      await ctx.assertMayTransmit?.();
+      return ctx.sock.groupCreate(p.name, p.participants.map(phone => `${phone.replace(/\D/g, '')}@s.whatsapp.net`));
+    }
+    case 'whatsapp.group.update': {
+      const p = payload as { jid: string; name?: string; description?: string };
+      await ctx.assertMayTransmit?.();
+      if (p.name !== undefined) await ctx.sock.groupUpdateSubject(p.jid, p.name);
+      if (p.description !== undefined) await ctx.sock.groupUpdateDescription(p.jid, p.description);
+      return { id: p.jid, updated: ['name', 'description'].filter(key => p[key as 'name' | 'description'] !== undefined) };
+    }
+    case 'whatsapp.group.leave': {
+      const p = payload as { jid: string };
+      await ctx.assertMayTransmit?.();
+      await ctx.sock.groupLeave(p.jid);
+      return { id: p.jid, left: true };
+    }
+    case 'whatsapp.group.members': {
+      const p = payload as { jid: string; action: 'add' | 'remove' | 'promote' | 'demote'; participants: string[] };
+      await ctx.assertMayTransmit?.();
+      return ctx.sock.groupParticipantsUpdate(p.jid, p.participants.map(phone => `${phone.replace(/\D/g, '')}@s.whatsapp.net`), p.action);
+    }
+    case 'whatsapp.community.create': {
+      const p = payload as { name: string; description: string };
+      await ctx.assertMayTransmit?.();
+      return ctx.sock.communityCreate(p.name, p.description);
+    }
+    case 'whatsapp.community.update': {
+      const p = payload as { jid: string; name?: string; description?: string };
+      await ctx.assertMayTransmit?.();
+      if (p.name !== undefined) await ctx.sock.communityUpdateSubject(p.jid, p.name);
+      if (p.description !== undefined) await ctx.sock.communityUpdateDescription(p.jid, p.description);
+      return { id: p.jid, updated: ['name', 'description'].filter(key => p[key as 'name' | 'description'] !== undefined) };
+    }
+    case 'whatsapp.community.leave': {
+      const p = payload as { jid: string };
+      await ctx.assertMayTransmit?.();
+      await ctx.sock.communityLeave(p.jid);
+      return { id: p.jid, left: true };
+    }
+    case 'whatsapp.community.link-group': {
+      const p = { ...(payload as { community_jid: string; group_jid: string; action: 'link' | 'unlink' }) };
+      await ctx.assertMayTransmit?.();
+      if (p.action === 'link') await ctx.sock.communityLinkGroup(p.group_jid, p.community_jid);
+      else await ctx.sock.communityUnlinkGroup(p.group_jid, p.community_jid);
+      return { community_jid: p.community_jid, group_jid: p.group_jid, linked: p.action === 'link' };
+    }
     default:
       throw new CommandFailure('UNKNOWN_COMMAND', `Unknown command ${String(type)}`);
   }

@@ -80,7 +80,8 @@ export class CommandRunner {
       throw new CommandFailure(code, 'Not sent: the workspace is suspended or the number is paused or banned.');
     };
     const ctx: CommandContext = { sock, queryFn: this.queryFn, deviceKey: this.deviceKey, deviceId: row.device_id, presence: this.presence, log: this.log, assertMayTransmit: guard };
-    const writes = row.type === 'status.post' || row.type === 'profile.update' || row.type === 'profile.picture';
+    const writes = row.type === 'status.post' || row.type === 'profile.update' || row.type === 'profile.picture'
+      || row.type.startsWith('whatsapp.group.') || row.type.startsWith('whatsapp.community.');
     try {
       if (writes) await guard(); // first check; the commands repeat it right before the actual write
       const result = await executeCommand(row.type, row.payload, ctx);

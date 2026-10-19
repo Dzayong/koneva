@@ -8,6 +8,7 @@ import {
   type WASocket,
   type AnyMessageContent,
   type WAMessageUpdate,
+  type WAMessage,
 } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import { query } from '../shared/database/connection';
@@ -164,17 +165,28 @@ async function getMessageById(id: string, queryFn: QueryFn): Promise<MessageReco
   return row ? mapMessageRow(row) : undefined;
 }
 
-async function hasValidReplyContext(message: MessageRecord, queryFn: QueryFn, now = new Date()): Promise<boolean> {
-  if (!message.replyToMessageId) return false;
+interface ReplyContext { fromNumber: string | null; whatsappMessageId: string | null; content: string }
+
+async function getReplyContext(message: MessageRecord, queryFn: QueryFn, now = new Date()): Promise<ReplyContext | null> {
+  if (!message.replyToMessageId) return null;
+  const groupReply = message.to.endsWith('@g.us');
   const result = await queryFn(
-    `SELECT 1 FROM messages
-     WHERE id = $1 AND tenant_id = $2 AND device_id = $3 AND direction = 'inbound'
-       AND regexp_replace(COALESCE(from_number, ''), '[^0-9]', '', 'g') = $4
-       AND created_at >= $5 AND created_at <= $6`,
+    groupReply
+      ? `SELECT from_number, whatsapp_message_id, content FROM messages
+         WHERE id = $1 AND tenant_id = $2 AND device_id = $3 AND direction = 'inbound'
+           AND chat_jid = $4 AND created_at >= $5 AND created_at <= $6`
+      : `SELECT from_number, whatsapp_message_id, content FROM messages
+         WHERE id = $1 AND tenant_id = $2 AND device_id = $3 AND direction = 'inbound'
+           AND regexp_replace(COALESCE(from_number, ''), '[^0-9]', '', 'g') = $4
+           AND created_at >= $5 AND created_at <= $6`,
     [message.replyToMessageId, message.tenantId, message.deviceId,
-      message.to.replace(/\D/g, ''), new Date(now.getTime() - 24 * 60 * 60_000), now],
+      groupReply ? message.to : message.to.replace(/\D/g, ''), new Date(now.getTime() - 24 * 60 * 60_000), now],
   );
-  return result.rows.length > 0;
+  return (result.rows[0] as ReplyContext | undefined) ?? null;
+}
+
+async function hasValidReplyContext(message: MessageRecord, queryFn: QueryFn, now = new Date()): Promise<boolean> {
+  return Boolean(await getReplyContext(message, queryFn, now));
 }
 
 interface UpdateMessageStatusFields {
@@ -420,8 +432,11 @@ async function processJobBody(
     throw new UnrecoverableError('Signup OTP expired before delivery');
   }
 
-  const initialConsent = await getStoredRecipientConsent(queryFn, message.tenantId, message.to);
-  const initialReplyContext = await hasValidReplyContext(message, queryFn, deps.now?.() ?? new Date());
+  const replyContext = await getReplyContext(message, queryFn, deps.now?.() ?? new Date());
+  const groupReply = message.to.endsWith('@g.us');
+  const consentRecipient = groupReply ? (replyContext?.fromNumber ?? message.to) : message.to;
+  const initialConsent = await getStoredRecipientConsent(queryFn, message.tenantId, consentRecipient);
+  const initialReplyContext = Boolean(replyContext);
   if (!message.quotaExempt && (initialConsent === 'opted_out' || (initialConsent !== 'opted_in' && !initialReplyContext))) {
     const code = initialConsent === 'opted_out' ? 'RECIPIENT_OPTED_OUT' : 'RECIPIENT_CONSENT_REQUIRED';
     await updateMessageStatus(message.id, { status: 'blocked', errorMessage: code.toLocaleLowerCase() }, queryFn);
@@ -459,9 +474,9 @@ async function processJobBody(
   const decision = await (deps.canSend ?? canSendMessage)(message.deviceKey, {
     queryFn,
     content: message.content,
-    recipient: message.to,
+    recipient: consentRecipient,
     hasMedia: message.type !== 'text',
-    isProactive: !(await hasRecentInbound(message.deviceId, message.to, queryFn)),
+    isProactive: groupReply ? !initialReplyContext : !(await hasRecentInbound(message.deviceId, message.to, queryFn)),
     priority: message.priority,
     ...(deps.now ? { now: deps.now() } : {}),
   });
@@ -555,18 +570,29 @@ async function processJobBody(
 
   let sendResult;
   try {
-    sendResult = await withRecipientConsentLock(message.tenantId, message.to, async () => {
-      const currentConsent = await getStoredRecipientConsent(queryFn, message.tenantId, message.to);
-      const currentReplyContext = await hasValidReplyContext(message, queryFn, deps.now?.() ?? new Date());
+    sendResult = await withRecipientConsentLock(message.tenantId, consentRecipient, async () => {
+      const currentReply = await getReplyContext(message, queryFn, deps.now?.() ?? new Date());
+      const currentConsent = await getStoredRecipientConsent(queryFn, message.tenantId,
+        groupReply ? (currentReply?.fromNumber ?? message.to) : message.to);
+      const currentReplyContext = Boolean(currentReply);
       if (!message.quotaExempt && (currentConsent === 'opted_out' || (currentConsent !== 'opted_in' && !currentReplyContext))) {
         throw new RecipientConsentDenied(currentConsent === 'opted_out' ? 'RECIPIENT_OPTED_OUT' : 'RECIPIENT_CONSENT_REQUIRED');
       }
       const last = await checkTransmission(message.deviceKey, queryFn, deps.now?.());
       if (!last.allowed) await applyTransmitBlock(last, job, message, deviceKey, connection, queryFn, log);
+      const quoted: WAMessage | undefined = groupReply && currentReply?.whatsappMessageId ? {
+        key: {
+          remoteJid: message.to,
+          fromMe: false,
+          id: currentReply.whatsappMessageId,
+          participant: currentReply.fromNumber ? `${currentReply.fromNumber}@s.whatsapp.net` : undefined,
+        },
+        message: { conversation: currentReply.content },
+      } as WAMessage : undefined;
       return withSpan(
         'message.send',
         { device_key: deviceKey, message_id: message.id, 'message.type': message.type },
-        () => sock.sendMessage(jid, toMessageContent(message)),
+        () => sock.sendMessage(jid, toMessageContent(message), quoted ? { quoted } : undefined),
       );
     });
   } catch (err) {

@@ -46,7 +46,7 @@ function ReplyComposer({ message, devices }: { message: Message; devices: NonNul
   const send = useMutation({
     mutationFn: () => api.sendMessage({
       device_key: message.device_key,
-      to: message.from_number!,
+      to: message.chat_jid?.endsWith("@g.us") ? message.chat_jid : message.from_number!,
       message: text.trim(),
       reply_to_message_id: message.id,
     }),
@@ -59,7 +59,8 @@ function ReplyComposer({ message, devices }: { message: Message; devices: NonNul
     onError: (error) => toast.error("Balasan gagal dikirim", { description: apiFailure(error).message }),
   });
 
-  if (message.direction !== "inbound" || !message.from_number) return null;
+  const isGroupMessage = message.chat_jid?.endsWith("@g.us") ?? false;
+  if (message.direction !== "inbound" || (!message.from_number && !isGroupMessage)) return null;
   if (!replyWindowOpen) {
     return <p className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">Waktu untuk membalas pesan ini sudah lewat 24 jam. Minta pelanggan menghubungi Anda kembali sebelum membalas.</p>;
   }
@@ -72,10 +73,10 @@ function ReplyComposer({ message, devices }: { message: Message; devices: NonNul
 
   return (
     <form className="space-y-3 border-t pt-4" onSubmit={(event) => { event.preventDefault(); if (text.trim()) send.mutate(); }}>
-      <label htmlFor={`reply-${message.id}`} className="text-sm font-medium">Balas percakapan</label>
+      <label htmlFor={`reply-${message.id}`} className="text-sm font-medium">{isGroupMessage ? "Balas di grup" : "Balas percakapan"}</label>
       <Textarea id={`reply-${message.id}`} rows={3} maxLength={4096} value={text} onChange={(event) => setText(event.target.value)} placeholder="Tulis balasan ke pelanggan…" />
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">Balasan ini merujuk ke pesan pelanggan yang dipilih.</p>
+      <p className="text-xs text-muted-foreground">{isGroupMessage ? "Balasan dikirim ke grup dan mengutip pesan yang dipilih." : "Balasan ini merujuk ke pesan pelanggan yang dipilih."}</p>
         <Button type="submit" disabled={!text.trim() || send.isPending}>{send.isPending ? "Mengirim…" : "Kirim balasan"}</Button>
       </div>
     </form>

@@ -230,6 +230,46 @@ class ApiClient {
     return response.data.data;
   }
 
+  async createWhatsAppGroup(deviceKey: string, payload: { name: string; participants: string[] }): Promise<unknown> {
+    const response = await this.client.post<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-groups`, payload);
+    return response.data.data;
+  }
+
+  async updateWhatsAppGroup(deviceKey: string, jid: string, payload: { name?: string; description?: string }): Promise<unknown> {
+    const response = await this.client.patch<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}`, payload);
+    return response.data.data;
+  }
+
+  async manageWhatsAppGroupMembers(deviceKey: string, jid: string, payload: { action: "add" | "remove" | "promote" | "demote"; participants: string[] }): Promise<unknown> {
+    const response = await this.client.post<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}/members`, payload);
+    return response.data.data;
+  }
+
+  async leaveWhatsAppGroup(deviceKey: string, jid: string): Promise<unknown> {
+    const response = await this.client.delete<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}`);
+    return response.data.data;
+  }
+
+  async createWhatsAppCommunity(deviceKey: string, payload: { name: string; description: string }): Promise<unknown> {
+    const response = await this.client.post<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-communities`, payload);
+    return response.data.data;
+  }
+
+  async updateWhatsAppCommunity(deviceKey: string, jid: string, payload: { name?: string; description?: string }): Promise<unknown> {
+    const response = await this.client.patch<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-communities/${encodeURIComponent(jid)}`, payload);
+    return response.data.data;
+  }
+
+  async setCommunityGroupLink(deviceKey: string, communityJid: string, payload: { group_jid: string; action: "link" | "unlink" }): Promise<unknown> {
+    const response = await this.client.post<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-communities/${encodeURIComponent(communityJid)}/groups`, payload);
+    return response.data.data;
+  }
+
+  async leaveWhatsAppCommunity(deviceKey: string, jid: string): Promise<unknown> {
+    const response = await this.client.delete<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-communities/${encodeURIComponent(jid)}`);
+    return response.data.data;
+  }
+
   async lookupWhatsAppChannel(deviceKey: string, link: string): Promise<WhatsAppChannelSummary> {
     const response = await this.client.get<ApiSuccess<WhatsAppChannelSummary>>(`/api/v1/devices/${deviceKey}/whatsapp-channel`, { params: { link }, skipErrorToast: true });
     return response.data.data;

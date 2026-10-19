@@ -81,7 +81,15 @@ export async function queueSystemNotification(tenantId: string, eventId: string,
 }
 
 async function queueMessageInternal(tenantId: string, input: SendMessageRequest, systemKind: 'otp' | 'notification' | null, notificationDelayMs = 0): Promise<MessageRow> {
-  return withRecipientConsentLock(tenantId, input.to, async () => {
+  const groupLockRecipient = input.to.endsWith('@g.us') && input.reply_to_message_id
+    ? ((await pool.query<{ from_number: string | null }>(
+      `SELECT m.from_number FROM messages m JOIN devices d ON d.id=m.device_id
+       WHERE m.id=$1 AND m.tenant_id=$2 AND d.device_key=$3 AND m.direction='inbound' AND m.chat_jid=$4
+         AND m.created_at >= now() - interval '24 hours'`,
+      [input.reply_to_message_id, tenantId, input.device_key, input.to],
+    )).rows[0]?.from_number ?? input.to)
+    : input.to;
+  return withRecipientConsentLock(tenantId, groupLockRecipient, async () => {
   const systemOtp = systemKind === 'otp';
   const systemNotification = systemKind === 'notification';
   const systemManaged = systemOtp || systemNotification;
@@ -159,20 +167,27 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
     }
 
     let replyContext = false;
+    let replyRecipient = input.to;
     if (input.reply_to_message_id) {
-      const inbound = await client.query(
-        `SELECT id FROM messages
-         WHERE id = $1 AND tenant_id = $2 AND device_id = $3 AND direction = 'inbound'
-           AND regexp_replace(COALESCE(from_number, ''), '[^0-9]', '', 'g') = $4
-           AND created_at >= now() - interval '24 hours'`,
-        [input.reply_to_message_id, tenantId, device.id, input.to.replace(/\D/g, '')],
+      const groupReply = input.to.endsWith('@g.us');
+      const inbound = await client.query<{ from_number: string | null }>(
+        groupReply
+          ? `SELECT from_number FROM messages
+             WHERE id = $1 AND tenant_id = $2 AND device_id = $3 AND direction = 'inbound'
+               AND chat_jid = $4 AND created_at >= now() - interval '24 hours'`
+          : `SELECT from_number FROM messages
+             WHERE id = $1 AND tenant_id = $2 AND device_id = $3 AND direction = 'inbound'
+               AND regexp_replace(COALESCE(from_number, ''), '[^0-9]', '', 'g') = $4
+               AND created_at >= now() - interval '24 hours'`,
+        [input.reply_to_message_id, tenantId, device.id, groupReply ? input.to : input.to.replace(/\D/g, '')],
       );
       if (!inbound.rows[0]) {
         throw new ServiceError(409, 'REPLY_CONTEXT_INVALID', 'A reply must reference a customer message from this number within the last 24 hours');
       }
+      if (groupReply && inbound.rows[0]?.from_number) replyRecipient = inbound.rows[0].from_number;
       replyContext = true;
     }
-    if (replyContext) await assertReplyRecipientAllowed(client, tenantId, input.to);
+    if (replyContext) await assertReplyRecipientAllowed(client, tenantId, replyRecipient);
     else await assertRecipientConsent(client, tenantId, input.to, exempt);
 
     // Exempt sends skip the quota check entirely and never count toward used_messages. Everything else is held,
@@ -188,9 +203,11 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
 
     const result = await client.query<MessageRow>(
       `INSERT INTO messages
-         (tenant_id, device_id, device_key, to_number, content, external_id, status, priority, type, media_url, quota_exempt, system_otp, system_notification, reply_to_message_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
-      [tenantId, device.id, input.device_key, input.to, input.message, input.external_id ?? null, status, priority,
+         (tenant_id, device_id, device_key, to_number, chat_jid, content, external_id, status, priority, type, media_url, quota_exempt, system_otp, system_notification, reply_to_message_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
+      [tenantId, device.id, input.device_key, input.to,
+        input.to.endsWith('@g.us') ? input.to : `${input.to.replace(/\D/g, '')}@s.whatsapp.net`,
+        input.message, input.external_id ?? null, status, priority,
         input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt, systemOtp, systemNotification, input.reply_to_message_id ?? null],
     );
     if (status === 'queued' && !exempt) await client.query('UPDATE tenants SET used_messages = used_messages + 1 WHERE id = $1', [tenantId]);
@@ -347,14 +364,18 @@ export async function retryMessage(tenantId: string, messageId: string): Promise
     throw new ServiceError(409, 'RECIPIENT_CONSENT_SUPPRESSED', 'This message was suppressed by recipient consent; create a new message after re-opt-in');
   }
   if (target?.reply_to_message_id && target.device_id) {
-    const inbound = await pool.query(
-      `SELECT id FROM messages WHERE id=$1 AND tenant_id=$2 AND device_id=$3 AND direction='inbound'
-         AND regexp_replace(COALESCE(from_number, ''), '[^0-9]', '', 'g')=$4
-         AND created_at >= now() - interval '24 hours'`,
-      [target.reply_to_message_id, tenantId, target.device_id, target.to_number.replace(/\D/g, '')],
+    const groupReply = target.to_number.endsWith('@g.us');
+    const inbound = await pool.query<{ from_number: string | null }>(
+      groupReply
+        ? `SELECT from_number FROM messages WHERE id=$1 AND tenant_id=$2 AND device_id=$3 AND direction='inbound'
+             AND chat_jid=$4 AND created_at >= now() - interval '24 hours'`
+        : `SELECT from_number FROM messages WHERE id=$1 AND tenant_id=$2 AND device_id=$3 AND direction='inbound'
+             AND regexp_replace(COALESCE(from_number, ''), '[^0-9]', '', 'g')=$4
+             AND created_at >= now() - interval '24 hours'`,
+      [target.reply_to_message_id, tenantId, target.device_id, groupReply ? target.to_number : target.to_number.replace(/\D/g, '')],
     );
     if (!inbound.rows[0]) throw new ServiceError(409, 'REPLY_CONTEXT_EXPIRED', 'This reply can no longer be retried because its customer-chat window expired');
-    await assertReplyRecipientAllowed(pool, tenantId, target.to_number);
+    await assertReplyRecipientAllowed(pool, tenantId, groupReply ? (inbound.rows[0].from_number ?? '') : target.to_number);
   } else if (target) {
     await assertRecipientConsent(pool, tenantId, target.to_number, target.quota_exempt);
   }

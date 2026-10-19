@@ -8,7 +8,13 @@ import { cn, formatDate, formatPhoneNumber, formatShortRelative } from "@/lib/ut
 import type { Message } from "@/lib/types";
 
 export function messageNumber(message: Message): string {
+  if (message.chat_jid?.endsWith("@g.us")) return message.chat_jid;
+  if (message.to_number.endsWith("@g.us")) return message.to_number;
   return (message.direction === "inbound" ? message.from_number : message.to_number) ?? "";
+}
+
+function displayPeer(number: string): string {
+  return number.endsWith("@g.us") ? `Grup WhatsApp · ${number}` : formatPhoneNumber(number) || "Tidak dikenal";
 }
 
 /** Compact list row; the full message is shown in MessageDetail. */
@@ -41,7 +47,7 @@ export function MessageRow({
         <div className="flex items-baseline justify-between gap-3">
           <p className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
             <Arrow className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">{contactName || formatPhoneNumber(number) || "Tidak dikenal"}</span>
+            <span className="truncate">{contactName || displayPeer(number)}</span>
           </p>
           <time
             dateTime={message.created_at}
@@ -62,7 +68,7 @@ export function MessageDetail({ message, contactName }: { message: Message; cont
   const inbound = message.direction === "inbound";
   const number = messageNumber(message);
   const rows: Array<[string, React.ReactNode]> = [
-    [inbound ? "Dari" : "Ke", `${contactName ? `${contactName} · ` : ""}${formatPhoneNumber(number)}`],
+    [inbound ? "Dari" : "Ke", `${contactName ? `${contactName} · ` : ""}${displayPeer(number)}`],
     ["Nomor", <span key="d" className="font-mono text-xs">{message.device_key}</span>],
     ["Status", <MessageStatusBadge key="s" status={message.status} />],
     ["Dibuat", formatDate(message.created_at)],

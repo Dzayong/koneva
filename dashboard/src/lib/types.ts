@@ -66,6 +66,7 @@ export interface Message {
   direction: "inbound" | "outbound";
   from_number: string | null;
   to_number: string;
+  chat_jid?: string | null;
   content: string;
   type: "text" | "image" | "document" | "video" | "audio";
   status: MessageStatus;
