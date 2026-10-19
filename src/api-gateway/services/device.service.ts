@@ -12,7 +12,9 @@ export async function listDevices(tenantId: string) {
 export async function getDeviceStatus(tenantId: string, deviceKey: string) {
   const row = (await pool.query(
     `SELECT id, device_key, phone_number, label, status, health_score, last_connected,
-            qr_code, created_at, updated_at FROM devices
+            qr_code, created_at, updated_at, history_sync_status, history_sync_progress,
+            history_sync_completion_explicit,
+            history_latest_message_at, history_synced_at FROM devices
      WHERE tenant_id = $1 AND device_key = $2`,
     [tenantId, deviceKey],
   )).rows[0];

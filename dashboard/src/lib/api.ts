@@ -14,6 +14,8 @@ import type {
   ApiKeyRecord,
   DeviceCommand,
   DeviceProfile,
+  WhatsAppGroupSummary,
+  WhatsAppChannelSummary,
   ProfileUpdate,
   StatusPost,
   StatusViewers,
@@ -220,6 +222,16 @@ class ApiClient {
 
   async getDevice(deviceKey: string): Promise<Device> {
     const response = await this.client.get<ApiSuccess<Device>>(`/api/v1/devices/${deviceKey}`);
+    return response.data.data;
+  }
+
+  async getWhatsAppGroups(deviceKey: string): Promise<WhatsAppGroupSummary[]> {
+    const response = await this.client.get<ApiSuccess<WhatsAppGroupSummary[]>>(`/api/v1/devices/${deviceKey}/whatsapp-groups`, { skipErrorToast: true });
+    return response.data.data;
+  }
+
+  async lookupWhatsAppChannel(deviceKey: string, link: string): Promise<WhatsAppChannelSummary> {
+    const response = await this.client.get<ApiSuccess<WhatsAppChannelSummary>>(`/api/v1/devices/${deviceKey}/whatsapp-channel`, { params: { link }, skipErrorToast: true });
     return response.data.data;
   }
 

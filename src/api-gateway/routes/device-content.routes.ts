@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
 import { cancelCommand, enqueueCommand, getCommand, listCommands, listStatusViewers, runCommand } from '../services/command.service';
+import { ServiceError } from '../services/service-error';
 import { mediaUrl } from '../../shared/media-url';
 
 const router = Router();
@@ -90,6 +91,30 @@ router.post('/devices/:key/profile/picture', validate({ params: deviceParams, bo
 });
 router.delete('/devices/:key/profile/picture', validate({ params: deviceParams }), async (request: Request, response: Response) => {
   response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'profile.picture', {}, 30_000) });
+});
+
+router.get('/devices/:key/whatsapp-groups', validate({ params: deviceParams }), async (request: Request, response: Response) => {
+  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'whatsapp.groups.list', {}, 40_000) });
+});
+
+const channelLookupSchema = z.object({ link: z.string().trim().min(1).max(500) }).strict();
+router.get('/devices/:key/whatsapp-channel', validate({ params: deviceParams, query: channelLookupSchema }), async (request: Request, response: Response) => {
+  const { link } = request.validated!.query as z.infer<typeof channelLookupSchema>;
+  const jid = /^[A-Za-z0-9_-]+@newsletter$/.test(link);
+  let lookup = link;
+  if (!jid) {
+    try {
+      const url = new URL(link);
+      if (!['whatsapp.com', 'www.whatsapp.com'].includes(url.hostname.toLowerCase()) || !url.pathname.startsWith('/channel/')) throw new Error('invalid channel link');
+      lookup = decodeURIComponent(url.pathname.slice('/channel/'.length).split('/')[0] ?? '');
+    } catch {
+      throw new ServiceError(400, 'INVALID_CHANNEL_LINK', 'Masukkan tautan undangan saluran WhatsApp yang valid.');
+    }
+  }
+  if (!lookup || lookup.length > 200) {
+    throw new ServiceError(400, 'INVALID_CHANNEL_LINK', 'Masukkan tautan undangan saluran WhatsApp yang valid.');
+  }
+  response.json({ success: true, data: await runCommand(request.tenant!.id, key(request), 'whatsapp.channel.lookup', { lookup }, 25_000) });
 });
 
 export default router;

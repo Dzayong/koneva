@@ -90,6 +90,40 @@ export default function DeviceDetailPage(props: {
         </div>
       )}
 
+      {device && (
+        <section className="rounded-2xl border bg-card p-5 shadow-card" aria-live="polite">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">Riwayat chat terbaru</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {device.history_sync_status === "syncing"
+                  ? "WhatsApp sedang menyinkronkan ringkasan riwayat terbaru."
+                  : device.history_sync_status === "paused"
+                    ? "Sinkronisasi riwayat dijeda oleh WhatsApp."
+                    : device.history_sync_status === "completed"
+                      ? device.history_sync_completion_explicit
+                        ? "Sinkronisasi riwayat terbaru terkonfirmasi selesai."
+                        : "Sinkronisasi berhenti, tetapi WhatsApp tidak mengonfirmasi 100%."
+                      : "Menunggu informasi sinkronisasi dari WhatsApp."}
+                {device.history_sync_status !== "completed" && device.history_sync_progress != null && ` · ${device.history_sync_progress}%`}
+                {device.history_sync_status === "completed" && device.history_sync_completion_explicit && " · 100%"}
+              </p>
+            </div>
+            <span className="text-sm font-medium tabular-nums">
+              {device.history_latest_message_at
+                ? new Date(device.history_latest_message_at).toLocaleString("id-ID")
+                : "Belum ada waktu pesan"}
+            </span>
+          </div>
+          {device.history_sync_status === "syncing" && (
+            <progress className="mt-4 h-2 w-full accent-primary" max={100} value={device.history_sync_progress ?? undefined} aria-label="Progres sinkronisasi riwayat" />
+          )}
+          <p className="mt-3 text-xs text-muted-foreground">
+            KONEVA hanya menyimpan waktu pesan terbaru yang tersinkron, bukan isi riwayat. Data ini bukan umur akun WhatsApp.
+          </p>
+        </section>
+      )}
+
       {isLoading || !device ? (
         <Skeleton className="h-24 w-full" />
       ) : (

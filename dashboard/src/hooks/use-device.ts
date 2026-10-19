@@ -7,7 +7,7 @@ export function useDevice(deviceKey: string) {
   return useQuery({
     queryKey: ["devices", deviceKey],
     queryFn: () => api.getDevice(deviceKey),
-    refetchInterval: DEVICE_REFETCH_INTERVAL_MS,
+    refetchInterval: (query) => query.state.data?.history_sync_status === "syncing" ? 2_500 : DEVICE_REFETCH_INTERVAL_MS,
     enabled: Boolean(deviceKey),
   });
 }

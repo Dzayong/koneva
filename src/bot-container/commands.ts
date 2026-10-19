@@ -230,6 +230,45 @@ export async function executeCommand(type: CommandType, payload: unknown, ctx: C
       return setPicture(ctx, payload as ProfilePicturePayload);
     case 'status.post':
       return postStatus(ctx, payload as StatusPayload);
+    case 'whatsapp.groups.list': {
+      const deadline = ctx.deadlineMs ?? COMMAND_DEADLINE_MS;
+      const [groups, communities] = await Promise.all([
+        withDeadline(ctx.sock.groupFetchAllParticipating(), deadline),
+        withDeadline(ctx.sock.communityFetchAllParticipating(), deadline),
+      ]);
+      // Baileys exposes communities through a separate query from regular groups.
+      // Merge by JID because some server versions include community roots in both responses.
+      const all = new Map([...Object.values(groups), ...Object.values(communities)].map((group) => [group.id, group]));
+      return [...all.values()].map((group) => ({
+        id: group.id,
+        name: group.subject || 'Grup tanpa nama',
+        member_count: group.size ?? group.participants?.length ?? 0,
+        description: group.desc ?? null,
+        is_community: Boolean(group.isCommunity),
+        is_community_announcement: Boolean(group.isCommunityAnnounce),
+        parent_community_jid: group.linkedParent ?? null,
+        announcement_only: Boolean(group.announce),
+        created_at: group.creation ? new Date(group.creation * 1000).toISOString() : null,
+      })).sort((a, b) => a.name.localeCompare(b.name, 'id'));
+    }
+    case 'whatsapp.channel.lookup': {
+      const { lookup } = payload as { lookup: string };
+      const isJid = /^[A-Za-z0-9_-]+@newsletter$/.test(lookup);
+      const key = isJid ? lookup : lookup.trim();
+      const channel = await withDeadline(
+        ctx.sock.newsletterMetadata(isJid ? 'jid' : 'invite', key),
+        ctx.deadlineMs ?? COMMAND_DEADLINE_MS,
+      );
+      if (!channel) throw new CommandFailure('CHANNEL_NOT_FOUND', 'Saluran tidak ditemukan dari tautan tersebut.');
+      return {
+        id: channel.id,
+        name: channel.name,
+        description: channel.description ?? null,
+        subscribers: channel.subscribers ?? null,
+        verification: channel.verification ?? 'UNVERIFIED',
+        invite: channel.invite ?? null,
+      };
+    }
     default:
       throw new CommandFailure('UNKNOWN_COMMAND', `Unknown command ${String(type)}`);
   }

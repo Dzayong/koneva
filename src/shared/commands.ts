@@ -1,5 +1,8 @@
 // Shared between the API gateway (which validates and enqueues) and the bot (which runs).
-export const COMMAND_TYPES = ['profile.get', 'profile.update', 'profile.picture', 'status.post'] as const;
+export const COMMAND_TYPES = [
+  'profile.get', 'profile.update', 'profile.picture', 'status.post',
+  'whatsapp.groups.list', 'whatsapp.channel.lookup',
+] as const;
 export type CommandType = (typeof COMMAND_TYPES)[number];
 
 export const commandChannel = (deviceKey: string): string => `bot:command:${deviceKey}`;

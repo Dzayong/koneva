@@ -49,6 +49,8 @@ test('routes map to the intended permission', () => {
   assert.equal(permissionFor('POST', '/message/send'), 'messages:send');
   assert.equal(permissionFor('GET', '/devices'), 'devices:read');
   assert.equal(permissionFor('GET', '/devices/WAPI-1/health'), 'devices:read');
+  assert.equal(permissionFor('GET', '/devices/WAPI-1/whatsapp-groups'), 'devices:read');
+  assert.equal(permissionFor('GET', '/devices/WAPI-1/whatsapp-channel'), 'devices:read');
   assert.equal(permissionFor('GET', '/devices/WAPI-1/qr'), 'devices:write');
   assert.equal(permissionFor('DELETE', '/devices/WAPI-1'), 'devices:delete');
   assert.equal(permissionFor('PATCH', '/devices/WAPI-1/persona'), 'devices:write');

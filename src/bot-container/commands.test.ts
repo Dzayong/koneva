@@ -43,6 +43,38 @@ test('profile.get reports name, About, photo and whether the number is a Busines
   assert.equal(out.phone, '628111');
 });
 
+test('WhatsApp group listing returns group and community summaries without participant phone numbers', async () => {
+  const { context } = ctx();
+  const sock = context.sock as unknown as Record<string, unknown>;
+  sock['groupFetchAllParticipating'] = async () => ({
+    'group@g.us': { id: 'group@g.us', subject: 'Komunitas RT', size: 12, desc: 'Info warga', participants: [{ id: '628111@s.whatsapp.net' }] },
+    'child@g.us': { id: 'child@g.us', subject: 'Keamanan', size: 8, linkedParent: 'group@g.us', participants: [{ id: '628222@s.whatsapp.net' }] },
+  });
+  sock['communityFetchAllParticipating'] = async () => ({
+    'group@g.us': { id: 'group@g.us', subject: 'Komunitas RT', size: 12, desc: 'Info warga', isCommunity: true, participants: [{ id: '628111@s.whatsapp.net' }] },
+  });
+  const result = await executeCommand('whatsapp.groups.list', {}, context) as Array<Record<string, unknown>>;
+  assert.equal(result.length, 2);
+  assert.equal(result[0]?.['id'], 'child@g.us');
+  assert.equal(result[0]?.['parent_community_jid'], 'group@g.us');
+  assert.equal(result[1]?.['is_community'], true);
+  assert.equal(JSON.stringify(result).includes('628111'), false);
+});
+
+test('WhatsApp channel lookup returns public channel metadata only', async () => {
+  const { context } = ctx();
+  const sock = context.sock as unknown as Record<string, unknown>;
+  sock['newsletterMetadata'] = async (type: string, key: string) => {
+    assert.equal(type, 'invite');
+    assert.equal(key, 'invite-code');
+    return { id: 'channel@newsletter', name: 'Kabar Toko', description: 'Info terbaru', subscribers: 42, verification: 'VERIFIED' };
+  };
+  const result = await executeCommand('whatsapp.channel.lookup', { lookup: 'invite-code' }, context) as Record<string, unknown>;
+  assert.equal(result['name'], 'Kabar Toko');
+  assert.equal(result['subscribers'], 42);
+  assert.equal(result['verification'], 'VERIFIED');
+});
+
 test('profile.get still answers when the About text or photo is unavailable', async () => {
   const { context } = ctx({ business: false });
   const sock = context.sock as unknown as Record<string, unknown>;

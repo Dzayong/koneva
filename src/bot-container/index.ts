@@ -17,6 +17,7 @@ import { PresenceRoutine } from './presence';
 import { CommandRunner } from './command-runner';
 import { getOrCreatePersona } from '../shared/persona';
 import { DeviceStatusNotifier } from './device-events';
+import { registerHistorySyncListener } from './history-sync';
 import type { BotConfig, ConnectionState, BotStatus } from './types';
 
 const DEVICE_STATUS_BY_BOT_STATUS: Record<BotStatus, string> = {
@@ -193,6 +194,7 @@ async function main(): Promise<void> {
     onSocketReady: (sock: WASocket) => {
       currentSocket = sock;
       registerReceiptListener(sock, log, queryFn, botConfig.botId);
+      registerHistorySyncListener(sock, botConfig.botId, queryFn, log);
       registerIncomingMessageListener(sock, botConfig.botId, log, queryFn, async (message) => {
         if (message.consentCommand === 'stop') {
           await sendStopConfirmation(message, sock, log);

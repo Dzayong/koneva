@@ -44,6 +44,11 @@ export interface Device {
   qr_code: string | null;
   health_score: number;
   last_connected: string | null;
+  history_sync_status?: "not_started" | "syncing" | "paused" | "completed";
+  history_sync_progress?: number | null;
+  history_sync_completion_explicit?: boolean;
+  history_latest_message_at?: string | null;
+  history_synced_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -562,6 +567,26 @@ export interface DeviceProfile {
   is_business: boolean; business: BusinessProfile | null;
 }
 export interface ProfileUpdate { name?: string; about?: string; business?: BusinessUpdate }
+
+export interface WhatsAppGroupSummary {
+  id: string;
+  name: string;
+  member_count: number;
+  description: string | null;
+  is_community: boolean;
+  is_community_announcement: boolean;
+  parent_community_jid: string | null;
+  announcement_only: boolean;
+  created_at: string | null;
+}
+export interface WhatsAppChannelSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  subscribers: number | null;
+  verification: "VERIFIED" | "UNVERIFIED";
+  invite: string | null;
+}
 
 export interface StatusViewers { viewers: Array<{ number: string | null; viewed_at: string }>; total: number }
 
