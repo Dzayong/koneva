@@ -12,7 +12,7 @@ Port :13000 **tidak diakses** untuk menyusun dokumen ini — datanya dari `docke
 | `:13000` personal (real WhatsApp, real DB) | **Owner saja** yang menjalankan `make update`/`make ps`. Agen (Claude/Codex/Kimi) **tidak boleh** mengakses/mengubah/restart/deploy tanpa 4 langkah di bawah ("ATURAN KERAS :13000"). | Konfirmasi eksplisit owner, per giliran. |
 | `:13200`/`:13300` dev/operator sandbox, harness disposable | Claude boleh start/stop/uji bebas — data sintetis, transport mock. | Tidak ada; sudah disposable by design. |
 | VPS (`91.98.225.235`, kunci `~/.ssh/mps_key`) | Belum ada task yang mengotorisasi akses hari ini. | Izin eksplisit owner per task. |
-| GitHub (`Dzayong/koneva`) | Hanya Claude yang commit/push ke repo proyek (aturan owner 2026-09-28, lihat `ROADMAP_2026-09-28.md`). | Push develop butuh autentikasi Git yang valid di sandbox eksekusi (lihat T0.4 di `STATUS_PROYEK.md` — saat ini belum ada). |
+| GitHub (`Dzayong/koneva`) | Branch kerja proyek `develop`; jangan push `master`. | Autentikasi SSH sudah tersedia; T0.4 dan Gerbang 0 selesai pada 2026-09-29 (lihat `STATUS_PROYEK.md`). |
 
 ## Tabel port
 
@@ -50,8 +50,9 @@ luar itu. Proses wajib sebelum deploy batch (dicatat juga di `docs/HANDOFF.md` d
 4. Baru deploy **batch Gerbang** ke `:13000` dijalankan.
 
 Tanpa keempat langkah itu selesai, agen dilarang mengakses, mengubah, me-restart, atau deploy ke `:13000` —
-untuk task apa pun. Gerbang 0 belum lulus selama T0.4 belum selesai (lihat `STATUS_PROYEK.md`), jadi belum ada
-batch yang memenuhi syarat deploy. Agen bekerja di `:13200`/`:13300`/harness disposable saja.
+untuk task apa pun. **Gerbang 0 dan T0.4 selesai pada 2026-09-29** (lihat `STATUS_PROYEK.md`); syarat itu bukan
+blocker saat ini. Deploy batch tetap memerlukan laporan perubahan/bukti, pemeriksaan PM, dan persetujuan owner
+untuk giliran tersebut. Agen bekerja di `:13200`/`:13300`/harness disposable bila persetujuan batch belum ada.
 
 ## DEV banner dan sandbox (`:13200`)
 
