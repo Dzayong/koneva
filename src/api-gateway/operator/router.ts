@@ -7,9 +7,9 @@ import { z } from 'zod';
 import type { OperatorConfig } from './config';
 import { authenticate, checkCsrf, checkOrigin, clearSessionCookie, login, me, reserveLoginAttempt, sessionToken } from './auth';
 import { operatorTransaction, OperatorError, type Actor } from './core';
-import { confirmPayment, decideStudent } from './mutations';
+import { closeWorkspace, confirmPayment, decideStudent } from './mutations';
 import { otpAlerts } from './alerts';
-import { ownerInsights, ownerDeviceList, ownerDeviceDetail, ownerSystemHealth, ownerWorkspaceList, ownerWorkspaceDetail } from './insights';
+import { ownerInsights, ownerDeviceList, ownerDeviceDetail, ownerSystemHealth, ownerWorkspaceList, ownerWorkspaceDetail, ownerWorkspaceCostMeter } from './insights';
 import { getSystemWhatsappOtpSender, pairSystemWhatsappOtpSender, queueSystemWhatsappNotificationTest, saveSystemWhatsappNotificationSettings } from './system-whatsapp-otp';
 import { invoiceDetail, listAudit, listInvoices, listStudents, listWorkspaces, studentDetail, workspaceDetail } from './reads';
 
@@ -24,6 +24,7 @@ const paymentSchema = z.object({ method: z.enum(['transfer','ewallet','qris','tu
   expected: z.object({ amount_idr: z.number().int().nonnegative(), version: z.number().int().positive() }).strict() }).strict();
 const decisionSchema = z.object({ decision: z.enum(['approve','reject']), reason: z.string().max(500).optional(),
   expected: z.object({ request_id: z.string().uuid(), version: z.number().int().positive() }).strict() }).strict();
+const closeWorkspaceSchema = z.object({ confirmation: z.string().trim().min(1).max(100), reason: z.string().trim().min(10).max(500) }).strict();
 const ownerPageSchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
   offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
@@ -184,6 +185,15 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
   });
   router.get('/insights/workspaces/:id', permit('owner:insights'), async (request, response) => {
     response.json({ success: true, data: await ownerWorkspaceDetail(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown', uuid.parse(request.params['id'])) });
+  });
+  router.post('/insights/workspaces/:id/close', permit('owner:insights'), async (request, response) => {
+    const result = await closeWorkspace(db, actorOf(response), uuid.parse(request.params['id']), keySchema.parse(request.get('Idempotency-Key')),
+      closeWorkspaceSchema.parse(request.body), response.locals['requestId'] as string, request.ip ?? 'unknown');
+    if (result.replay) response.set('Idempotent-Replay', 'true');
+    response.json(result.body);
+  });
+  router.get('/insights/workspaces/:id/cost-meter', permit('owner:insights'), async (request, response) => {
+    response.json({ success: true, data: await ownerWorkspaceCostMeter(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown', uuid.parse(request.params['id'])) });
   });
   router.get('/audit', permit('audit:read'), async (request, response) => {
     const filter = auditSchema.parse(request.query);

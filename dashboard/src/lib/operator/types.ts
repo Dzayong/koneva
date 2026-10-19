@@ -248,6 +248,18 @@ export interface OwnerWorkspaceDetailData {
   members: OwnerWorkspaceMember[];
   recent_payments: OwnerWorkspacePayment[];
 }
+export interface CloseOwnerWorkspaceInput { confirmation: string; reason: string }
+export interface CloseOwnerWorkspaceResult { id: string; status: "deleted"; closed_at: string; purge_after: string }
+export interface OwnerWorkspaceCostMeter {
+  measuredAt: string; windowHours: number;
+  workspace: { id: string; name: string; planId: string | null; planName: string | null };
+  database: { estimatedBytes: number; totalDatabaseBytes: number; confidence: string; billingReady: false; method: string; note: string;
+    sampledTables: Array<{ table: string; relationBytes: number; samplePercent: number; sampledRows: number }> };
+  devices: Array<{ id: string; label: string; status: string; sessionStorageBytes: number | null;
+    queue: { waiting: number | null; active: number | null; delayed: number | null; failed: number | null; deadLetter: number | null };
+    cpuPercentAvg: number | null; memoryUsageBytesAvg: number | null; memoryUsageBytesMax: number | null; resourceSamples: number }>;
+  pricing: { status: "not_calculated"; note: string };
+}
 
 export function parseOwnerDeviceSummary(v: unknown): OwnerDeviceSummary {
   const d = obj(v);
@@ -316,6 +328,27 @@ export function parseOwnerWorkspaceDetailData(v: unknown): OwnerWorkspaceDetailD
     devices: arr(d["devices"]).map((dv) => { const x = obj(dv); return { id: str(x["id"]), label: str(x["label"]), status: str(x["status"]), status_label: str(x["status_label"]), health_score: numOrNull(x["health_score"]), health_badge: str(x["health_badge"]) }; }),
     members: arr(d["members"]).map((m) => { const x = obj(m); return { name: str(x["name"]), email: str(x["email"]), role: str(x["role"]), joined_at: strOrNull(x["joined_at"]) }; }),
     recent_payments: arr(d["recent_payments"]).map((p) => { const x = obj(p); return { id: str(x["id"]), number: str(x["number"]), amount_idr: num(x["amount_idr"]), status: str(x["status"]), plan_name: strOrNull(x["plan_name"]), cycle: strOrNull(x["cycle"]), created_at: strOrNull(x["created_at"]), paid_at: strOrNull(x["paid_at"]) }; }),
+  };
+}
+export function parseOwnerWorkspaceCostMeter(v: unknown): OwnerWorkspaceCostMeter {
+  const d = obj(v); const w = obj(d["workspace"]); const database = obj(d["database"]); const pricing = obj(d["pricing"]);
+  return {
+    measuredAt: str(d["measuredAt"]), windowHours: num(d["windowHours"]),
+    workspace: { id: str(w["id"]), name: str(w["name"]), planId: strOrNull(w["planId"]), planName: strOrNull(w["planName"]) },
+    database: {
+      estimatedBytes: num(database["estimatedBytes"]), totalDatabaseBytes: num(database["totalDatabaseBytes"]),
+      confidence: str(database["confidence"]), billingReady: false, method: str(database["method"]), note: str(database["note"]),
+      sampledTables: arr(database["sampledTables"]).map((item) => { const x = obj(item); return {
+        table: str(x["table"]), relationBytes: num(x["relationBytes"]), samplePercent: num(x["samplePercent"]), sampledRows: num(x["sampledRows"]),
+      }; }),
+    },
+    devices: arr(d["devices"]).map((item) => { const x = obj(item); const q = obj(x["queue"]); return {
+      id: str(x["id"]), label: str(x["label"]), status: str(x["status"]), sessionStorageBytes: numOrNull(x["sessionStorageBytes"]),
+      queue: { waiting: numOrNull(q["waiting"]), active: numOrNull(q["active"]), delayed: numOrNull(q["delayed"]), failed: numOrNull(q["failed"]), deadLetter: numOrNull(q["deadLetter"]) },
+      cpuPercentAvg: numOrNull(x["cpuPercentAvg"]), memoryUsageBytesAvg: numOrNull(x["memoryUsageBytesAvg"]),
+      memoryUsageBytesMax: numOrNull(x["memoryUsageBytesMax"]), resourceSamples: num(x["resourceSamples"]),
+    }; }),
+    pricing: { status: "not_calculated", note: str(pricing["note"]) },
   };
 }
 

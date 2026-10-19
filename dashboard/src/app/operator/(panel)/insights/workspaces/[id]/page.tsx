@@ -2,14 +2,24 @@
 
 import { use } from "react";
 import Link from "next/link";
-import { ArrowLeft, ShieldOff } from "lucide-react";
+import { ArrowLeft, ShieldOff, Trash2, TriangleAlert, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, FieldList } from "@/components/operator/field-list";
+import { OwnerWorkspaceCostMeter } from "@/components/operator/owner-workspace-cost-meter";
 import { ErrorState, ForbiddenState, LoadingBlock } from "@/components/operator/page-state";
+import { ReauthPrompt } from "@/components/operator/reauth-prompt";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useOperatorSession, useOwnerWorkspace } from "@/hooks/use-operator";
+import { useCloseOwnerWorkspace, useOperatorSession, useOwnerWorkspace } from "@/hooks/use-operator";
+import { OperatorApiError, operatorErrorText } from "@/lib/operator/errors";
+import { useGuardedSubmit } from "@/hooks/use-guarded-submit";
+import type { CloseOwnerWorkspaceResult } from "@/lib/operator/types";
 import { formatDate } from "@/lib/utils";
+import { useState } from "react";
 
 const fmt = (n: number) => new Intl.NumberFormat("id-ID").format(n);
 const fmtRp = (n: number) => `Rp${new Intl.NumberFormat("id-ID").format(n)}`;
@@ -90,6 +100,8 @@ export default function OwnerWorkspaceDetailPage(props: { params: Promise<{ id: 
           </div>
         </div>
       </Card>
+
+      <OwnerWorkspaceCostMeter workspaceId={id} />
 
       <Card title={`Anggota tim (${w.members.length})`}>
         {w.members.length > 0 ? (
@@ -208,7 +220,64 @@ export default function OwnerWorkspaceDetailPage(props: { params: Promise<{ id: 
         ) : <p className="text-sm text-muted-foreground">Belum ada riwayat pembayaran.</p>}
       </Card>
 
-      <p className="flex items-start gap-2 text-xs text-muted-foreground"><ShieldOff className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />Panel ini tidak menampilkan kunci API, secret webhook, kredensial, kode QR, sesi WhatsApp, atau isi pesan, dan tidak punya aksi terhadap workspace.</p>
+      <CloseWorkspaceCard id={id} name={w.name} status={w.status} />
+
+      <p className="flex items-start gap-2 text-xs text-muted-foreground"><ShieldOff className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />Panel ini tidak menampilkan kunci API, secret webhook, kredensial, kode QR, sesi WhatsApp, atau isi pesan.</p>
     </div>
+  );
+}
+
+function CloseWorkspaceCard({ id, name, status }: { id: string; name: string; status: string }) {
+  const [confirmation, setConfirmation] = useState("");
+  const [reason, setReason] = useState("");
+  const [acknowledged, setAcknowledged] = useState(false);
+  const closeWorkspace = useCloseOwnerWorkspace(id);
+  const { phase, run } = useGuardedSubmit<CloseOwnerWorkspaceResult>();
+  const input = { confirmation: confirmation.trim(), reason: reason.trim() };
+  const ready = input.confirmation === name && input.reason.length >= 10 && acknowledged;
+  const send = () => void run({ workspace_id: id, ...input }, (key) => closeWorkspace.mutateAsync({ input, key }));
+  const busy = phase.kind === "submitting";
+
+  return (
+    <Card title="Tutup akun dan hapus data">
+      {status === "deleted" ? (
+        <p role="status" className="text-sm text-muted-foreground">Workspace sudah ditutup. Data operasional memasuki masa retensi 30 hari; penghapusan fisik berjalan saat job retensi diaktifkan. Invoice dan catatan audit dipertahankan sesuai kebijakan retensi.</p>
+      ) : phase.kind === "done" ? (
+        <div role="status" className="space-y-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm">
+          <p className="flex items-center gap-2 font-medium"><CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />Workspace ditutup</p>
+          <p>Akses dan kredensial API sudah dinonaktifkan. Data operasional masuk masa retensi 30 hari hingga sekitar {phase.result.purge_after ? formatDate(phase.result.purge_after) : "30 hari lagi"}; penghapusan fisik berjalan saat job retensi diaktifkan. Invoice dan jejak audit tetap tersimpan sesuai kebijakan retensi.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden />
+            <p>Workspace langsung dinonaktifkan dan kredensial API dicabut. Data operasional tidak dihapus seketika: setelah masa retensi 30 hari, penghapusan fisik berjalan saat job retensi diaktifkan. Invoice dan audit tetap disimpan sesuai kebijakan. Pesan/perintah yang masih antre dibatalkan.</p>
+          </div>
+          {phase.kind === "conflict" || phase.kind === "failed" ? (
+            phase.error instanceof OperatorApiError && phase.error.kind === "reauth_required" ? <ReauthPrompt onSignedIn={send} /> :
+              <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">{operatorErrorText(phase.error)}</p>
+          ) : phase.kind === "unknown" ? (
+            <div role="alert" className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <p>Hasil belum pasti. Coba lagi dengan data yang sama; permintaan menggunakan kunci idempoten.</p>
+              <Button type="button" variant="outline" onClick={send} disabled={busy}>Periksa ulang</Button>
+            </div>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="close-workspace-name">Ketik nama workspace persis</Label>
+              <Input id="close-workspace-name" value={confirmation} maxLength={100} onChange={(e) => setConfirmation(e.target.value)} placeholder={name} disabled={busy} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="close-workspace-reason">Alasan penutupan (min. 10 karakter)</Label>
+              <Textarea id="close-workspace-reason" value={reason} maxLength={500} rows={2} onChange={(e) => setReason(e.target.value)} disabled={busy} />
+            </div>
+          </div>
+          <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} disabled={busy} className="mt-0.5 h-4 w-4 accent-[var(--primary)]" />Saya memahami workspace langsung dinonaktifkan dan penghapusan fisik menunggu masa retensi 30 hari serta job retensi aktif.</label>
+          <Button type="button" variant="destructive" onClick={send} disabled={!ready || busy}>
+            <Trash2 className="mr-2 h-4 w-4" aria-hidden />{busy ? "Menutup workspace…" : "Tutup akun dan jadwalkan pembersihan"}
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 }

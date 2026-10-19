@@ -126,6 +126,13 @@ Restrictions now in the API itself (`middleware/admin-access.ts`):
 
 ## Cleanup and retention
 
+Owner operators may close an individual customer workspace from its owner-insights detail page. The action requires a recently authenticated
+operator session, the exact workspace name, a reason, and an idempotency key. It immediately marks the tenant deleted, revokes its API keys,
+cancels queued messages/commands and scheduled campaigns, and audits the actor and reason. It refuses system workspaces and any workspace with
+a message or command actively in progress. It does not immediately erase the database: the existing closed-account policy begins its 30-day
+retention window, after which the separately provisioned retention executor must run the purge job. Invoice records and append-only operator audit
+records remain governed by their own retention rules.
+
 Hourly when the panel is enabled (first run one minute after start), and callable as `cleanupOperatorData()`:
 - sessions ended (revoked or expired) more than a day ago; challenges expired/consumed more than a day ago; expired login/MFA throttle buckets;
 - **idempotency rows older than `OPERATOR_IDEMPOTENCY_RETENTION_DAYS` (default 7, minimum 3 = the 72-hour replay promise; smaller values stop startup).**

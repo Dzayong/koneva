@@ -561,6 +561,74 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
     assert.ok(auditRow.rowCount! >= 1, 'workspace detail view is audited');
   });
 
+  await t.test('owner can close one customer workspace through the guarded retention flow', async () => {
+    const owner = phaseAOwner, ws = await workspace(), exactName = `Workspace ${ws}`;
+    const apiKeyId = randomUUID(), msgId = randomUUID(), deviceId = randomUUID(), runningCommandId = randomUUID(), queuedCommandId = randomUUID();
+    await pool.query('UPDATE tenants SET name=$2 WHERE id=$1', [ws, exactName]);
+    await pool.query('INSERT INTO devices(id,tenant_id,device_key,label) VALUES ($1,$2,$3,$4)', [deviceId, ws, `WAPI-${deviceId.slice(0,8)}`, 'Device Sintetis']);
+    await pool.query(`INSERT INTO api_keys(id,tenant_id,name,prefix,key_hash,scopes) VALUES ($1,$2,'Synthetic','wgk_test','a'.repeat(64),ARRAY['messages:send'])`, [apiKeyId, ws]);
+    await pool.query(`INSERT INTO messages(id,tenant_id,to_number,content,status) VALUES ($1,$2,'6281234567890','Synthetic pending message','queued')`, [msgId, ws]);
+    await pool.query(`INSERT INTO device_commands(id,tenant_id,device_id,device_key,type,status) VALUES
+      ($1,$2,$3,$4,'status.post','running'),($5,$2,$3,$4,'status.post','queued')`, [runningCommandId, ws, deviceId, `WAPI-${deviceId.slice(0,8)}`, queuedCommandId]);
+    const body = { confirmation: exactName, reason: 'Customer requested account deletion' };
+    const mismatch = await call(`/insights/workspaces/${ws}/close`, { session: owner, method: 'POST', key: randomUUID(), body: { ...body, confirmation: 'wrong name' } });
+    assertCode(mismatch, 409, 'WORKSPACE_CONFIRMATION_MISMATCH');
+    assert.equal((await pool.query('SELECT status FROM tenants WHERE id=$1', [ws])).rows[0]?.status, 'active');
+
+    const key = randomUUID();
+    const busy = await call(`/insights/workspaces/${ws}/close`, { session: owner, method: 'POST', key, body });
+    assertCode(busy, 409, 'WORKSPACE_HAS_ACTIVE_JOBS');
+    assert.equal((await pool.query('SELECT status FROM tenants WHERE id=$1', [ws])).rows[0]?.status, 'active');
+    await pool.query("UPDATE device_commands SET status='done',finished_at=now() WHERE id=$1", [runningCommandId]);
+    const closed = await call(`/insights/workspaces/${ws}/close`, { session: owner, method: 'POST', key, body });
+    assert.equal(closed.status, 200, closed.text);
+    assert.equal(closed.body.data.status, 'deleted');
+    assert.ok(closed.body.data.purge_after);
+    assert.equal((await pool.query('SELECT status FROM tenants WHERE id=$1', [ws])).rows[0]?.status, 'deleted');
+    assert.equal((await pool.query('SELECT revoked_at IS NOT NULL AS revoked FROM api_keys WHERE id=$1', [apiKeyId])).rows[0]?.revoked, true);
+    assert.deepEqual((await pool.query('SELECT status,error_message FROM messages WHERE id=$1', [msgId])).rows[0], { status: 'failed', error_message: 'workspace_closed' });
+    assert.equal((await pool.query('SELECT status,error FROM device_commands WHERE id=$1', [queuedCommandId])).rows[0]?.status, 'cancelled');
+    assert.equal(Number((await pool.query('SELECT count(*)::int AS n FROM memberships WHERE tenant_id=$1', [ws])).rows[0]?.n), 1, 'membership is retained so the scheduled retention job can remove orphaned users safely');
+    const audit = await pool.query('SELECT action,reason FROM operator_audit WHERE target_id=$1 AND action=$2 ORDER BY at DESC LIMIT 1', [ws, 'owner.workspace.close']);
+    assert.equal(audit.rows[0]?.reason, body.reason);
+    assert.equal(audit.rows[0]?.action, 'owner.workspace.close');
+    const replay = await call(`/insights/workspaces/${ws}/close`, { session: owner, method: 'POST', key, body });
+    assert.equal(replay.status, 200); assert.equal(replay.headers.get('idempotent-replay'), 'true');
+    assertCode(await call(`/insights/workspaces/${ws}/close`, { session: op, method: 'POST', key: randomUUID(), body }), 403, 'FORBIDDEN');
+  });
+
+  await t.test('Phase A: workspace cost meter is owner-only, audited, and contains aggregate resource data only', async () => {
+    const owner = phaseAOwner;
+    const ws = await workspace();
+    const deviceId = randomUUID();
+    await pool.query('INSERT INTO devices(id,tenant_id,device_key,label,status) VALUES ($1,$2,$3,$4,$5)', [deviceId, ws, `WAPI-${deviceId.slice(0,8)}`, 'Device Sintetis', 'online']);
+    await pool.query(`INSERT INTO resource_usage_hourly(bucket_start,resource_key,tenant_id,device_id,kind,cpu_percent_sum,memory_usage_bytes_sum,memory_usage_bytes_max,memory_limit_bytes_max,sample_count)
+      VALUES (date_trunc('hour',now()),$1,$2,$3,'device',50,1024,768,2048,2)`, [`device:${deviceId}`, ws, deviceId]);
+    await pool.query(`INSERT INTO device_usage_hourly(bucket_start,resource_key,tenant_id,device_id,session_storage_bytes,queue_waiting_count,queue_active_count,queue_delayed_count,queue_failed_count,dead_letter_count,sampled_at)
+      VALUES (date_trunc('hour',now()),$1,$2,$3,1024,3,1,2,4,5,now())`, [`device:${deviceId}`, ws, deviceId]);
+
+    const response = await call(`/insights/workspaces/${ws}/cost-meter`, { session: owner });
+    assert.equal(response.status, 200, response.text);
+    const meter = response.body.data;
+    assert.equal(meter.workspace.id, ws);
+    assert.equal(meter.database.billingReady, false);
+    assert.equal(meter.database.confidence, 'directional');
+    assert.ok(Array.isArray(meter.database.sampledTables));
+    assert.equal(meter.devices.length, 1);
+    assert.equal(meter.devices[0].cpuPercentAvg, 25);
+    assert.equal(meter.devices[0].memoryUsageBytesMax, 768);
+    assert.equal(meter.devices[0].sessionStorageBytes, 1024);
+    assert.deepEqual(meter.devices[0].queue, { waiting: 3, active: 1, delayed: 2, failed: 4, deadLetter: 5 });
+    assert.equal(meter.pricing.status, 'not_calculated');
+    const encoded = JSON.stringify(meter);
+    for (const forbidden of ['content', 'phone_number', 'api_key', 'webhook_secret']) assert.equal(encoded.includes(forbidden), false);
+    const auditRow = await pool.query("SELECT 1 FROM operator_audit WHERE action='owner.workspace_cost_meter.view' AND operator_id=$1 AND target_id=$2", [owner.id, ws]);
+    assert.ok(auditRow.rowCount! >= 1, 'cost meter view is audited');
+
+    const staff = await operator(['payments:read']);
+    assertCode(await call(`/insights/workspaces/${ws}/cost-meter`, { session: staff }), 403, 'FORBIDDEN');
+  });
+
   await t.test('Phase A: owner insights includes device_counts', async () => {
     const owner = phaseAOwner;
     const response = await call('/insights', { session: owner });
@@ -632,7 +700,7 @@ test('operator HTTP + PostgreSQL contract (disposable database only)', { skip: !
 
   await t.test('Phase A: staff without owner:insights is denied on all Phase A endpoints', async () => {
     const staff = await operator(['payments:read']);
-    for (const route of ['/insights/devices', '/insights/devices/' + randomUUID(), '/insights/health', '/insights/workspaces', '/insights/workspaces/' + randomUUID()]) {
+    for (const route of ['/insights/devices', '/insights/devices/' + randomUUID(), '/insights/health', '/insights/workspaces', '/insights/workspaces/' + randomUUID(), `/insights/workspaces/${randomUUID()}/cost-meter`]) {
       assertCode(await call(route, { session: staff }), 403, 'FORBIDDEN');
     }
   });

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { otpLimits } from '../services/otp-limits';
 import { lockActor, OperatorError, operatorTransaction, writeAudit, type Actor } from './core';
+import { estimateDatabaseUsage } from '../../device-manager/database-usage';
 
 /** Owner-only snapshot. It deliberately returns aggregate and display-safe fields, never message or recipient contents. */
 export async function ownerInsights(db: Pool, actor: Actor, requestId: string, clientIp: string) {
@@ -533,5 +534,82 @@ export async function ownerWorkspaceDetail(db: Pool, actor: Actor, requestId: st
       created_at: (p['created_at'] as Date | null)?.toISOString() ?? null,
       paid_at: (p['paid_at'] as Date | null)?.toISOString() ?? null,
     })),
+  };
+}
+
+/** An explicit, owner-only cost-meter read. Database size is sampled on demand, never in a poller. */
+export async function ownerWorkspaceCostMeter(db: Pool, actor: Actor, requestId: string, clientIp: string, workspaceId: string) {
+  await operatorTransaction(db, async (client) => {
+    await lockActor(client, actor, 'owner:insights', false);
+    await writeAudit(client, actor, 'owner.workspace_cost_meter.view', 'workspace', workspaceId, 'Meteran biaya workspace', {}, requestId, clientIp);
+  });
+  const workspace = await db.query<{ id: string; name: string; plan_name: string | null; plan_id: string | null }>(
+    `SELECT t.id, t.name, p.id AS plan_id, p.name AS plan_name
+     FROM tenants t LEFT JOIN subscriptions s ON s.tenant_id=t.id
+     LEFT JOIN plans p ON p.id=s.plan_id
+     WHERE t.id=$1 AND t.is_system=false`, [workspaceId],
+  );
+  const w = workspace.rows[0];
+  if (!w) throw new OperatorError(404, 'WORKSPACE_NOT_FOUND', 'Workspace tidak ditemukan.');
+
+  const [database, devices] = await Promise.all([
+    estimateDatabaseUsage(db),
+    db.query<{
+      id: string; label: string; status: string; session_storage_bytes: string | null;
+      waiting_count: number | null; active_count: number | null; delayed_count: number | null;
+      failed_count: number | null; dead_letter_count: number | null; cpu_percent_avg: string | null;
+      memory_usage_bytes_avg: string | null; memory_usage_bytes_max: string | null; sample_count: number;
+    }>(
+      `SELECT d.id, COALESCE(d.label,d.device_key) AS label, d.status,
+         du.session_storage_bytes, du.queue_waiting_count AS waiting_count,
+         du.queue_active_count AS active_count, du.queue_delayed_count AS delayed_count,
+         du.queue_failed_count AS failed_count, du.dead_letter_count,
+         ru.cpu_percent_avg, ru.memory_usage_bytes_avg, ru.memory_usage_bytes_max,
+         COALESCE(ru.sample_count,0)::int AS sample_count
+       FROM devices d
+       LEFT JOIN LATERAL (
+         SELECT session_storage_bytes, queue_waiting_count, queue_active_count,
+                queue_delayed_count, queue_failed_count, dead_letter_count
+         FROM device_usage_hourly WHERE device_id=d.id
+         ORDER BY bucket_start DESC LIMIT 1
+       ) du ON true
+       LEFT JOIN LATERAL (
+         SELECT sum(cpu_percent_sum) / NULLIF(sum(sample_count),0) AS cpu_percent_avg,
+                sum(memory_usage_bytes_sum) / NULLIF(sum(sample_count),0) AS memory_usage_bytes_avg,
+                max(memory_usage_bytes_max) AS memory_usage_bytes_max,
+                sum(sample_count)::int AS sample_count
+         FROM resource_usage_hourly
+         WHERE device_id=d.id AND kind='device' AND bucket_start >= now()-interval '24 hours'
+       ) ru ON true
+       WHERE d.tenant_id=$1 ORDER BY d.created_at DESC, d.id`, [workspaceId],
+    ),
+  ]);
+  const dbTenant = database.tenants.find((tenant) => tenant.tenantId === workspaceId);
+  return {
+    measuredAt: database.measuredAt,
+    windowHours: 24,
+    workspace: { id: w.id, name: w.name, planId: w.plan_id, planName: w.plan_name },
+    database: {
+      estimatedBytes: dbTenant?.estimatedBytes ?? 0,
+      totalDatabaseBytes: database.totalDatabaseBytes,
+      confidence: database.confidence,
+      billingReady: false as const,
+      method: database.method,
+      note: database.note,
+      sampledTables: database.sampledTables,
+    },
+    devices: devices.rows.map((device) => ({
+      id: device.id, label: device.label, status: device.status,
+      sessionStorageBytes: device.session_storage_bytes === null ? null : Number(device.session_storage_bytes),
+      queue: {
+        waiting: device.waiting_count, active: device.active_count, delayed: device.delayed_count,
+        failed: device.failed_count, deadLetter: device.dead_letter_count,
+      },
+      cpuPercentAvg: device.cpu_percent_avg === null ? null : Number(device.cpu_percent_avg),
+      memoryUsageBytesAvg: device.memory_usage_bytes_avg === null ? null : Number(device.memory_usage_bytes_avg),
+      memoryUsageBytesMax: device.memory_usage_bytes_max === null ? null : Number(device.memory_usage_bytes_max),
+      resourceSamples: device.sample_count,
+    })),
+    pricing: { status: 'not_calculated' as const, note: 'Harga infra per workspace belum dihitung; diperlukan invoice provider dan alokasi biaya bersama.' },
   };
 }

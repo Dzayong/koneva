@@ -42,6 +42,48 @@ export async function confirmPayment(db: Pool, actor: Actor, id: string, key: st
 }
 
 export interface DecisionInput { decision: 'approve' | 'reject'; reason?: string | undefined; expected: { request_id: string; version: number } }
+
+export interface CloseWorkspaceInput { confirmation: string; reason: string }
+
+/** Close a customer workspace now; the existing 30-day retention job purges its tenant data later. */
+export async function closeWorkspace(db: Pool, actor: Actor, id: string, key: string, input: CloseWorkspaceInput, requestId: string, clientIp: string) {
+  return idempotent(db, actor, 'owner.workspace.close', id, key, input, 'owner:insights', async (client) => {
+    const workspace = (await client.query<{ name: string; status: string; is_system: boolean; retention_purged_at: Date | null }>(
+      'SELECT name,status,is_system,retention_purged_at FROM tenants WHERE id=$1 FOR UPDATE', [id],
+    )).rows[0];
+    if (!workspace || workspace.is_system) throw new OperatorError(404, 'WORKSPACE_NOT_FOUND', 'Workspace tidak ditemukan.');
+    if (workspace.status === 'deleted' || workspace.retention_purged_at) {
+      throw new OperatorError(409, 'WORKSPACE_ALREADY_CLOSED', 'Workspace ini sudah ditutup atau datanya sudah diproses.');
+    }
+    if (input.confirmation !== workspace.name) {
+      throw new OperatorError(409, 'WORKSPACE_CONFIRMATION_MISMATCH', 'Nama workspace tidak cocok. Muat ulang detail sebelum mencoba lagi.');
+    }
+    const active = (await client.query<{ sending: number; running: number }>(
+      `SELECT
+        (SELECT count(*)::int FROM messages WHERE tenant_id=$1 AND status='sending') AS sending,
+        (SELECT count(*)::int FROM device_commands WHERE tenant_id=$1 AND status='running') AS running`, [id],
+    )).rows[0]!;
+    if (active.sending > 0 || active.running > 0) {
+      throw new OperatorError(409, 'WORKSPACE_HAS_ACTIVE_JOBS', 'Workspace masih memiliki pesan atau perintah yang sedang diproses. Tunggu hingga selesai lalu coba lagi.', active);
+    }
+
+    const closed = (await client.query<{ closed_at: Date }>(
+      `UPDATE tenants SET status='deleted' WHERE id=$1 AND is_system=false RETURNING closed_at`, [id],
+    )).rows[0];
+    if (!closed) throw new OperatorError(404, 'WORKSPACE_NOT_FOUND', 'Workspace tidak ditemukan.');
+    await client.query(`UPDATE messages SET status='failed',error_message='workspace_closed'
+      WHERE tenant_id=$1 AND status IN ('queued','quota_hold')`, [id]);
+    await client.query(`UPDATE device_commands SET status='cancelled',error='workspace_closed',finished_at=now()
+      WHERE tenant_id=$1 AND status='queued'`, [id]);
+    await client.query(`UPDATE scheduled_campaigns SET status='cancelled',claimed_at=NULL
+      WHERE tenant_id=$1 AND status IN ('scheduled','processing')`, [id]);
+    await client.query('UPDATE api_keys SET revoked_at=COALESCE(revoked_at,now()) WHERE tenant_id=$1', [id]);
+    await writeAudit(client, actor, 'owner.workspace.close', 'workspace', id, workspace.name,
+      { status: { from: workspace.status, to: 'deleted' } }, requestId, clientIp, input.reason.trim());
+    return { id, status: 'deleted', closed_at: closed.closed_at.toISOString(), purge_after: new Date(closed.closed_at.getTime() + 30 * 86_400_000).toISOString() };
+  });
+}
+
 export async function decideStudent(db: Pool, actor: Actor, id: string, key: string, input: DecisionInput, requestId: string) {
   return idempotent(db, actor, 'student_request.decision', id, key, input, 'students:decide', async (client) => {
     const target = (await client.query<{ tenant_id: string }>('SELECT tenant_id FROM student_requests WHERE id=$1', [id])).rows[0];

@@ -10,6 +10,8 @@ import { createKubernetesClients, KubernetesBotManager } from './kubernetes';
 import type { BotOrchestrator, DeviceManagerConfig, OrchestrationMode } from './types';
 import { safeEqual } from '../shared/utils/secure-compare';
 import { readResourceHistory, startResourceUsageCollector } from './resource-usage';
+import { readDeviceUsageHistory, RedisDeviceUsageReader, startDeviceUsageCollector } from './device-usage';
+import { estimateDatabaseUsage } from './database-usage';
 
 const createDeviceSchema = z.object({
   tenant_id: z.string().uuid(),
@@ -116,6 +118,30 @@ export function createDeviceManagerApp(orchestrator: BotOrchestrator): express.E
       }
       throw error;
     }
+  }));
+
+  app.get('/resources/usage/history', asyncRoute(async (request, response) => {
+    const parsed = resourceHistorySchema.safeParse(request.query);
+    if (!parsed.success) {
+      response.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', details: parsed.error.flatten() } });
+      return;
+    }
+    const to = parsed.data.to ?? new Date();
+    const from = parsed.data.from ?? new Date(to.getTime() - 24 * 60 * 60_000);
+    try {
+      const data = await readDeviceUsageHistory(pool, { from, to, tenantId: parsed.data.tenant_id });
+      response.json({ success: true, data });
+    } catch (error) {
+      if (error instanceof Error && (error.message === 'Device usage history range exceeds 31 days' || error.message === 'Invalid device usage history range')) {
+        response.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: error.message } });
+        return;
+      }
+      throw error;
+    }
+  }));
+
+  app.get('/resources/database/estimate', asyncRoute(async (_request, response) => {
+    response.json({ success: true, data: await estimateDatabaseUsage(pool) });
   }));
 
   app.post('/devices', asyncRoute(async (request, response) => {
@@ -274,6 +300,15 @@ export async function main(): Promise<void> {
   const stopResourceCollector = startResourceUsageCollector(orchestrator, pool, (error) => {
     logger.warn('Unable to collect resource usage snapshot', { mode: orchestrator.mode, error });
   });
+  const deviceUsageReader = new RedisDeviceUsageReader(managerConfig.redisUrl);
+  const stopDeviceUsageCollector = startDeviceUsageCollector(pool, {
+    sessionRoot: managerConfig.sessionHostPath,
+    reader: deviceUsageReader,
+    ...(managerConfig.mode === 'docker' ? {} : {
+      measureSession: async () => { throw new Error('Session storage metrics are unavailable for this orchestration mode'); },
+    }),
+    onError: (error) => logger.warn('Unable to collect device usage snapshot', { mode: orchestrator.mode, error }),
+  });
   const server = http.createServer(createDeviceManagerApp(orchestrator));
   server.listen(managerConfig.port, () => {
     logger.info('Device Manager listening', { port: managerConfig.port, mode: orchestrator.mode });
@@ -282,7 +317,8 @@ export async function main(): Promise<void> {
   const shutdown = (signal: string): void => {
     logger.info('Stopping Device Manager', { signal });
     stopResourceCollector();
-    server.close(() => void pool.end().finally(() => process.exit(0)));
+    stopDeviceUsageCollector();
+    server.close(() => void Promise.all([deviceUsageReader.close(), pool.end()]).finally(() => process.exit(0)));
     setTimeout(() => process.exit(1), 10_000).unref();
   };
   process.once('SIGTERM', () => shutdown('SIGTERM'));

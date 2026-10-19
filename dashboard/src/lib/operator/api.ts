@@ -2,11 +2,12 @@ import { operatorClient } from "./client";
 import {
   parseAudit, parseOtpAlerts, parseOwnerInsights, parseOwnerDeviceSummary, parseOwnerDeviceDetail, parseOwnerSystemHealth, parseSystemWhatsappOtpSender, parseOwnerWorkspaceSummary, parseOwnerWorkspaceDetailData,
   parseConfirmResult, parseDecisionResult, parseInvoiceDetail, parseInvoiceSummary, parseMe, parsePagination, parseSignedIn,
-  parseStudentDetail, parseStudentSummary, parseWorkspace,
+  parseStudentDetail, parseStudentSummary, parseWorkspace, parseOwnerWorkspaceCostMeter,
   type AuditEntry, type OtpAlerts, type SignedIn, type ConfirmPaymentInput, type ConfirmPaymentResult, type DecisionInput, type DecisionResult, type InvoiceDetail,
   type InvoiceSummary, type InvoiceStatus, type OperatorMe, type OwnerInsights, type OwnerDeviceSummary, type OwnerDeviceDetail, type OwnerSystemHealth, type SystemWhatsappOtpSender,
-  type OwnerWorkspaceSummary, type OwnerWorkspaceDetailData, type Page, type StudentRequestDetail, type StudentRequestSummary,
+  type OwnerWorkspaceSummary, type OwnerWorkspaceDetailData, type OwnerWorkspaceCostMeter, type Page, type StudentRequestDetail, type StudentRequestSummary,
   type StudentStatus, type WorkspaceDetail,
+  type CloseOwnerWorkspaceInput, type CloseOwnerWorkspaceResult,
 } from "./types";
 
 /** Every path below is part of the PROPOSED contract (dashboard/docs/operator-panel-contract.md). */
@@ -103,6 +104,17 @@ export const operatorApi = {
   },
   async getOwnerWorkspace(id: string): Promise<OwnerWorkspaceDetailData> {
     return parseOwnerWorkspaceDetailData((await operatorClient.request(`/insights/workspaces/${encodeURIComponent(id)}`))?.data);
+  },
+  async getOwnerWorkspaceCostMeter(id: string): Promise<OwnerWorkspaceCostMeter> {
+    return parseOwnerWorkspaceCostMeter((await operatorClient.request(`/insights/workspaces/${encodeURIComponent(id)}/cost-meter`, { timeoutMs: 15_000 }))?.data);
+  },
+  async closeOwnerWorkspace(id: string, input: CloseOwnerWorkspaceInput, idempotencyKey: string): Promise<CloseOwnerWorkspaceResult> {
+    const d = object((await operatorClient.request(`/insights/workspaces/${encodeURIComponent(id)}/close`, {
+      method: "POST", body: input, idempotencyKey,
+    }))?.data);
+    return { id: typeof d["id"] === "string" ? d["id"] : id, status: "deleted",
+      closed_at: typeof d["closed_at"] === "string" ? d["closed_at"] : "",
+      purge_after: typeof d["purge_after"] === "string" ? d["purge_after"] : "" };
   },
   async listAudit(params: { action?: string | undefined; targetType?: string | undefined; targetId?: string | undefined; from?: string | undefined; to?: string | undefined; offset?: number | undefined }): Promise<Page<AuditEntry>> {
     return page(await operatorClient.request("/audit", {

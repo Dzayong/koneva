@@ -66,13 +66,13 @@ export async function lockActor(client: PoolClient, actor: Actor, permission: st
 }
 
 export async function writeAudit(client: PoolClient, actor: Actor, action: string, targetType: string, targetId: string,
-  label: string | null, changes: Record<string, { from: unknown; to: unknown }>, requestId: string, clientIp?: string): Promise<void> {
-  // Only callers' explicit scalar status/method/version changes; never body, notes, email, or references.
+  label: string | null, changes: Record<string, { from: unknown; to: unknown }>, requestId: string, clientIp?: string, reason?: string): Promise<void> {
+  // Only callers' explicit scalar status/method/version changes and optional explicit audit reason; never request bodies, email, or payment references.
   const allowed: Record<string, unknown> = {};
   for (const key of ['status', 'method', 'version']) if (changes[key]) allowed[key] = changes[key];
   try {
-    await client.query(`INSERT INTO operator_audit (operator_id, action, target_type, target_id, target_label, changes, request_id, client_ip)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [actor.id, action, targetType, targetId, label, JSON.stringify(allowed), requestId, clientIp ?? null]);
+    await client.query(`INSERT INTO operator_audit (operator_id, action, target_type, target_id, target_label, reason, changes, request_id, client_ip)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [actor.id, action, targetType, targetId, label, reason?.slice(0, 500) ?? null, JSON.stringify(allowed), requestId, clientIp ?? null]);
   } catch { throw new AuditWriteError(); }
 }
 

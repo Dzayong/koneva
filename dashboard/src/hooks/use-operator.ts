@@ -5,7 +5,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { operatorApi } from "@/lib/operator/api";
 import { operatorClient } from "@/lib/operator/client";
 import { OperatorApiError } from "@/lib/operator/errors";
-import type { ConfirmPaymentInput, DecisionInput, InvoiceStatus, OperatorPermission, StudentStatus } from "@/lib/operator/types";
+import type { CloseOwnerWorkspaceInput, ConfirmPaymentInput, DecisionInput, InvoiceStatus, OperatorPermission, StudentStatus } from "@/lib/operator/types";
 
 export const OP = "operator" as const;
 
@@ -114,4 +114,21 @@ export function useOwnerWorkspaces(params: { q?: string; limit?: number; offset?
 }
 export function useOwnerWorkspace(id: string, enabled = true) {
   return useQuery({ queryKey: [OP, "owner-workspace", id], queryFn: () => operatorApi.getOwnerWorkspace(id), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always", refetchInterval: 60_000 });
+}
+/** On-demand estimate; it samples a bounded number of PostgreSQL blocks and is intentionally not polled. */
+export function useOwnerWorkspaceCostMeter(id: string, enabled = false) {
+  return useQuery({ queryKey: [OP, "owner-workspace-cost-meter", id], queryFn: () => operatorApi.getOwnerWorkspaceCostMeter(id), enabled,
+    retry: retryTransient, staleTime: 10 * 60_000, refetchOnWindowFocus: false });
+}
+export function useCloseOwnerWorkspace(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { input: CloseOwnerWorkspaceInput; key: string }) => operatorApi.closeOwnerWorkspace(id, v.input, v.key),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: [OP, "owner-workspace", id] });
+      void qc.invalidateQueries({ queryKey: [OP, "owner-workspaces"] });
+      void qc.invalidateQueries({ queryKey: [OP, "owner-insights"] });
+      void qc.invalidateQueries({ queryKey: [OP, "audit"] });
+    },
+  });
 }

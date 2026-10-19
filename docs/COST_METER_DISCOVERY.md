@@ -1,6 +1,6 @@
 # Cost-meter KONEVA: penemuan dan rancangan
 
-Tanggal rancangan: 2026-09-27. **Status 2026-10-17: fondasi implementasi lokal tersedia; rancangan biaya dan angka masih belum tervalidasi.** Device Manager memiliki snapshot CPU/RAM cgroup Docker untuk bot KONEVA per-device dan layanan bersama Compose yang dikenali di jaringan KONEVA (`postgres`, `redis`, `api-gateway`, `device-manager`, `dashboard`, serta layanan opsional). Endpoint `/resources` memerlukan admin key; respons menandai tiap sampel sebagai `device` atau `shared` agar biaya layanan bersama tidak dibebankan ke satu device. Kubernetes menyatakan metrik unavailable tanpa Metrics Server. Belum ada sampling historis, rollup, benchmark sintetis, invoice aktual, ataupun perubahan harga/paket. Merujuk brief PM di `docs/research/2026-09-27-koneva/README.md` ("Brief pekerjaan berikutnya untuk Claude") dan `pricing.md` (asumsi biaya yang belum diukur).
+Tanggal rancangan: 2026-09-27. **Status 2026-10-19: fondasi meter tersedia lokal dan lolos uji sintetis; belum menjadi data tagihan atau biaya final.** Device Manager memiliki snapshot CPU/RAM cgroup Docker untuk bot KONEVA per-device dan layanan bersama Compose yang dikenali di jaringan KONEVA (`postgres`, `redis`, `api-gateway`, `device-manager`, `dashboard`, serta layanan opsional). Endpoint `/resources` memerlukan admin key; respons menandai tiap sampel sebagai `device` atau `shared`. Collector per jam menyimpan CPU/RAM, ukuran file sesi Docker, dan jumlah job antrean per device; `/resources/usage/history` menyajikan histori admin-only. `/resources/database/estimate` mengukur porsi tenant dari tabel yang diizinkan dengan `TABLESAMPLE SYSTEM` dan hanya membaca `tenant_id`, bukan payload. Detail workspace di panel operator menyediakan `GET /api/operator/insights/workspaces/:id/cost-meter` secara manual, owner-only dan diaudit; tampilan memuat estimasi database serta agregat CPU/RAM, sesi, dan antrean per device. Hasil database diberi `confidence=directional` dan `billingReady=false`. Benchmark sintetis database lulus; benchmark idle/aktif multi-container, invoice aktual, dan perubahan harga/paket belum tersedia. Merujuk brief PM di `docs/research/2026-09-27-koneva/README.md` ("Brief pekerjaan berikutnya untuk Claude") dan `pricing.md` (asumsi biaya yang belum diukur).
 
 ## 1. Metrik yang sudah ada (inventarisasi, tanpa membangun ulang)
 
@@ -44,14 +44,14 @@ Semua ini hanya `COUNT(*)`, `pg_total_relation_size`, atau agregasi kolom non-ko
 
 ## 2. Gap (yang belum ada, dan hanya ini yang perlu dibangun)
 
-### 2.1 RAM/CPU **nyata per container**, bukan alokasi
-`docker stats --no-stream` (atau `/sys/fs/cgroup/.../memory.current`, `cpu.stat`) per nama container (`wa-bot-<device_key>`) tidak pernah dikumpulkan. Metrik Prometheus bot mengukur proses Node di dalam container, bukan cgroup dari luar — dua hal berbeda (RSS Node vs total container termasuk V8, native libs, tmpfs). Ini satu-satunya observability infra yang benar-benar hilang; sisanya (1.1–1.4) sudah cukup untuk komponen volume/queue/storage.
+### 2.1 RAM/CPU **nyata per container**, bukan alokasi — tersedia lokal
+Device Manager mengambil snapshot cgroup Docker melalui `/resources` dan mengagregasikannya per jam pada `resource_usage_hourly`; ini mengukur pemakaian container, bukan RSS Node. Layanan bersama tetap ditandai `shared`, bukan dibagi otomatis ke device. Kubernetes menyatakan metrik unavailable tanpa Metrics Server.
 
-### 2.2 Storage per tenant, bukan per tabel
-`pg_total_relation_size` memberi ukuran tabel keseluruhan, bukan per `tenant_id` (tidak ada partisi/tablespace per tenant). Perkiraan per tenant harus dihitung: `(baris tenant / total baris) × ukuran tabel`, cukup akurat untuk model biaya kasar, tidak untuk invoice yang presisi per byte.
+### 2.2 Storage per tenant, bukan per tabel — tersedia sebagai estimasi arah
+`/resources/database/estimate` memakai ukuran fisik relasi dan proporsi tenant dari sampel blok tabel, dibatasi maksimum kira-kira 4 MiB per tabel. Query hanya memilih `tenant_id`; statement timeout 5 detik dan transaksi read-only membatasi beban. Ukuran baris yang berbeda dan sampel yang kosong dapat membuat estimasi meleset. Endpoint secara eksplisit bukan untuk invoice atau quota.
 
-### 2.3 Tidak ada agregasi/rollup
-Semua di atas adalah data mentah atau snapshot; belum ada job yang meringkas "per device per hari" ke satu tabel kecil untuk laporan cepat tanpa scan tabel besar berulang.
+### 2.3 Agregasi resource per jam — tersedia lokal
+`resource_usage_hourly` menyimpan agregat CPU/RAM; `device_usage_hourly` menyimpan snapshot terakhir setiap jam untuk storage sesi dan status antrean. Data device dipertahankan 35 hari, endpoint histori membatasi rentang ke 31 hari. Ukuran sesi unavailable pada mode selain Docker; nilai `NULL` berarti data tidak tersedia, bukan nol.
 
 ### 2.4 Tidak ada percobaan menit dukungan
 "Menit dukungan per device" (disebut di riset PM) sama sekali tidak terekam di sistem manapun — itu proses manusia (tiket, chat), bukan metrik aplikasi. Ini murni operasional, tidak butuh kode.
@@ -84,7 +84,7 @@ Semua di lingkungan lokal/disposable yang sama seperti tes-tes sebelumnya (Postg
 3. **Storage sesi:** ukuran folder `sessions/<device>` sesungguhnya dari QR-scan pengujian yang sudah pernah dilakukan sebelumnya di proyek ini (bukan nomor baru) — `du -sh`, angka nyata bukan estimasi.
 5. **Storage DB per 1.000 pesan:** insert 1.000 baris sintetis ke `messages`+`message_status_history`, ukur delta `pg_total_relation_size` — memberi angka byte/pesan yang bisa dikalikan volume nyata nanti.
 
-Semua langkah di atas **desain, belum dijalankan** pada eksekusi rancangan ini; menjalankannya adalah pekerjaan implementasi terpisah (lihat estimasi §6).
+Benchmark DB sintetis telah dijalankan dengan 20.000 baris contoh dan distribusi tenant 80/20. Relasi `messages` berukuran 5.480.448 byte; sampel mengambil 17.552 baris (angka berubah karena TABLESAMPLE), dan estimasi porsi tenant besar 79,98%. Pengukuran terbaru selesai dalam 14 ms pada PostgreSQL disposable. Ini hanya menguji logika estimator, bukan kapasitas produksi. Benchmark idle/aktif multi-container, tekanan antrean, serta pencatatan biaya/invoice provider masih belum dijalankan.
 
 ## 5. Data invoice yang PM/finance perlukan (daftar, bukan angka)
 
@@ -101,13 +101,12 @@ Untuk mengganti asumsi `pricing.md` dengan angka nyata, PM perlu memasok atau me
 
 | Pekerjaan | Estimasi (hari-orang, sebelum review) |
 |---|---|
-| Kumpulkan `docker stats`/cgroup per container, ekspos sebagai metrik Prometheus berlabel `device_key` (gap 2.1) | 2 |
-| Job rollup harian "per device" ke tabel ringkas (gap 2.3), dari data yang sudah ada (1.1–1.4) | 1.5 |
-| Endpoint/skrip baca-saja: agregasi biaya per tenant dari rollup (bukan UI, hanya query) | 1 |
+| Benchmark idle/aktif multi-container dan tekanan antrean (gap §4) | 1.5 |
+| Endpoint owner-only + panel manual untuk agregat penggunaan workspace (belum ada tarif rupiah) | **tersedia lokal** |
 | Kebijakan dan implementasi retensi untuk `messages`/`message_status_history`/`webhook_logs`/`status_views`/`device_events` (gap 2.5) — **butuh keputusan pemilik dulu** soal jangka waktu | 1.5 (setelah keputusan) |
 | Jalankan lima benchmark sintetis di §4 dan tulis hasilnya | 1.5 |
-| Dashboard/report biaya untuk PM (opsional, di luar cakupan cost-meter inti) | 2–3 (terpisah, P1) |
-| **Total tanpa dashboard** | **≈ 7.5 hari** |
+| Dashboard/report biaya rupiah untuk PM (menunggu invoice dan keputusan alokasi shared-cost) | belum dapat diestimasi |
+| **Pekerjaan tersisa untuk biaya final** | invoice provider, keputusan alokasi dan retensi, benchmark T3.1 |
 
 ## 7. Yang secara sengaja TIDAK dikerjakan dalam dokumen ini
-Tidak mengubah harga atau struktur paket manapun. Tidak menjalankan benchmark sungguhan (baru rencana). Tidak menyentuh `.env`, produksi, atau nomor WhatsApp asli. Tidak mengklaim kapasitas nyata dari asumsi dokumen ini — semua angka di `pricing.md` tetap berstatus hipotesis sampai §4 benar-benar dijalankan dan §5 diisi PM/finance.
+Tidak mengubah harga atau struktur paket manapun. Tidak mengklaim kapasitas nyata dari uji sintetis. Tidak menyentuh `.env`, produksi, atau nomor WhatsApp asli. Semua angka di `pricing.md` tetap berstatus hipotesis sampai benchmark §4 dan data invoice §5 tersedia serta ditinjau PM/finance.
