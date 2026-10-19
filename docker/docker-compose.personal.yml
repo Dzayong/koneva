@@ -16,7 +16,6 @@ x-env: &env
   SESSION_HOST_PATH: ${SESSION_HOST_PATH:?Use scripts/start-personal.sh}
   ORCHESTRATOR: docker
   TRUST_PROXY_HOPS: "1"
-  WA_PROXY_URL: ${WA_PROXY_URL:-}
 
 services:
   postgres:

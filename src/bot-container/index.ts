@@ -40,8 +40,6 @@ const botEnvSchema = z.object({
   // Comma-separated list so a new key can be added ahead of removing the old
   // one during rotation. Falls back to the shared ADMIN_API_KEY if unset.
   BOT_API_KEYS: z.string().optional(),
-  // Optional egress proxy (socks5://, http://) so a device keeps one stable IP.
-  WA_PROXY_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
 });
 
 function loadConfig(): BotConfig {
@@ -67,7 +65,6 @@ function loadConfig(): BotConfig {
     reconnectDelaysMs: RECONNECT_DELAYS_MS,
     queueName: `queue:messages:${env.BOT_ID}`,
     apiKeys,
-    proxyUrl: env.WA_PROXY_URL || undefined,
   };
 }
 

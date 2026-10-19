@@ -9,7 +9,6 @@ export interface BotConfig {
   reconnectDelaysMs: number[];
   queueName: string;
   apiKeys: string[];
-  proxyUrl?: string | undefined;
 }
 
 export type BotStatus =

@@ -191,7 +191,7 @@ Lingkungan: WSL2 (Linux) di `/home/dzayong/projects/wa-gateway`, Windows di `/mn
 - **3 tes kesehatan butuh Postgres di `localhost:5432`**: nyalakan container lama `docker-postgres-1` /
   `docker-redis-1` hanya saat menjalankan `npm test`, lalu matikan.
 - Env: `.env.personal` (jangan di-commit). Contoh: `.env.personal.example`. Variabel penting selain DB/Redis:
-  `ADMIN_API_KEY`, `PAYMENT_INSTRUCTIONS`, `OPERATOR_CONTACT`, `WA_PROXY_URL`, `NEXT_PUBLIC_SITE_URL`
+  `ADMIN_API_KEY`, `PAYMENT_INSTRUCTIONS`, `OPERATOR_CONTACT`, `NEXT_PUBLIC_SITE_URL`
   (**harus diisi domain asli sebelum publik**; default `localhost` merusak canonical/sitemap).
 - Verifikasi UI dilakukan dengan Playwright/Chromium. Di WSL ini Chromium butuh libs tambahan:
   `LD_LIBRARY_PATH=/tmp/pwlibs/root/usr/lib/x86_64-linux-gnu` dan `NODE_PATH=$HOME/.claude/skills/playwright-skill/node_modules`,

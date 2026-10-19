@@ -6,7 +6,6 @@ import makeWASocket, {
 import type { Logger } from 'winston';
 import { loadSession, bindCredsUpdate } from './session';
 import { classifyDisconnect } from './disconnect';
-import { createProxyAgent, describeProxy } from './proxy';
 import { whatsappTransportMode } from '../shared/sandbox';
 import type { BotConfig, ConnectionState } from './types';
 
@@ -53,14 +52,6 @@ export async function startBotConnection(
     const { version, isLatest } = await fetchLatestBaileysVersion();
     logger.info('Using Baileys version', { botId: config.botId, version, isLatest });
 
-    const agent = createProxyAgent(config.proxyUrl);
-    if (config.proxyUrl) {
-      logger.info('Routing WhatsApp traffic through proxy', {
-        botId: config.botId,
-        proxy: describeProxy(config.proxyUrl),
-      });
-    }
-
     const sock = makeWASocket({
       version,
       auth: state,
@@ -70,7 +61,6 @@ export async function startBotConnection(
       // owner is not staring at the screen, and skip the full history pull.
       markOnlineOnConnect: false,
       syncFullHistory: false,
-      ...(agent ? { agent, fetchAgent: agent } : {}),
     });
 
     sock.ev.on('creds.update', bindCredsUpdate(saveCreds, config.botId, logger));

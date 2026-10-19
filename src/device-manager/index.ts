@@ -45,7 +45,6 @@ export function loadDeviceManagerConfig(): DeviceManagerConfig {
     redisUrl: config.redis.url,
     sessionHostPath: config.sessionHostPath,
     dockerNetwork: config.docker.network,
-    botProxyUrl: process.env.WA_PROXY_URL || undefined,
     kubernetes: {
       namespace: config.deviceManager.kubernetes.namespace,
       inCluster: config.deviceManager.kubernetes.inCluster,

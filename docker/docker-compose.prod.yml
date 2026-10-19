@@ -117,7 +117,8 @@ services:
 networks:
   backend:
     name: wa-gateway-backend
-    internal: true
+    # Ordinary bridge: private service IPs plus Docker host-NAT for bot Internet access.
+    driver: bridge
   edge:
     name: wa-gateway-edge
 

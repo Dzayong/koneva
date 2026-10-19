@@ -105,17 +105,6 @@ test('bot container is started with hardening flags and resource limits', async 
   assert.equal(after('--pids-limit'), '256');
 });
 
-test('proxy URL is forwarded to the bot only when configured', async () => {
-  const without = fakeRunner(null);
-  await new DockerBotManager(config, without.runner).createBot({ deviceKey: 'WAPI-TEST1', tenantId: 't' });
-  assert.ok(!without.calls.find((args) => args[0] === 'run')!.some((a) => a.startsWith('WA_PROXY_URL=')));
-
-  const withProxy = fakeRunner(null);
-  await new DockerBotManager({ ...config, botProxyUrl: 'socks5://u:p@10.0.0.1:1080' }, withProxy.runner)
-    .createBot({ deviceKey: 'WAPI-TEST1', tenantId: 't' });
-  assert.ok(withProxy.calls.find((args) => args[0] === 'run')!.includes('WA_PROXY_URL=socks5://u:p@10.0.0.1:1080'));
-});
-
 test('resource snapshot parses device and shared container CPU/RAM, ignoring unselected containers', () => {
   const selected = new Map<string, { kind: 'device' | 'shared'; service: string | null; deviceKey: string | null }>([
     ['wa-bot-wapi-a1', { kind: 'device', service: null, deviceKey: 'WAPI-A1' }],

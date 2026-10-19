@@ -107,7 +107,7 @@ export class DockerBotManager implements BotOrchestrator {
     // bot as the same uid/gid or its non-root user can't write to the mount.
     const owner = process.getuid && process.getgid ? ['--user', `${process.getuid()}:${process.getgid()}`] : [];
     const { stdout } = await this.runner('docker', [
-      'run', '-d', '--name', name,
+      'run', '-d', '--name', name, '--network', this.config.dockerNetwork,
       '--restart', 'unless-stopped',
       '--init',
       // Hardening: the bot needs no privileges, no writable rootfs, and must not
@@ -121,7 +121,6 @@ export class DockerBotManager implements BotOrchestrator {
       '--label', `wa.gateway.device=${spec.deviceKey}`,
       '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3',
       ...owner,
-      '--network', this.config.dockerNetwork,
       '--add-host', 'host.docker.internal:host-gateway',
       '-e', `BOT_ID=${spec.deviceKey}`,
       '-e', `BOT_API_KEYS=${this.config.adminApiKey}`,
@@ -131,7 +130,6 @@ export class DockerBotManager implements BotOrchestrator {
       '-e', `REDIS_URL=${containerUrl(this.config.redisUrl)}`,
       '-e', 'SESSION_PATH=/app/sessions',
       '-e', 'DB_POOL_MAX=4',
-      ...(this.config.botProxyUrl ? ['-e', `WA_PROXY_URL=${this.config.botProxyUrl}`] : []),
       '-v', `${deviceSessionPath}:/app/sessions`,
       this.config.botImage,
     ]);

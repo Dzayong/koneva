@@ -10,7 +10,6 @@ export interface DeviceManagerConfig {
   redisUrl: string;
   sessionHostPath: string;
   dockerNetwork: string;
-  botProxyUrl?: string | undefined;
   kubernetes: KubernetesConfig;
 }
 
