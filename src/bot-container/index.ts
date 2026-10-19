@@ -75,6 +75,24 @@ async function main(): Promise<void> {
   const botConfig = loadConfig();
   const log = logger.child({ service: 'bot-container', botId: botConfig.botId });
 
+  // A fake queue transport is available only for the disposable T3.1 benchmark.
+  // The regular connection remains behind KONEVA_SANDBOX and never creates a Baileys socket.
+  let benchmarkSendCount = 0;
+  let benchmarkSocket: WASocket | undefined;
+  if (process.env['T31_QUEUE_BENCHMARK'] === '1') {
+    const databaseUrl = new URL(botConfig.databaseUrl);
+    const redisUrl = new URL(botConfig.redisUrl);
+    if (botConfig.nodeEnv !== 'test' || process.env['KONEVA_SANDBOX'] !== '1'
+      || databaseUrl.hostname !== 'pg' || databaseUrl.pathname !== '/koneva'
+      || redisUrl.hostname !== 'redis' || !/^WAPI-T31-[0-9]{2}$/.test(botConfig.botId)) {
+      throw new Error('T31 queue fake transport refused: disposable test safeguards did not match');
+    }
+    benchmarkSocket = {
+      sendMessage: async () => ({ key: { id: `t31-fake-${++benchmarkSendCount}` } }),
+      sendPresenceUpdate: async () => undefined,
+    } as unknown as WASocket;
+  }
+
   log.info('Starting bot container', { nodeEnv: botConfig.nodeEnv });
 
   await pool.query('SELECT 1');
@@ -118,9 +136,17 @@ async function main(): Promise<void> {
     botConfig.botId,
     redis,
     {
-      getSocket: () => currentSocket,
-      isConnected: () => currentState.status === 'online',
-      presence,
+      getSocket: () => benchmarkSocket ?? currentSocket,
+      isConnected: () => Boolean(benchmarkSocket) || currentState.status === 'online',
+      ...(!benchmarkSocket ? { presence } : {}),
+      ...(benchmarkSocket ? {
+        canSend: async () => ({
+          allowed: true as const, delayMs: 0,
+          typing: { shouldSimulate: false, durationMs: 0 },
+          healthScore: 100, dailyCap: 1_000_000, sentToday: 0, warmupDay: 30,
+        }),
+        delay: async () => undefined,
+      } : {}),
     },
     log,
     queryFn,

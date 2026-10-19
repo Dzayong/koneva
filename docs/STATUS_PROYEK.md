@@ -93,7 +93,7 @@ Sumber kebenaran status proyek. Codex/PM mengubah status dan `updated_at` setiap
 
 | Task | Status | Bukti singkat | Blocker / langkah berikut |
 |---|---|---|---|
-| T3.1 Benchmark resource 1 idle / 1 aktif / 5 aktif | todo | Belum dijalankan | Lokal sintetis; bukan pemakaian WhatsApp LIVE |
+| T3.1 Benchmark resource 1 idle / 1 aktif / 5 aktif | **partial — benchmark lokal sintetis** | 2026-10-19: disposable PostgreSQL/Redis, sandboxed bot processes, guarded in-memory fake transport; 1,000 queued jobs per active device completed with queue age, CPU/RAM, and restart probe recorded in `docs/T3.1_LOCAL_BENCHMARK.md`; repeatable probe `scripts/benchmark-device-sizing.sh`. | Real WhatsApp session/pacing, soak, and VPS measurements remain; do not size VPS from this baseline alone. |
 | T3.2 VPS IP publik: sewa dan deploy stack disposable | todo | Belum ada VPS/bukti IP | Vendor/budget owner; deployment tidak boleh menyentuh production |
 | T3.3 Observasi sesi uji 14 hari nonstop | todo | Belum ada izin/akun uji | Akun khusus dan izin eksplisit owner; ukur stabilitas, bukan bebas ban |
 | **Gerbang 3** VPS lolos → baru domain dibeli | todo | — | Uptime/reconnect/auth-loss/IP/resource terukur dan diterima owner |
