@@ -13,6 +13,7 @@ import { SidebarNav } from "./sidebar-nav";
 import { ThemeToggle } from "./theme-toggle";
 import { NotificationCenter } from "./notification-center";
 import { HelpButton, TrialChip } from "./header-extras";
+import { GlobalSearch } from "./global-search";
 
 const PAGE_TITLES: Record<string, string> = {
   "/dashboard": "Ringkasan",
@@ -75,6 +76,7 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-3 md:gap-4">
+        <GlobalSearch />
         <Badge variant="outline" className="hidden border-border bg-card px-2.5 py-1 font-medium lg:flex">
           {workspace?.name ?? "…"}
         </Badge>
