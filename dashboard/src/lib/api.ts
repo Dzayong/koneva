@@ -802,6 +802,13 @@ class ApiClient {
     return response.data.data;
   }
 
+  async createPaygTopupCheckout(amountIdr: number): Promise<DokuCheckoutResult & { invoice_number: string; amount_idr: number }> {
+    const response = await this.client.post<ApiSuccess<DokuCheckoutResult & { invoice_number: string; amount_idr: number }>>(
+      "/api/v1/billing/payg/topup-checkout", { amount_idr: amountIdr }, { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
   // ---- Sending behaviour --------------------------------------------------
 
   async getPresets(): Promise<Preset[]> {

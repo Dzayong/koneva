@@ -133,6 +133,22 @@ test('POST /send rejects an empty body', async () => {
   });
 });
 
+test('POST /send is blocked while PAYG is active so it cannot bypass wallet reservation', async () => {
+  await withServer(
+    { queryFn: async () => ({ rows: [{ enabled: true }] }) },
+    async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/send`, {
+        method: 'POST',
+        headers: { 'x-api-key': 'test-key', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: '6281234567890', content: 'hello' }),
+      });
+      assert.equal(res.status, 409);
+      const body = (await res.json()) as { error: { code: string } };
+      assert.equal(body.error.code, 'payg_gateway_required');
+    },
+  );
+});
+
 test('POST /send rejects a non-digit "to"', async () => {
   await withServer({}, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/send`, {

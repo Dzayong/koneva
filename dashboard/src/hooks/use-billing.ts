@@ -37,3 +37,7 @@ export function useStudentRequest() {
 export function useDokuCheckout() {
   return useMutation({ mutationFn: () => api.createDokuCheckout() });
 }
+
+export function usePaygTopupCheckout() {
+  return useMutation({ mutationFn: (amountIdr: number) => api.createPaygTopupCheckout(amountIdr) });
+}

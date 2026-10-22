@@ -70,6 +70,7 @@ const RULES: readonly Rule[] = [
   [['GET'], /^\/audit$/, 'audit:read'],
   [['GET', 'POST'], /^\/billing(\/[^/]+)?$/, 'billing:manage'],
   [['POST'], /^\/billing\/doku\/checkout$/, 'billing:manage'],
+  [['POST'], /^\/billing\/payg\/topup-checkout$/, 'billing:manage'],
   [['GET'], /^\/tenant$/, 'devices:read'],
   [['PATCH'], /^\/tenant$/, 'webhooks:manage'],
   [['GET', 'POST'], /^\/tenant\/webhook(\/[^/]+)?$/, 'webhooks:manage'],

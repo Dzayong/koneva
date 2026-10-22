@@ -139,6 +139,10 @@ export function createApiRouter(deps: ApiDependencies): Router {
 
   router.post('/send', sendRateLimiter, async (req, res, next) => {
     try {
+      const payg = await deps.queryFn('SELECT enabled FROM payg_settings WHERE singleton=true', []);
+      if ((payg.rows[0] as { enabled?: boolean } | undefined)?.enabled) {
+        throw new ApiError(409, 'payg_gateway_required', 'Saat PAYG aktif, kirim pesan melalui API KONEVA agar saldo dapat diperiksa dan dicadangkan.');
+      }
       const parsed = sendBodySchema.safeParse(req.body);
       if (!parsed.success) {
         next(validationError('Invalid request body', parsed.error.flatten()));

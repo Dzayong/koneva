@@ -10,6 +10,7 @@ import { assertSubscriptionActive, currentUsage } from './billing.service';
 import { assertRecipientConsent, assertReplyRecipientAllowed } from './recipient-consent.service';
 import logger from '../../shared/utils/logger';
 import { withRecipientConsentLock } from '../../shared/recipient-consent';
+import { currentPaygSettings, reserveMessageCharge } from './wallet.service';
 
 const messageQueues = new Map<string, Queue>();
 
@@ -37,8 +38,9 @@ async function enqueueStoredMessage(
   const urgent = priority === 'urgent';
   await getMessageQueue(deviceKey, priority).add('send', { messageId }, {
     jobId,
-    attempts: urgent ? 2 : 3,
-    backoff: urgent ? { type: 'fixed', delay: 1500 } : { type: 'exponential', delay: 5000 },
+    // A failed WhatsApp request is never replayed automatically. The owner can
+    // explicitly choose one retry after reviewing a definite failure.
+    attempts: 1,
     ...(delayMs > 0 ? { delay: delayMs } : {}),
     removeOnComplete: { age: 86_400, count: 1000 },
   });
@@ -60,6 +62,7 @@ interface MessageRow extends QueryResultRow {
   reply_to_message_id?: string | null;
   error_message?: string | null;
   created_at: Date;
+  retry_count?: number;
 }
 
 export async function queueMessage(
@@ -266,7 +269,8 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
     // Exempt sends skip the quota check entirely and never count toward used_messages. Everything else is held,
     // not dropped or rejected, once the regular quota is spent -- a periodic sweep (see sweepQuotaHolds) and every
     // fresh billing window release held messages in order once headroom exists (see releaseHeldMessages).
-    const overQuota = !exempt && await (async () => {
+    const payg = await currentPaygSettings(client);
+    const overQuota = !payg.enabled && !exempt && await (async () => {
       const usage = await currentUsage(client, tenantId);
       return usage.used >= usage.quota;
     })();
@@ -284,6 +288,9 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
         input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt, systemOtp, systemNotification, input.reply_to_message_id ?? null,
         !systemManaged && input.allow_warmup_override === true],
     );
+    if (status === 'queued' && !exempt && payg.enabled) {
+      await reserveMessageCharge(client, tenantId, result.rows[0]!.id, 0);
+    }
     if (status === 'queued' && !exempt) await client.query('UPDATE tenants SET used_messages = used_messages + 1 WHERE id = $1', [tenantId]);
     return { message: result.rows[0]!, reused: false };
   });
@@ -321,6 +328,7 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
  * revisits exemption.
  */
 export async function releaseHeldMessages(tenantId: string, now: Date = new Date()): Promise<{ released: number }> {
+  if ((await currentPaygSettings(pool)).enabled) return { released: 0 };
   const toRelease = await transaction(async (client) => {
     const usage = await currentUsage(client, tenantId, now);
     const remaining = Math.max(0, usage.quota - usage.used);
@@ -435,7 +443,8 @@ export async function listMessages(
 }
 
 export async function retryMessage(tenantId: string, messageId: string, allowWarmupOverride = false): Promise<MessageRow> {
-  // A retry is a new send: it needs a live plan and an online number, exactly like the first attempt (it does not use quota again).
+  // A manual retry is a new send attempt. PAYG reserves a fresh charge for it;
+  // legacy subscriptions retain their existing quota rules.
   await assertSubscriptionActive(pool, tenantId);
   const target = (await pool.query<{ device_status: string | null; device_id: string | null; to_number: string; quota_exempt: boolean; error_message: string | null; reply_to_message_id: string | null; type: string; device_created_at: Date | null; warmup_started_at: Date | null }>(
     `SELECT d.status AS device_status, m.device_id, m.to_number, COALESCE(m.quota_exempt, false) AS quota_exempt,
@@ -474,13 +483,24 @@ export async function retryMessage(tenantId: string, messageId: string, allowWar
     await assertRecipientConsent(pool, tenantId, target.to_number, target.quota_exempt);
   }
   if (target && target.device_status !== 'online') throw new ServiceError(503, 'DEVICE_OFFLINE', 'Device is not online');
-  const result = await pool.query<MessageRow>(
-    `UPDATE messages SET status='queued', queue_started_at=now(), error_message=NULL, allow_warmup_override=$3
-     WHERE id=$1 AND tenant_id=$2 AND system_otp=false AND system_notification=false
-       AND status IN ('failed','blocked') AND COALESCE(error_message,'') <> 'delivery_uncertain' RETURNING *`,
-    [messageId, tenantId, allowWarmupOverride],
-  );
-  const message = result.rows[0];
+  const message = await transaction(async (client) => {
+    const current = (await client.query<MessageRow & { retry_count: number }>(
+      `SELECT * FROM messages WHERE id=$1 AND tenant_id=$2 AND system_otp=false AND system_notification=false FOR UPDATE`,
+      [messageId, tenantId],
+    )).rows[0];
+    if (!current) return null;
+    if (!['failed', 'blocked'].includes(current.status) || current.error_message === 'delivery_uncertain') return null;
+    const attemptNo = (current.retry_count ?? 0) + 1;
+    const updated = (await client.query<MessageRow>(
+      `UPDATE messages SET status='queued', retry_count=$3, queue_started_at=now(), error_message=NULL, allow_warmup_override=$4
+       WHERE id=$1 AND tenant_id=$2 RETURNING *`,
+      [messageId, tenantId, attemptNo, allowWarmupOverride],
+    )).rows[0]!;
+    if (!updated.quota_exempt && (await currentPaygSettings(client)).enabled) {
+      await reserveMessageCharge(client, tenantId, messageId, attemptNo);
+    }
+    return updated;
+  });
   if (!message) {
     const exists = await pool.query<{ status: string; error_message: string | null }>(
       'SELECT status,error_message FROM messages WHERE id=$1 AND tenant_id=$2 AND system_otp=false AND system_notification=false',
@@ -494,7 +514,7 @@ export async function retryMessage(tenantId: string, messageId: string, allowWar
   }
   try {
     await enqueueStoredMessage(
-      message.device_key, message.id, `${message.id}:retry:${Date.now()}`,
+      message.device_key, message.id, `${message.id}:retry:${message.retry_count ?? 0}`,
       message.quota_exempt ? 'urgent' : 'normal',
     );
   } catch (error) {

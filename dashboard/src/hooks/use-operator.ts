@@ -119,6 +119,16 @@ export function useSaveAiReplySettings() {
     void qc.invalidateQueries({ queryKey: [OP, "audit"] });
   } });
 }
+export function usePaygSettings(enabled = true) {
+  return useQuery({ queryKey: [OP, "payg-settings"], queryFn: () => operatorApi.getPaygSettings(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always" });
+}
+export function useSavePaygSettings() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: operatorApi.savePaygSettings, onSuccess: () => {
+    void qc.invalidateQueries({ queryKey: [OP, "payg-settings"] });
+    void qc.invalidateQueries({ queryKey: [OP, "audit"] });
+  } });
+}
 export function useOwnerWorkspaces(params: { q?: string; limit?: number; offset?: number; plan?: string; status?: string }, enabled = true) {
   return useQuery({ queryKey: [OP, "owner-workspaces", params], queryFn: () => operatorApi.listOwnerWorkspaces(params), enabled, retry: retryTransient, placeholderData: keepPreviousData, refetchInterval: 60_000 });
 }

@@ -6,6 +6,7 @@ import { validate } from '../middleware/validate';
 import { createOrder, getBillingState, getLatestUnpaidInvoice, requestStudentVerification } from '../services/billing.service';
 import { createDokuCheckout } from '../services/doku.service';
 import { ServiceError } from '../services/service-error';
+import { createWalletTopup } from '../services/wallet.service';
 
 const router = Router();
 
@@ -15,6 +16,7 @@ export const orderSchema = z.object({
 }).strict();
 
 export const studentSchema = z.object({ note: z.string().trim().max(500).default('') }).strict();
+export const walletTopupSchema = z.object({ amount_idr: z.number().int().min(10000).max(10_000_000) }).strict();
 
 router.get('/billing', async (request: Request, response: Response) => {
   const state = await getBillingState(request.tenant!.id);
@@ -43,6 +45,15 @@ router.post('/billing/doku/checkout', requireVerifiedEmail, async (request: Requ
     email: request.tenant!.email,
   });
   response.json({ success: true, data: { invoice_number: invoice.number, payment_url: checkout.payment_url } });
+});
+
+router.post('/billing/payg/topup-checkout', requireVerifiedEmail, validate({ body: walletTopupSchema }), async (request: Request, response: Response) => {
+  const { amount_idr } = request.validated!.body as z.infer<typeof walletTopupSchema>;
+  if (!config.doku.configured) throw new ServiceError(503, 'DOKU_NOT_CONFIGURED', 'Pembayaran DOKU belum dikonfigurasi di server ini.');
+  if (!config.appPublicUrl) throw new ServiceError(503, 'APP_PUBLIC_URL_NOT_CONFIGURED', 'APP_PUBLIC_URL belum diatur untuk callback DOKU.');
+  const topup = await createWalletTopup(request.tenant!.id, amount_idr);
+  const checkout = await createDokuCheckout(topup.invoice_number, topup.amount_idr, topup.customer);
+  response.status(201).json({ success: true, data: { invoice_number: topup.invoice_number, amount_idr: topup.amount_idr, payment_url: checkout.payment_url } });
 });
 
 router.post('/billing/student-request', validate({ body: studentSchema }), async (request: Request, response: Response) => {

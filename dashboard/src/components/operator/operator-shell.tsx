@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
-import { Activity, BarChart3, BellRing, Building2, CreditCard, GraduationCap, HeartPulse, LayoutDashboard, LogOut, Menu, ScrollText, ShieldCheck, Smartphone, ScanLine, Bot } from "lucide-react";
+import { Activity, BarChart3, BellRing, Building2, CreditCard, GraduationCap, HeartPulse, LayoutDashboard, LogOut, Menu, ScrollText, ShieldCheck, Smartphone, ScanLine, Bot, Wallet } from "lucide-react";
 import { KonevaMark } from "@/components/brand/koneva-logo";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -34,6 +34,7 @@ const NAV_GROUPS: Array<{ label: string; items: OperatorNavItem[] }> = [
     { href: "/operator/insights/health", label: "Kesehatan Sistem", icon: HeartPulse, permission: "owner:insights" },
     { href: "/operator/system/whatsapp-otp", label: "OTP WhatsApp", icon: ScanLine, permission: "owner:insights" },
     { href: "/operator/system/ai-reply", label: "Provider AI", icon: Bot, permission: "owner:insights" },
+    { href: "/operator/system/payg", label: "PAYG & tarif", icon: Wallet, permission: "owner:insights" },
     { href: "/operator/insights/workspaces", label: "Workspace", icon: Building2, permission: "owner:insights" },
   ] },
 ];

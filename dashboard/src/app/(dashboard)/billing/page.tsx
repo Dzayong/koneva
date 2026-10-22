@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GraduationCap, Loader2 } from "lucide-react";
+import { GraduationCap, Loader2, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmailVerificationDialog } from "@/components/account/email-verification-dialog";
 import { PlanCards, rupiah } from "@/components/billing/plan-cards";
-import { useBilling, useCreateOrder, useDokuCheckout, useStudentRequest } from "@/hooks/use-billing";
+import { useBilling, useCreateOrder, useDokuCheckout, usePaygTopupCheckout, useStudentRequest } from "@/hooks/use-billing";
 import { usePermissions } from "@/hooks/use-me";
 import { apiFailure } from "@/lib/errors";
 import type { BillingState, Invoice, PublicPlan } from "@/lib/types";
@@ -165,6 +165,8 @@ export default function BillingPage() {
   const { can, isLoading: permsLoading } = usePermissions();
   const { data, isLoading } = useBilling();
   const order = useCreateOrder();
+  const topup = usePaygTopupCheckout();
+  const [topupAmount, setTopupAmount] = useState("50000");
   const [created, setCreated] = useState<{ invoice: Invoice; payment: BillingState["payment"] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [verifyOpen, setVerifyOpen] = useState(false);
@@ -179,6 +181,43 @@ export default function BillingPage() {
 
   if (!permsLoading && !can("billing:manage")) return <p className="text-muted-foreground">Hanya pemilik workspace yang bisa membuka Tagihan.</p>;
   if (isLoading || !data) return <div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-40" /><Skeleton className="h-64" /></div>;
+
+  if (data.wallet.enabled) {
+    const amount = Number(topupAmount);
+    const startTopup = async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      try {
+        const checkout = await topup.mutateAsync(amount);
+        window.location.href = checkout.payment_url;
+      } catch { /* Mutation error is shown below. */ }
+    };
+    return <div className="mx-auto max-w-4xl space-y-6">
+      <div><h1 className="text-2xl font-semibold tracking-tight">Saldo PAYG</h1><p className="text-sm text-muted-foreground">Paket bulanan sudah digantikan saldo prabayar. Saldo dipotong hanya setelah WhatsApp mengonfirmasi pesan terkirim.</p></div>
+      {dokuReturned && <div role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">{dokuReturned === "cancel" ? "Pembayaran dibatalkan. Saldo belum berubah." : "Menunggu konfirmasi DOKU. Saldo akan masuk otomatis setelah pembayaran terverifikasi."}</div>}
+      <section className="grid gap-4 sm:grid-cols-3">
+        <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Saldo tersedia</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.available_idr)}</p></div>
+        <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Saldo ditahan untuk status belum pasti</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.reserved_idr)}</p></div>
+        <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Tarif per pesan berhasil</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.price_per_message_idr ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">Balasan AI memakai tarif yang sama.</p></div>
+      </section>
+      <section className="rounded-xl border bg-card p-5">
+        <div className="flex items-center gap-2"><Wallet className="h-5 w-5 text-primary" aria-hidden /><h2 className="font-semibold">Isi saldo lewat DOKU</h2></div>
+        <form className="mt-4 flex flex-col gap-3 sm:flex-row" onSubmit={(event) => void startTopup(event)}>
+          <label className="sr-only" htmlFor="payg-topup-amount">Nominal isi saldo</label>
+          <input id="payg-topup-amount" type="number" min={10000} max={10000000} step={1000} required value={topupAmount} onChange={(event) => setTopupAmount(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2" />
+          <Button type="submit" disabled={topup.isPending || !Number.isInteger(amount) || amount < 10000 || amount > 10000000}>{topup.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Lanjutkan ke DOKU</Button>
+        </form>
+        {topup.error && <p role="alert" className="mt-3 text-sm text-destructive">{apiFailure(topup.error).code === "DOKU_NOT_CONFIGURED" ? "DOKU belum dikonfigurasi di server." : topup.error.message}</p>}
+        <p className="mt-2 text-xs text-muted-foreground">Isi saldo Rp10.000–Rp10.000.000 per transaksi. Pesan gagal pasti tidak dikenai biaya; jika hasil pengiriman tidak pasti, saldonya ditahan untuk pemeriksaan dan tidak dikirim ulang otomatis.</p>
+      </section>
+      <section className="rounded-xl border bg-card p-5"><h2 className="font-semibold">Pemakaian per device</h2>
+        {data.wallet.devices.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">Belum ada aktivitas pesan.</p> : <div className="mt-3 divide-y">{data.wallet.devices.map((device) => <div key={device.device_key} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"><span className="font-mono">{device.device_key}</span><span>{device.messages_sent} berhasil · {device.messages_failed} gagal · {rupiah(device.charged_idr)}</span></div>)}</div>}
+      </section>
+      <section className="rounded-xl border bg-card p-5"><h2 className="font-semibold">Riwayat isi saldo</h2>
+        {data.wallet.recent_topups.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">Belum ada isi saldo.</p> : <div className="mt-3 divide-y">{data.wallet.recent_topups.map((item) => <div key={item.invoice_number} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><span className="font-mono">{item.invoice_number}</span><span>{rupiah(item.amount_idr)} · {item.status === "paid" ? "Lunas" : item.status === "unpaid" ? "Menunggu" : "Dibatalkan"}</span></div>)}</div>}
+      </section>
+      <p className="text-xs text-muted-foreground">Perangkat tidak lagi dibatasi oleh tingkatan paket. Jumlah kirim tetap mengikuti saldo dan perlindungan pengiriman KONEVA.</p>
+    </div>;
+  }
 
   const sub = data.subscription;
   const unpaid = data.invoices.find((i) => i.status === "unpaid");

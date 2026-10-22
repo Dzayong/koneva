@@ -7,6 +7,7 @@ import {
 import { ServiceError } from './service-error';
 import { sendNoticeEmail } from './mailer';
 import { recordSystemNotification } from './system-notification-outbox';
+import { getWalletState } from './wallet.service';
 
 type Queryable = Pick<PoolClient, 'query'> | typeof pool;
 
@@ -34,6 +35,12 @@ const INACTIVE_MESSAGE: Partial<Record<SubscriptionStatus, string>> = {
 
 /** Sending, adding numbers and similar actions need a live subscription. No row means an older workspace: allowed. */
 export async function assertSubscriptionActive(db: Queryable, tenantId: string): Promise<void> {
+  // PAYG has no subscription expiry. Balance is checked atomically with each send
+  // reservation in message.service.ts, so every entry point can share this gate.
+  const payg = await db.query<{ enabled: boolean }>(
+    'SELECT enabled FROM payg_settings WHERE singleton=true',
+  );
+  if (payg.rows[0]?.enabled) return;
   const row = (await db.query<{ status?: SubscriptionStatus; period_end?: Date | null }>(
     'SELECT status, period_end FROM subscriptions WHERE tenant_id = $1',
     [tenantId],
@@ -177,6 +184,8 @@ export interface InvoiceRow {
 }
 
 export async function createOrder(tenantId: string, planId: string, cycle: BillingCycle): Promise<InvoiceRow> {
+  const payg = await pool.query<{ enabled: boolean }>('SELECT enabled FROM payg_settings WHERE singleton=true');
+  if (payg.rows[0]?.enabled) throw new ServiceError(409, 'PACKAGES_RETIRED', 'Workspace ini memakai PAYG. Isi saldo berdasarkan pemakaian di halaman Tagihan.');
   // Annual checkout is closed for new orders (T1.1); only a subscription that is ALREADY on a yearly cycle keeps
   // reading as yearly (handled by getBillingState/invoices, never re-priced here). No yearly price is invented.
   if (cycle === 'yearly') throw new ServiceError(400, 'ANNUAL_CHECKOUT_CLOSED', 'Checkout tahunan sudah ditutup untuk pesanan baru. Pilih siklus bulanan.');
@@ -279,6 +288,7 @@ export async function grantPlan(tenantId: string, planId: string, cycle: Billing
 // ---- What a workspace sees ----------------------------------------------------
 
 export async function getBillingState(tenantId: string) {
+  const wallet = await getWalletState(tenantId);
   const sub = (await pool.query<{ plan_id: string; status: SubscriptionStatus; cycle: BillingCycle | null; period_start: Date; period_end: Date | null }>(
     'SELECT plan_id, status, cycle, period_start, period_end FROM subscriptions WHERE tenant_id = $1', [tenantId],
   )).rows[0];
@@ -338,11 +348,25 @@ export async function getBillingState(tenantId: string) {
     },
     plans: orderable.filter((p) => p.audience !== 'trial' && p.audience !== 'internal'),
     invoices,
+    wallet,
   };
 }
 
 /** One cheap query for the banner every member sees; the full picture is owner-only. */
 export async function getSubscriptionSummary(tenantId: string, now: Date = new Date()) {
+  const payg = (await pool.query<{ enabled: boolean; price_per_message_idr: number | null }>(
+    'SELECT enabled,price_per_message_idr FROM payg_settings WHERE singleton=true',
+  )).rows[0];
+  if (payg?.enabled) {
+    const balance = (await pool.query<{ available_idr: number | string }>(
+      'SELECT available_idr FROM wallet_accounts WHERE tenant_id=$1', [tenantId],
+    )).rows[0]?.available_idr ?? 0;
+    return {
+      plan_id: 'payg', plan_name: 'PAYG', status: 'active' as const,
+      can_send: Number(balance) >= Number(payg.price_per_message_idr ?? Number.MAX_SAFE_INTEGER),
+      days_left: null, period_end: null,
+    };
+  }
   const row = (await pool.query<{ plan_id: string; plan_name: string; status: SubscriptionStatus; period_end: Date | null }>(
     `SELECT s.plan_id, p.name AS plan_name, s.status, s.period_end
      FROM subscriptions s JOIN plans p ON p.id = s.plan_id WHERE s.tenant_id = $1`, [tenantId],

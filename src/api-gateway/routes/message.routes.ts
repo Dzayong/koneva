@@ -40,8 +40,8 @@ const listSchema = z.object({
 router.post('/message/send', validate({ body: sendSchema }), async (request, response) => {
   const input = request.validated!.body as z.infer<typeof sendSchema>;
   const message = await queueMessage(request.tenant!.id, input);
-  // Reports the message's real status: 'quota_hold' when the monthly quota is spent (the send was kept, not
-  // dropped), 'queued' otherwise -- never hardcoded, so a client can tell the two apart and show it.
+  // Reports the actual queue state. Legacy subscriptions may still return quota_hold;
+  // PAYG sends are queued only after their balance reservation succeeds.
   const data = { message_id: message.id, status: message.status as 'queued' | 'quota_hold' };
   response.status(202).json({ success: true, data, ...data });
 });

@@ -5,6 +5,7 @@ import config from '../../shared/config';
 import { ServiceError } from './service-error';
 import { computeDokuSignature, verifyDokuSignature } from './doku-signature';
 import { markInvoicePaidWithClient } from './billing.service';
+import { creditWalletWithClient } from './wallet.service';
 
 /**
  * DOKU Non-SNAP checkout + inbound notification handling, per docs/DOKU_INTEGRATION_SPEC.md.
@@ -99,6 +100,7 @@ export interface DokuNotificationResult {
     | 'invoice_not_found'
     | 'amount_mismatch'
     | 'currency_mismatch'
+    | 'wallet_topped_up'
     | `status_${string}`;
 }
 
@@ -170,6 +172,23 @@ export async function handleDokuNotification(
     }
 
     if (status !== 'SUCCESS') return { applied: false, reason: `status_${status}` } as const;
+
+    const topup = (await client.query<{ tenant_id: string; amount_idr: number; status: string }>(
+      'SELECT tenant_id,amount_idr,status FROM wallet_topups WHERE invoice_number=$1 FOR UPDATE', [invoiceNumber],
+    )).rows[0];
+    if (topup) {
+      const notifiedCurrency = payload.order?.currency;
+      if (notifiedCurrency !== 'IDR') return { applied: false, reason: 'currency_mismatch' } as const;
+      if (payload.order?.amount !== Number(topup.amount_idr)) return { applied: false, reason: 'amount_mismatch' } as const;
+      const paid = await client.query(
+        `UPDATE wallet_topups SET status='paid',paid_at=now(),payment_reference=$2
+         WHERE invoice_number=$1 AND status='unpaid' RETURNING tenant_id`, [invoiceNumber, headers.requestId],
+      );
+      if (!paid.rowCount) return { applied: false, reason: 'already_paid' } as const;
+      await creditWalletWithClient(client, topup.tenant_id, Number(topup.amount_idr), `wallet-topup:${invoiceNumber}`, invoiceNumber);
+      await client.query('UPDATE doku_notification_events SET applied_at=now() WHERE request_id=$1', [headers.requestId]);
+      return { applied: true, reason: 'wallet_topped_up' } as const;
+    }
 
     const invoice = (await client.query<{ id: string; amount_idr: number }>(
       'SELECT id, amount_idr FROM invoices WHERE number = $1',

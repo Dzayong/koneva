@@ -105,6 +105,16 @@ export const operatorApi = {
   async saveAiReplySettings(input: { base_url: string; model: string; api_key?: string; enabled: boolean }): Promise<AiReplyProviderSettings> {
     return parseAiReplyProviderSettings((await operatorClient.request("/system/ai-reply", { method: "PUT", body: input }))?.data);
   },
+  async getPaygSettings(): Promise<{ enabled: boolean; price_per_message_idr: number | null; updated_at: string | null }> {
+    const d = object((await operatorClient.request("/system/payg"))?.data);
+    return { enabled: d["enabled"] === true, price_per_message_idr: typeof d["price_per_message_idr"] === "number" ? d["price_per_message_idr"] : null,
+      updated_at: typeof d["updated_at"] === "string" ? d["updated_at"] : null };
+  },
+  async savePaygSettings(input: { enabled: boolean; price_per_message_idr: number }): Promise<{ enabled: boolean; price_per_message_idr: number | null; updated_at: string | null }> {
+    const d = object((await operatorClient.request("/system/payg", { method: "PUT", body: input }))?.data);
+    return { enabled: d["enabled"] === true, price_per_message_idr: typeof d["price_per_message_idr"] === "number" ? d["price_per_message_idr"] : null,
+      updated_at: typeof d["updated_at"] === "string" ? d["updated_at"] : null };
+  },
   async listOwnerWorkspaces(params: { q?: string; limit?: number; offset?: number; plan?: string; status?: string }): Promise<Page<OwnerWorkspaceSummary>> {
     return page(await operatorClient.request("/insights/workspaces", { query: { q: params.q, limit: params.limit ?? OWNER_PAGE_SIZE, offset: params.offset ?? 0, plan: params.plan, status: params.status } }), parseOwnerWorkspaceSummary);
   },

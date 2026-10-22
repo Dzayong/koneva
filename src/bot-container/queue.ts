@@ -485,6 +485,19 @@ async function processJobBody(
     log.info('Message already handled, skipping', { messageId: message.id, status: message.status });
     return;
   }
+  const paygGuard = await queryFn(
+    `SELECT p.enabled, COALESCE(m.quota_exempt,false) AS quota_exempt,
+       EXISTS(SELECT 1 FROM message_wallet_reservations r
+         WHERE r.message_id=m.id AND r.attempt_no=COALESCE(m.retry_count,0) AND r.state='reserved') AS has_reservation
+     FROM messages m CROSS JOIN payg_settings p WHERE m.id=$1 AND p.singleton=true`,
+    [message.id],
+  );
+  const paygRow = paygGuard.rows[0] as { enabled?: boolean; quota_exempt?: boolean; has_reservation?: boolean } | undefined;
+  if (paygRow?.enabled && !paygRow.quota_exempt && !paygRow.has_reservation) {
+    await updateMessageStatus(message.id, { status: 'failed', errorMessage: 'PAYG_CUTOVER_REQUIRES_REVIEW' }, queryFn);
+    log.warn('Unreserved legacy message stopped at PAYG cutover', { messageId: message.id, deviceKey });
+    throw new UnrecoverableError('Message has no PAYG wallet reservation');
+  }
   const now = deps.now?.() ?? new Date();
   const queueAgeMs = now.getTime() - message.queueStartedAt.getTime();
   const maxQueueAgeMs = message.priority === 'urgent' ? MAX_URGENT_QUEUE_AGE_MS : MAX_NORMAL_QUEUE_AGE_MS;

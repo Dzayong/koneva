@@ -15,12 +15,13 @@ export async function createDevice(request: Request, response: Response): Promis
   const tenant = request.tenant!;
   const input = request.validated!.body as z.infer<typeof createDeviceSchema>;
   await assertSubscriptionActive(pool, tenant.id);
+  const payg = await pool.query<{ enabled: boolean }>('SELECT enabled FROM payg_settings WHERE singleton=true');
   const deviceCount = await pool.query<{ count: number }>(
     'SELECT COUNT(*)::int AS count FROM devices WHERE tenant_id = $1',
     [tenant.id],
   );
 
-  if ((deviceCount.rows[0]?.count ?? 0) >= tenant.max_devices) {
+  if (!payg.rows[0]?.enabled && (deviceCount.rows[0]?.count ?? 0) >= tenant.max_devices) {
     response.status(429).json({
       success: false,
       error: {

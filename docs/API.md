@@ -367,7 +367,14 @@ The separate session-authenticated operator API is documented in [OPERATOR_PANEL
 It is disabled by default and currently limited to isolated development/testing pending MFA. The legacy `/admin`
 maintenance endpoints below remain separate; their admin key never authenticates `/operator`.
 
-Billing is manual: the owner orders a plan, pays outside the system, and the operator confirms.
+Legacy package billing supports manual confirmation and DOKU checkout.
+
+**PAYG (feature-gated):** When the superadmin enables PAYG in `/operator/system/payg`, package checkout is retired
+for customer workspaces. Owners top up Rp10.000–Rp10.000.000 through the DOKU sandbox checkout below. The configured
+fixed IDR tariff is reserved atomically before a message enters the queue, charged only on a WhatsApp send/delivery/read
+receipt, returned for a definite failure, and held for an ambiguous result until a late receipt resolves it. AI replies
+use the same per-message tariff; KONEVA absorbs the AI provider cost. Unreserved old queue rows are stopped at cutover
+and marked for review. Devices are not restricted by plan tiers under PAYG; send rate and safety guards still apply.
 
 **Catalog (T1.1):** Pelajar (`pelajar`, Rp29.000/1 device/1.000 pesan/1 anggota, needs student verification),
 Asisten Pribadi (`asisten`, Rp59.000/1/5.000/1), Tim UKM (`umkm`, Rp99.000/3/10.000/3 — id kept stable from the
@@ -390,6 +397,7 @@ are historical records and are never rewritten by a later price change either wa
 | `GET /public/plans` | anyone | Published plans, with `quota_headline`/`quota_note`. Prices are `null` until the operator marks them final. |
 | `GET /api/v1/billing` | owner | Subscription, usage (messages held/exempt included, numbers, members), invoices, payment instructions. |
 | `POST /api/v1/billing/orders` `{plan, cycle: "monthly"}` | owner | Creates an invoice. Replaces the previous unpaid one. `cycle: "yearly"` is refused (see above). |
+| `POST /api/v1/billing/payg/topup-checkout` `{amount_idr}` | verified owner | Creates a DOKU checkout for a PAYG wallet top-up (available only when PAYG is enabled). |
 | `POST /api/v1/billing/student-request` `{note}` | owner | Asks for student verification (campus/school email required). |
 | `GET /auth/me` | any member | Includes `subscription` (status, days left) for the banner. |
 

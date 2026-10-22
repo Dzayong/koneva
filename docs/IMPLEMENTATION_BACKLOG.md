@@ -15,15 +15,16 @@ Product decisions captured so far:
 
 Implementation checklist:
 
-- [ ] Confirm the per-message IDR tariff and who configures it.
-- [ ] Confirm the wallet top-up/settlement route.
-- [ ] Add an auditable wallet ledger and idempotent top-up credits.
-- [ ] Reserve funds atomically before enqueue/send; reject sends without sufficient funds.
-- [ ] Settle one reservation only for a WhatsApp-accepted send; release only when non-delivery is definite; hold ambiguous outcomes for reconciliation.
-- [ ] Remove automatic BullMQ send retries; keep explicit user-selected retry as a distinct, auditable attempt.
-- [ ] Add operator pricing controls and customer balance/top-up UI.
-- [ ] Add per-device send/cost reporting and the 20% low-balance alert.
-- [ ] Add concurrency, duplicate-delivery, crash/uncertain-outcome, and insufficient-funds tests.
+- [x] Pricing rule: one fixed IDR rate per confirmed WhatsApp outbound; AI replies use the same rate, with AI cost absorbed by KONEVA. Superadmin sets the actual rate after choosing a provider/model.
+- [x] Top-up route: DOKU. Sandbox credentials are present privately; checkout and signed webhook still need an end-to-end payment test.
+- [x] Add an auditable append-only wallet ledger and idempotent top-up credits.
+- [x] Reserve funds atomically before enqueue/send; reject sends without sufficient funds.
+- [x] Settle one reservation only for a WhatsApp-accepted send; release definite failures; hold ambiguous outcomes until a late receipt resolves them.
+- [x] Remove automatic BullMQ transport retries; keep explicit user-selected retry as a newly reserved attempt.
+- [x] Add operator pricing controls and customer balance/DOKU top-up UI.
+- [x] Add per-device sent/failed counts and charged totals.
+- [ ] Send the owner a WhatsApp OTP-number notification when remaining balance reaches 20% of the last top-up amount. This threshold needs to be defined against top-up amount now that package balances are retired.
+- [ ] Add concurrency, duplicate-delivery, crash/uncertain-outcome, and insufficient-funds integration tests; unit coverage is in place for reserve, insufficient balance, and idempotent top-up.
 - [ ] Deploy migrations and code, verify runtime, then push the completed PAYG change.
 
 ## Remaining after PAYG
