@@ -27,7 +27,7 @@ COPY --from=build /app/dist ./dist
 RUN addgroup -S -g 10001 botcontainer && adduser -S -D -H -u 10001 -G botcontainer botcontainer \
   && mkdir -p /app/sessions && chown botcontainer:botcontainer /app /app/sessions
 
-USER botcontainer
+USER 10001:10001
 
 EXPOSE 9000
 
