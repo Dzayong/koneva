@@ -58,7 +58,7 @@ export function MessageRow({
           </time>
         </div>
         <p className="line-clamp-2 text-sm">{message.content}</p>
-        <MessageStatusBadge status={message.status} />
+        <MessageStatusBadge status={message.status} errorMessage={message.error_message} />
       </button>
     </li>
   );
@@ -70,7 +70,7 @@ export function MessageDetail({ message, contactName }: { message: Message; cont
   const rows: Array<[string, React.ReactNode]> = [
     [inbound ? "Dari" : "Ke", `${contactName ? `${contactName} · ` : ""}${displayPeer(number)}`],
     ["Nomor", <span key="d" className="font-mono text-xs">{message.device_key}</span>],
-    ["Status", <MessageStatusBadge key="s" status={message.status} />],
+    ["Status", <MessageStatusBadge key="s" status={message.status} errorMessage={message.error_message} />],
     ["Dibuat", formatDate(message.created_at)],
     ...(message.sent_at ? ([["Terkirim", formatDate(message.sent_at)]] as Array<[string, React.ReactNode]>) : []),
     ...(message.delivered_at ? ([["Sampai", formatDate(message.delivered_at)]] as Array<[string, React.ReactNode]>) : []),
@@ -84,7 +84,12 @@ export function MessageDetail({ message, contactName }: { message: Message; cont
         <p className="mt-3 text-lg leading-relaxed whitespace-pre-wrap">{message.content}</p>
       </div>
       {message.error_message && (
-        <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+        <p className={cn(
+          "rounded-xl border p-3 text-sm",
+          message.error_message === "delivery_uncertain"
+            ? "border-amber-500/30 bg-amber-500/5 text-amber-800 dark:text-amber-300"
+            : "border-destructive/30 bg-destructive/5 text-destructive",
+        )}>
           {messageErrorText(message.error_message)}
         </p>
       )}

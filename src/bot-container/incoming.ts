@@ -55,6 +55,53 @@ export function incomingContent(message: WAMessage): {
   return { content: '[Unsupported message]', type: 'text' };
 }
 
+/** Save group history without invoking webhooks, consent handling, or auto-replies. */
+export async function persistGroupMessage(
+  message: WAMessage,
+  deviceKey: string,
+  queryFn: QueryFn,
+): Promise<boolean> {
+  const remoteJid = message.key.remoteJid;
+  if (!remoteJid?.endsWith('@g.us') || !message.key.id) return false;
+  const deviceResult = await queryFn(
+    'SELECT id, tenant_id, phone_number FROM devices WHERE device_key = $1 LIMIT 1',
+    [deviceKey],
+  );
+  const device = deviceResult.rows[0] as
+    | { id: string; tenant_id: string; phone_number: string | null }
+    | undefined;
+  if (!device) return false;
+  const fromMe = Boolean(message.key.fromMe);
+  const sender = fromMe ? device.phone_number ?? deviceKey : resolveSenderNumber(message.key);
+  if (!sender) return false;
+  const parsed = incomingContent(message);
+  const timestampSeconds = Number(message.messageTimestamp);
+  const direction = fromMe ? 'outbound' : 'inbound';
+  const status = fromMe ? 'sent' : 'received';
+  const result = await queryFn(
+    `INSERT INTO messages (
+       tenant_id, device_id, device_key, from_number, to_number, chat_jid, content, type,
+       status, direction, whatsapp_message_id, created_at, sent_at
+     )
+     SELECT $1::uuid, $2::uuid, $3::varchar, $4::varchar, $5::varchar, $6::varchar, $7::text, $8::varchar,
+            $9::varchar, $10::varchar, $11::varchar,
+            CASE WHEN $12::double precision > 0 THEN to_timestamp($12::double precision) ELSE now() END,
+            CASE WHEN $10::varchar = 'outbound' AND $12::double precision > 0 THEN to_timestamp($12::double precision) ELSE NULL END
+     WHERE NOT EXISTS (
+       SELECT 1 FROM messages WHERE device_key = $3::varchar
+         AND whatsapp_message_id = $11::varchar AND direction = $10::varchar
+     )
+     RETURNING id`,
+    [
+      device.tenant_id, device.id, deviceKey, sender,
+      fromMe ? remoteJid : remoteJid,
+      remoteJid, parsed.content, parsed.type, status, direction, message.key.id,
+      Number.isFinite(timestampSeconds) ? timestampSeconds : 0,
+    ],
+  );
+  return Boolean(result.rows[0]);
+}
+
 export async function handleIncomingMessage(
   message: WAMessage,
   deviceKey: string,
@@ -63,6 +110,10 @@ export async function handleIncomingMessage(
   webhookDispatcher: typeof dispatchWebhook = dispatchWebhook,
   beforeWebhook?: (message: IncomingMessageRecord) => Promise<void>,
 ): Promise<IncomingMessageRecord | undefined> {
+  if (message.key.fromMe && message.key.remoteJid?.endsWith('@g.us')) {
+    await persistGroupMessage(message, deviceKey, queryFn);
+    return;
+  }
   if (message.key.fromMe || !message.key.id) {
     log.debug('Ignoring own or id-less WhatsApp message', { deviceKey, fromMe: message.key.fromMe });
     return;
@@ -97,16 +148,20 @@ export async function handleIncomingMessage(
   const parsed = incomingContent(message);
   const timestampSeconds = Number(message.messageTimestamp);
   const inserted = await queryFn(
-    `INSERT INTO messages (
+    `WITH claimed AS (
+       INSERT INTO inbound_message_dedup (device_key, whatsapp_message_id)
+       VALUES ($3::varchar, $9::varchar)
+       ON CONFLICT (device_key, whatsapp_message_id) DO NOTHING
+       RETURNING 1
+     )
+     INSERT INTO messages (
        tenant_id, device_id, device_key, from_number, to_number, chat_jid, content, type,
        status, direction, whatsapp_message_id, created_at
      )
      SELECT $1::uuid, $2::uuid, $3::varchar, $4::varchar, $5::varchar, $6::varchar, $7::text, $8::varchar,
             'received', 'inbound', $9::varchar,
             CASE WHEN $10::double precision > 0 THEN to_timestamp($10::double precision) ELSE now() END
-     WHERE NOT EXISTS (
-       SELECT 1 FROM messages WHERE whatsapp_message_id = $8::varchar AND direction = 'inbound'
-     )
+     WHERE EXISTS (SELECT 1 FROM claimed)
      RETURNING id, created_at`,
     [
       device.tenant_id,

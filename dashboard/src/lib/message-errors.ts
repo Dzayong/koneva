@@ -12,6 +12,7 @@ const REASONS: Record<string, string> = {
   content_rejected: "Isi pesan ditolak filter spam.",
   recipient_opted_out: "Penerima pernah meminta berhenti, jadi pesan proaktif tidak dikirim.",
   lost_in_queue: "Pesan hilang dari antrean saat sistem dimulai ulang. Kirim ulang bila perlu.",
+  delivery_uncertain: "WhatsApp belum memberi konfirmasi. Pesan mungkin sudah diterima; periksa chat sebelum mencoba kirim lagi.",
   "WhatsApp socket is not connected": "Nomor sedang tidak tersambung ke WhatsApp.",
 };
 

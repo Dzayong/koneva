@@ -1,8 +1,9 @@
 import type { BaileysEventMap, WASocket, WAMessage } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import type { QueryFn } from './health-score';
+import { persistGroupMessage } from './incoming';
 
-/** Return only a timestamp summary; never persist or log any part of message content. */
+/** Return a timestamp summary; history logs must never include message content. */
 export function latestHistoryMessageAt(messages: readonly WAMessage[]): Date | null {
   let latest = 0;
   for (const message of messages) {
@@ -25,6 +26,12 @@ export async function recordHistoryBatch(
 ): Promise<void> {
   const latest = latestHistoryMessageAt(event.messages);
   const progress = normalizeHistoryProgress(event.progress);
+  let groupMessagesStored = 0;
+  for (const message of event.messages) {
+    if (message.key?.remoteJid?.endsWith('@g.us') && await persistGroupMessage(message, deviceKey, queryFn)) {
+      groupMessagesStored += 1;
+    }
+  }
   await queryFn(
     `UPDATE devices
      SET history_sync_status = 'syncing',
@@ -43,6 +50,7 @@ export async function recordHistoryBatch(
   log.info('WhatsApp recent history sync batch processed', {
     deviceKey,
     messageCount: event.messages.length,
+    groupMessagesStored,
     progress,
     hasLatestMessageAt: latest !== null,
   });

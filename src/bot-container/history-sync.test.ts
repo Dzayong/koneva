@@ -25,7 +25,7 @@ test('history progress is clamped and rounded without inventing missing progress
   assert.equal(normalizeHistoryProgress(Number.NaN), null);
 });
 
-test('history batch persists timestamp metadata only and never message bodies', async () => {
+test('history batch records sync metadata without persisting one-to-one message bodies', async () => {
   let sql = '';
   let params: unknown[] = [];
   const queryFn: QueryFn = async (text, values) => { sql = text; params = values ?? []; return { rows: [] }; };

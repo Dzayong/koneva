@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { mediaUrl, MEDIA_TYPES } from '../../shared/media-url';
@@ -23,9 +23,29 @@ export const broadcastSchema = z.object({
 
 export async function createBroadcast(request: Request, response: Response): Promise<void> {
   const input = request.validated!.body as z.infer<typeof broadcastSchema>;
+  const idempotencyKey = request.get('idempotency-key')?.trim();
+  if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 128 || !/^[\w.:-]+$/.test(idempotencyKey)) {
+    throw new ServiceError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Kirim header Idempotency-Key (8–128 karakter: huruf, angka, titik, titik dua, garis bawah, atau tanda hubung)');
+  }
   // A suspended workspace queues nothing at all: one clear refusal instead of hundreds of per-recipient failures.
   await assertSubscriptionActive(pool, request.tenant!.id);
-  const broadcastId = randomUUID();
+  const requestHash = createHash('sha256').update(JSON.stringify(input)).digest('hex');
+  const candidateId = randomUUID();
+  const inserted = await pool.query<{ broadcast_id: string; request_hash: string }>(
+    `INSERT INTO broadcast_idempotency (tenant_id, idempotency_key, request_hash, broadcast_id)
+     VALUES ($1,$2,$3,$4) ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+     RETURNING broadcast_id, request_hash`,
+    [request.tenant!.id, idempotencyKey, requestHash, candidateId],
+  );
+  const prior = inserted.rows[0] ?? (await pool.query<{ broadcast_id: string; request_hash: string }>(
+    `SELECT broadcast_id, request_hash FROM broadcast_idempotency WHERE tenant_id=$1 AND idempotency_key=$2`,
+    [request.tenant!.id, idempotencyKey],
+  )).rows[0];
+  if (!prior) throw new ServiceError(503, 'BROADCAST_CLAIM_UNAVAILABLE', 'Tidak dapat mengunci permintaan broadcast; coba ulang dengan kunci yang sama');
+  if (prior.request_hash !== requestHash) {
+    throw new ServiceError(409, 'IDEMPOTENCY_KEY_CONFLICT', 'Idempotency-Key sudah digunakan untuk isi broadcast yang berbeda');
+  }
+  const broadcastId = prior.broadcast_id;
   const results: Array<{ phone_number: string; message_id?: string; status: 'queued' | 'failed'; error_code?: string; error?: string }> = [];
   for (const [index, recipient] of input.recipients.entries()) {
     try {

@@ -117,7 +117,7 @@ export default function DocsPage() {
               <tr><td>8+</td><td>50</td><td>Batas normal</td></tr>
             </tbody>
           </table>
-          <p>Ada juga batas per menit dan kuota pesan bulanan sesuai paket. Hanya OTP dengan <code>otp_code</code> yang diverifikasi server yang memakai jalur transactional cepat; nilai <code>priority: &quot;urgent&quot;</code> dari pemanggil tidak mengaktifkannya.</p>
+          <p>Ada juga batas per menit dan kuota pesan bulanan sesuai paket. Pesan OTP yang dikirim melalui API tenant tetap mengikuti aturan consent, kuota, dan pacing biasa. Nilai <code>priority: &quot;urgent&quot;</code> maupun <code>otp_code</code> dari pemanggil tidak mengaktifkan jalur istimewa.</p>
 
           <H2 id="webhook">Webhook</H2>
           <p>Webhook adalah panggilan dari kami ke server Anda saat ada kejadian, sehingga Anda tidak perlu menanyakan status terus-menerus. Simpan alamat di dashboard menu <strong>Webhook</strong>, buat kunci tanda tangan, lalu tekan <em>Kirim tes</em>.</p>

@@ -1,8 +1,8 @@
 // Shared between the API gateway (which validates and enqueues) and the bot (which runs).
 export const COMMAND_TYPES = [
   'profile.get', 'profile.update', 'profile.picture', 'status.post',
-  'whatsapp.groups.list', 'whatsapp.channel.lookup',
-  'whatsapp.group.create', 'whatsapp.group.update', 'whatsapp.group.leave', 'whatsapp.group.members',
+  'whatsapp.groups.list', 'whatsapp.channel.lookup', 'whatsapp.channel.follow', 'whatsapp.channel.create', 'whatsapp.channel.update', 'whatsapp.channel.unfollow', 'whatsapp.channel.post',
+  'whatsapp.group.create', 'whatsapp.group.update', 'whatsapp.group.leave', 'whatsapp.group.members', 'whatsapp.group.details', 'whatsapp.group.invite', 'whatsapp.group.invite.revoke', 'whatsapp.group.settings', 'whatsapp.group.picture', 'whatsapp.group.join-requests', 'whatsapp.group.join-requests.update',
   'whatsapp.community.create', 'whatsapp.community.update', 'whatsapp.community.leave', 'whatsapp.community.link-group',
 ] as const;
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -14,6 +14,14 @@ export const commandChannel = (deviceKey: string): string => `bot:command:${devi
  * default is deliberately low. Not measured against WhatsApp's limits; treat it as caution.
  */
 export const STATUS_DAILY_LIMIT = 3;
+
+export interface WhatsAppChannelPostPayload {
+  jid: string;
+  kind: 'text' | 'image' | 'video';
+  text?: string;
+  media_url?: string;
+  caption?: string;
+}
 
 export interface StatusPayload {
   kind: 'text' | 'image' | 'video';

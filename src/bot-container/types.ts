@@ -80,4 +80,6 @@ export interface MessageRecord {
   /** Outbound reply is tied to this recent inbound customer message. */
   replyToMessageId?: string | null;
   createdAt: Date;
+  /** When this queued attempt became eligible to send; separate from creation/schedule time. */
+  queueStartedAt: Date;
 }

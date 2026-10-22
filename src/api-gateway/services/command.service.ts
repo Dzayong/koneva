@@ -9,7 +9,9 @@ import { assertSubscriptionActive } from './billing.service';
 const WRITE_COMMANDS: ReadonlySet<CommandType> = new Set([
   'status.post', 'profile.update', 'profile.picture',
   'whatsapp.group.create', 'whatsapp.group.update', 'whatsapp.group.leave', 'whatsapp.group.members',
+  'whatsapp.group.invite.revoke', 'whatsapp.group.settings', 'whatsapp.group.picture', 'whatsapp.group.join-requests.update',
   'whatsapp.community.create', 'whatsapp.community.update', 'whatsapp.community.leave', 'whatsapp.community.link-group',
+  'whatsapp.channel.follow', 'whatsapp.channel.create', 'whatsapp.channel.update', 'whatsapp.channel.unfollow', 'whatsapp.channel.post',
 ]);
 
 export interface CommandRow {

@@ -10,7 +10,9 @@
     "build": "tsc",
     "migrate": "ts-node scripts/migrate.ts",
     "seed": "ts-node scripts/seed.ts",
-    "test": "node --require ts-node/register --test src/**/*.test.ts"
+    "test": "node --require ts-node/register --test src/**/*.test.ts",
+    "postinstall": "node scripts/patch-baileys-newsletter.js",
+    "test:baileys-patch": "node --test scripts/patch-baileys-newsletter.test.js"
   },
   "keywords": [],
   "author": "",

@@ -6,10 +6,11 @@ import { getRedisClient } from '../../shared/redis';
 import type { TenantContext } from '../../shared/types/api';
 import { validate } from '../middleware/validate';
 import { ServiceError } from '../services/service-error';
+import { isSafeAutoReplyRegex } from '../../shared/safe-auto-reply-regex';
 
 const router = Router();
 const idSchema = z.object({ id: z.string().uuid() });
-const triggerPattern = z.string().max(1000);
+const triggerPattern = z.string().max(128);
 const ruleBody = z.object({
   device_key: z.string().min(1).max(32),
   trigger_type: z.enum(['keyword', 'regex', 'all']),
@@ -22,14 +23,8 @@ const ruleBody = z.object({
   if (input.trigger_type !== 'all' && input.trigger_pattern.trim().length === 0) {
     context.addIssue({ code: 'custom', path: ['trigger_pattern'], message: 'Trigger pattern is required' });
   }
-  if (input.trigger_type === 'regex') {
-    try {
-      new RegExp(input.trigger_pattern);
-      if (/(\+|\*|\{)\1|(\.\*){3,}|\(\?[^)]*\)\+|\([^)]*\+[^)]*\)\+/.test(input.trigger_pattern)) {
-        context.addIssue({ code: 'custom', path: ['trigger_pattern'], message: 'Regex pattern is too complex (potential ReDoS)' });
-      }
-    }
-    catch { context.addIssue({ code: 'custom', path: ['trigger_pattern'], message: 'Invalid regular expression' }); }
+  if (input.trigger_type === 'regex' && !isSafeAutoReplyRegex(input.trigger_pattern)) {
+    context.addIssue({ code: 'custom', path: ['trigger_pattern'], message: 'Regex tidak valid atau terlalu kompleks. Gunakan pola sederhana tanpa grup atau alternasi.' });
   }
 });
 const updateBody = z.object({

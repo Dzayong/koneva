@@ -4,6 +4,7 @@ import type { WASocket } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import { AutoReplyEngine, matchesAutoReply, processAutoReply, type AutoReplyRule } from './auto-reply';
 import type { QueryFn } from './health-score';
+import { isSafeAutoReplyRegex } from '../shared/safe-auto-reply-regex';
 
 const baseRule: AutoReplyRule = {
   id: 'rule-1', tenant_id: 'tenant-1', device_key: 'WAPI-1', is_active: true,
@@ -16,6 +17,13 @@ test('auto-reply matching supports keyword, regex, and all rules', () => {
   assert.equal(matchesAutoReply({ ...baseRule, trigger: { type: 'regex', pattern: '^order \\d+$' } }, 'ORDER 42'), true);
   assert.equal(matchesAutoReply({ ...baseRule, trigger: { type: 'all', pattern: '' } }, 'anything'), true);
   assert.equal(matchesAutoReply({ ...baseRule, is_active: false }, 'harga'), false);
+});
+
+test('auto-reply regex rejects catastrophic groups/alternation and accepts bounded simple patterns', () => {
+  assert.equal(isSafeAutoReplyRegex('^(a|a?)+$'), false);
+  assert.equal(isSafeAutoReplyRegex('(a+)+$'), false);
+  assert.equal(isSafeAutoReplyRegex('^order \\d+$'), true);
+  assert.equal(isSafeAutoReplyRegex('['), false);
 });
 
 test('matched inbound message sends and records an auto-reply', async () => {

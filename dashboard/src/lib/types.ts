@@ -120,6 +120,8 @@ export interface MessageListParams {
   device_key?: string;
   status?: MessageStatus;
   created_today?: boolean;
+  search?: string;
+  chat_jid?: string;
   limit?: number;
   offset?: number;
 }
@@ -580,6 +582,13 @@ export interface WhatsAppGroupSummary {
   announcement_only: boolean;
   created_at: string | null;
 }
+export interface WhatsAppGroupParticipant { id: string; name: string | null; role: "owner" | "admin" | "member" }
+export interface WhatsAppGroupDetails {
+  id: string; name: string; description: string | null; image_url?: string | null; created_at: string | null; owner: string | null;
+  announcement_only: boolean; restricted: boolean; member_add_mode: "admin_add" | "all_member_add";
+  join_approval: boolean; ephemeral_duration: number; participants: WhatsAppGroupParticipant[];
+}
+export interface WhatsAppGroupJoinRequest { id: string | null; requested_at: string | null }
 export interface WhatsAppChannelSummary {
   id: string;
   name: string;
@@ -587,6 +596,8 @@ export interface WhatsAppChannelSummary {
   subscribers: number | null;
   verification: "VERIFIED" | "UNVERIFIED";
   invite: string | null;
+  is_owner?: boolean;
+  followed_at?: string;
 }
 
 export interface StatusViewers { viewers: Array<{ number: string | null; viewed_at: string }>; total: number }

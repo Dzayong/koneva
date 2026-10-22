@@ -2,11 +2,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canSendMessage,
+  countMessagesSince,
   getDailyCapByHealthScore,
   getWarmupStage,
   isWithinSendingWindow,
   type QueryFn,
 } from './anti-ban';
+
+test('send budget counts persisted in-flight sends as reservations', async () => {
+  let statement = '';
+  const queryFn: QueryFn = async (sql) => { statement = sql; return { rows: [{ count: '2' }] } as never; };
+  assert.equal(await countMessagesSince('device-1', new Date(), queryFn), 2);
+  assert.match(statement, /status IN \('sending', 'sent', 'delivered', 'read'\)/);
+  assert.match(statement, /status = 'failed' AND error_message = 'delivery_uncertain'/);
+  assert.match(statement, /COALESCE\(sent_at, send_started_at, created_at\)/);
+});
 
 test('warm-up stages match the spec tiers', () => {
   assert.equal(getWarmupStage(1).maxMessagesPerDay, 5);

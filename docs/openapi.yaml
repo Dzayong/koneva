@@ -52,9 +52,37 @@ paths:
   /api/v1/devices/{key}/whatsapp-groups/{jid}/members:
     parameters: [ { $ref: '#/components/parameters/DeviceKey' }, { name: jid, in: path, required: true, schema: { type: string } } ]
     post: { summary: Add, remove, promote, or demote group members, requestBody: { required: true, content: { application/json: { schema: { type: object, required: [action, participants], properties: { action: { type: string, enum: [add, remove, promote, demote] }, participants: { type: array, minItems: 1, maxItems: 50, items: { type: string } } } } } } }, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/devices/{key}/whatsapp-groups/{jid}/details:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' }, { name: jid, in: path, required: true, schema: { type: string } } ]
+    get: { summary: Get group details, members, and supported settings, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/devices/{key}/whatsapp-groups/{jid}/invite:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' }, { name: jid, in: path, required: true, schema: { type: string } } ]
+    get: { summary: Get the current group invite link, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/devices/{key}/whatsapp-groups/{jid}/invite/revoke:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' }, { name: jid, in: path, required: true, schema: { type: string } } ]
+    post: { summary: Revoke and replace the group invite link, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/devices/{key}/whatsapp-groups/{jid}/settings:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' }, { name: jid, in: path, required: true, schema: { type: string } } ]
+    patch:
+      summary: Update supported group permissions and disappearing-message duration
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { announcement_only: { type: boolean }, restricted: { type: boolean }, member_add_mode: { type: boolean }, join_approval: { type: boolean }, ephemeral_duration: { type: integer, enum: [0, 86400, 604800, 7776000] } } } } }
+      responses: { "200": { $ref: '#/components/responses/Success' } }
+  /api/v1/devices/{key}/whatsapp-groups/{jid}/picture:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' }, { name: jid, in: path, required: true, schema: { type: string } } ]
+    post:
+      summary: Upload a group profile photo
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [image_base64], properties: { image_base64: { type: string, maxLength: 400000 } } } } } }
+      responses: { "200": { $ref: '#/components/responses/Success' } }
+  /api/v1/devices/{key}/whatsapp-groups/{jid}/join-requests:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' }, { name: jid, in: path, required: true, schema: { type: string } } ]
+    get: { summary: List pending group join requests, responses: { "200": { $ref: '#/components/responses/Success' } } }
+    post:
+      summary: Approve or reject pending group join requests
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [action, participants], properties: { action: { type: string, enum: [approve, reject] }, participants: { type: array, minItems: 1, maxItems: 50, items: { type: string } } } } } } }
+      responses: { "200": { $ref: '#/components/responses/Success' } }
   /api/v1/devices/{key}/whatsapp-communities:
     parameters: [ { $ref: '#/components/parameters/DeviceKey' } ]
-    post: { summary: Create a community, requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string }, description: { type: string } } } } } }, responses: { "201": { $ref: '#/components/responses/Success' } } }
+    post: { summary: Queue community creation and return a command id to poll, requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string }, description: { type: string } } } } } }, responses: { "202": { $ref: '#/components/responses/Success' } } }
   /api/v1/devices/{key}/whatsapp-communities/{jid}:
     parameters: [ { $ref: '#/components/parameters/DeviceKey' }, { name: jid, in: path, required: true, schema: { type: string } } ]
     patch: { summary: Update community name or description, requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { name: { type: string }, description: { type: string } } } } } }, responses: { "200": { $ref: '#/components/responses/Success' } } }
@@ -65,6 +93,20 @@ paths:
   /api/v1/devices/{key}/whatsapp-channel:
     parameters: [ { $ref: '#/components/parameters/DeviceKey' } ]
     get: { summary: Look up public channel metadata from an invite URL, responses: { "200": { $ref: '#/components/responses/Success' } } }
+  /api/v1/devices/{key}/whatsapp-channels:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' } ]
+    get: { summary: List channels followed or created through KONEVA, responses: { "200": { $ref: '#/components/responses/Success' } } }
+    post:
+      summary: Create a WhatsApp channel
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string, maxLength: 100 }, description: { type: string, maxLength: 512 } } } } }
+      responses: { "201": { $ref: '#/components/responses/Success' } }
+  /api/v1/devices/{key}/whatsapp-channels/follow:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' } ]
+    post: { summary: Follow a channel from its invite URL or newsletter JID, requestBody: { required: true, content: { application/json: { schema: { type: object, required: [link], properties: { link: { type: string, maxLength: 500 } } } } } }, responses: { "201": { $ref: '#/components/responses/Success' } } }
+  /api/v1/devices/{key}/whatsapp-channels/{jid}:
+    parameters: [ { $ref: '#/components/parameters/DeviceKey' }, { name: jid, in: path, required: true, schema: { type: string, example: '120363000000000000@newsletter' } } ]
+    patch: { summary: Update an owned channel name or description, responses: { "200": { $ref: '#/components/responses/Success' } } }
+    delete: { summary: Unfollow the channel on this linked number, responses: { "200": { $ref: '#/components/responses/Success' } } }
   /api/v1/messages:
     get:
       summary: List and filter messages
@@ -73,6 +115,7 @@ paths:
         - { name: status, in: query, schema: { $ref: '#/components/schemas/MessageStatus' } }
         - { name: direction, in: query, schema: { type: string, enum: [inbound, outbound] } }
         - { name: search, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: chat_jid, in: query, schema: { type: string, description: Exact WhatsApp chat JID filter, including group JIDs } }
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/Offset' }
       responses: { "200": { $ref: '#/components/responses/Paginated' } }

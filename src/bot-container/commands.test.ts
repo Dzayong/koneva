@@ -92,6 +92,90 @@ test('group and community management actions call Baileys and re-check transmiss
   assert.deepEqual(calls.find(call => call.fn === 'communityLinkGroup')?.args, ['120363000001-123456@g.us', '120363000000-123456@g.us']);
 });
 
+test('community creation treats a missing WhatsApp confirmation as failure', async () => {
+  const { context } = ctx();
+  const sock = context.sock as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  sock['communityCreate'] = async () => null;
+  await assert.rejects(
+    () => executeCommand('whatsapp.community.create', { name: 'Komunitas', description: '' }, context),
+    (error: unknown) => error instanceof CommandFailure && error.code === 'COMMUNITY_CREATE_UNCONFIRMED',
+  );
+});
+
+test('group details expose participants and supported settings without phone history', async () => {
+  const { context, calls } = ctx();
+  const sock = context.sock as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  sock['groupMetadata'] = async (...args: unknown[]) => ({
+    id: String(args[0]), subject: 'Tim', desc: 'Info', creation: 1_700_000_000, ownerPn: '628100@s.whatsapp.net', announce: true,
+    restrict: false, memberAddMode: true, joinApprovalMode: true, ephemeralDuration: 86_400,
+    participants: [{ id: '628100@s.whatsapp.net', phoneNumber: '628100@s.whatsapp.net', name: 'Dzaki', admin: 'superadmin' }, { id: '628200@s.whatsapp.net' }],
+  });
+  sock['profilePictureUrl'] = async () => 'https://media.example/group.jpg';
+  sock['groupInviteCode'] = async (...args: unknown[]) => { calls.push({ fn: 'groupInviteCode', args }); return 'invite-code'; };
+  sock['groupRevokeInvite'] = async (...args: unknown[]) => { calls.push({ fn: 'groupRevokeInvite', args }); return 'new-code'; };
+  sock['groupSettingUpdate'] = async (...args: unknown[]) => { calls.push({ fn: 'groupSettingUpdate', args }); };
+  sock['groupMemberAddMode'] = async (...args: unknown[]) => { calls.push({ fn: 'groupMemberAddMode', args }); };
+  sock['groupJoinApprovalMode'] = async (...args: unknown[]) => { calls.push({ fn: 'groupJoinApprovalMode', args }); };
+  sock['groupToggleEphemeral'] = async (...args: unknown[]) => { calls.push({ fn: 'groupToggleEphemeral', args }); };
+  sock['groupRequestParticipantsList'] = async () => [{ jid: '628300@s.whatsapp.net', request_time: '123' }];
+  sock['groupRequestParticipantsUpdate'] = async (...args: unknown[]) => { calls.push({ fn: 'groupRequestParticipantsUpdate', args }); return []; };
+
+  const details = await executeCommand('whatsapp.group.details', { jid: '120363000000-123456@g.us' }, context) as { participants: Array<{ name: string | null; role: string }>; join_approval: boolean; image_url: string };
+  assert.equal(details.participants[0]?.name, 'Dzaki');
+  assert.equal(details.participants[0]?.role, 'owner');
+  assert.equal(details.participants[1]?.role, 'member');
+  assert.equal(details.join_approval, true);
+  assert.equal(details.image_url, 'https://media.example/group.jpg');
+  assert.equal((await executeCommand('whatsapp.group.invite', { jid: '120363000000-123456@g.us' }, context) as { code: string }).code, 'invite-code');
+  assert.equal((await executeCommand('whatsapp.group.join-requests', { jid: '120363000000-123456@g.us' }, context) as Array<{ id: string }>)[0]?.id, '628300@s.whatsapp.net');
+
+  let guards = 0;
+  context.assertMayTransmit = async () => { guards += 1; };
+  sock['updateProfilePicture'] = async (...args: unknown[]) => { calls.push({ fn: 'updateProfilePicture', args }); };
+  await executeCommand('whatsapp.group.picture', { jid: 'g', image_base64: Buffer.from('photo').toString('base64') }, context);
+  await executeCommand('whatsapp.group.invite.revoke', { jid: '120363000000-123456@g.us' }, context);
+  await executeCommand('whatsapp.group.settings', { jid: 'g', announcement_only: true, restricted: true, member_add_mode: 'admin_add', join_approval: true, ephemeral_duration: 604_800 }, context);
+  await executeCommand('whatsapp.group.join-requests.update', { jid: 'g', action: 'approve', participants: ['628300@s.whatsapp.net'] }, context);
+  assert.equal(guards, 4);
+  assert.deepEqual(calls.find((call) => call.fn === 'updateProfilePicture')?.args, ['g', Buffer.from('photo')]);
+  assert.deepEqual(calls.find((call) => call.fn === 'groupSettingUpdate')?.args, ['g', 'announcement']);
+  assert.deepEqual(calls.find((call) => call.fn === 'groupToggleEphemeral')?.args, ['g', 604_800]);
+  assert.deepEqual(calls.find((call) => call.fn === 'groupRequestParticipantsUpdate')?.args, ['g', ['628300@s.whatsapp.net'], 'approve']);
+});
+
+test('channel follow and create return metadata and require transmission permission', async () => {
+  const { context, calls } = ctx();
+  const sock = context.sock as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  sock['newsletterMetadata'] = async (...args) => { calls.push({ fn: 'newsletterMetadata', args }); return { id: 'channel@newsletter', name: 'Info', invite: 'invite-code' }; };
+  sock['newsletterFollow'] = async (...args) => { calls.push({ fn: 'newsletterFollow', args }); return {}; };
+  sock['newsletterCreate'] = async (...args) => { calls.push({ fn: 'newsletterCreate', args }); return { id: 'channel@newsletter', name: 'Toko', invite: 'invite-code' }; };
+  let guards = 0;
+  context.assertMayTransmit = async () => { guards += 1; };
+  const followed = await executeCommand('whatsapp.channel.follow', { lookup: 'invite-code', isJid: false }, context) as Record<string, unknown>;
+  const created = await executeCommand('whatsapp.channel.create', { name: 'Toko', description: 'Info' }, context) as Record<string, unknown>;
+  assert.equal(followed['id'], 'channel@newsletter');
+  assert.equal(created['invite'], 'invite-code');
+  assert.equal(guards, 2);
+  assert.deepEqual(calls.find(call => call.fn === 'newsletterFollow')?.args, ['channel@newsletter']);
+  assert.deepEqual(calls.find(call => call.fn === 'newsletterCreate')?.args, ['Toko', 'Info']);
+});
+
+test('channel post sends a text, photo, or video to the selected channel after the write guard', async () => {
+  const { context, calls } = ctx();
+  let guards = 0;
+  context.assertMayTransmit = async () => { guards += 1; };
+  await executeCommand('whatsapp.channel.post', { jid: 'channel@newsletter', kind: 'text', text: 'Info toko' }, context);
+  await executeCommand('whatsapp.channel.post', { jid: 'channel@newsletter', kind: 'image', media_url: 'https://example.com/promo.jpg', caption: 'Promo' }, context);
+  await executeCommand('whatsapp.channel.post', { jid: 'channel@newsletter', kind: 'video', media_url: 'https://example.com/info.mp4' }, context);
+  const sent = calls.filter((call) => call.fn === 'sendMessage');
+  assert.equal(guards, 3);
+  assert.deepEqual(sent.map((call) => call.args), [
+    ['channel@newsletter', { text: 'Info toko' }],
+    ['channel@newsletter', { image: { url: 'https://example.com/promo.jpg' }, caption: 'Promo' }],
+    ['channel@newsletter', { video: { url: 'https://example.com/info.mp4' } }],
+  ]);
+});
+
 test('profile.get still answers when the About text or photo is unavailable', async () => {
   const { context } = ctx({ business: false });
   const sock = context.sock as unknown as Record<string, unknown>;

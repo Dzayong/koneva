@@ -1,6 +1,6 @@
 import { jidNormalizedUser, type WASocket } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
-import type { CommandType, ProfilePicturePayload, ProfileUpdate, StatusPayload } from '../shared/commands';
+import type { CommandType, ProfilePicturePayload, ProfileUpdate, StatusPayload, WhatsAppChannelPostPayload } from '../shared/commands';
 import { getOrCreatePersona, isWithinPersonaWindow, msUntilWindowOpens } from '../shared/persona';
 import type { PresenceRoutine } from './presence';
 import { getStoredRecipientConsent, normalizeRecipientNumber, withRecipientConsentLocks } from '../shared/recipient-consent';
@@ -269,6 +269,46 @@ export async function executeCommand(type: CommandType, payload: unknown, ctx: C
         invite: channel.invite ?? null,
       };
     }
+    case 'whatsapp.channel.follow': {
+      const p = payload as { lookup: string; isJid: boolean };
+      await ctx.assertMayTransmit?.();
+      const channel = await withDeadline(ctx.sock.newsletterMetadata(p.isJid ? 'jid' : 'invite', p.lookup), ctx.deadlineMs ?? COMMAND_DEADLINE_MS);
+      if (!channel) throw new CommandFailure('CHANNEL_NOT_FOUND', 'Saluran tidak ditemukan dari tautan tersebut.');
+      await ctx.sock.newsletterFollow(channel.id);
+      const refreshed = await withDeadline(ctx.sock.newsletterMetadata('jid', channel.id), ctx.deadlineMs ?? COMMAND_DEADLINE_MS);
+      const item = refreshed ?? channel;
+      return { id: item.id, name: item.name, description: item.description ?? null, subscribers: item.subscribers ?? null, verification: item.verification ?? 'UNVERIFIED', invite: item.invite ?? null };
+    }
+    case 'whatsapp.channel.create': {
+      const p = payload as { name: string; description: string };
+      await ctx.assertMayTransmit?.();
+      const channel = await ctx.sock.newsletterCreate(p.name, p.description);
+      return { id: channel.id, name: channel.name, description: channel.description ?? null, subscribers: channel.subscribers ?? null, verification: channel.verification ?? 'UNVERIFIED', invite: channel.invite ?? null };
+    }
+    case 'whatsapp.channel.update': {
+      const p = payload as { jid: string; name?: string; description?: string };
+      await ctx.assertMayTransmit?.();
+      if (p.name !== undefined) await ctx.sock.newsletterUpdateName(p.jid, p.name);
+      if (p.description !== undefined) await ctx.sock.newsletterUpdateDescription(p.jid, p.description);
+      return { id: p.jid, updated: ['name', 'description'].filter(key => p[key as 'name' | 'description'] !== undefined) };
+    }
+    case 'whatsapp.channel.unfollow': {
+      const p = payload as { jid: string };
+      await ctx.assertMayTransmit?.();
+      await ctx.sock.newsletterUnfollow(p.jid);
+      return { id: p.jid, followed: false };
+    }
+    case 'whatsapp.channel.post': {
+      const p = payload as WhatsAppChannelPostPayload;
+      await ctx.assertMayTransmit?.();
+      const content = p.kind === 'text'
+        ? { text: p.text! }
+        : p.kind === 'image'
+          ? { image: { url: p.media_url! }, ...(p.caption ? { caption: p.caption } : {}) }
+          : { video: { url: p.media_url! }, ...(p.caption ? { caption: p.caption } : {}) };
+      const result = await withDeadline(ctx.sock.sendMessage(p.jid, content as never), ctx.deadlineMs ?? COMMAND_DEADLINE_MS);
+      return { id: p.jid, message_id: result?.key?.id ?? null, kind: p.kind };
+    }
     case 'whatsapp.group.create': {
       const p = payload as { name: string; participants: string[] };
       await ctx.assertMayTransmit?.();
@@ -292,10 +332,75 @@ export async function executeCommand(type: CommandType, payload: unknown, ctx: C
       await ctx.assertMayTransmit?.();
       return ctx.sock.groupParticipantsUpdate(p.jid, p.participants.map(phone => `${phone.replace(/\D/g, '')}@s.whatsapp.net`), p.action);
     }
+    case 'whatsapp.group.details': {
+      const { jid } = payload as { jid: string };
+      const deadline = ctx.deadlineMs ?? COMMAND_DEADLINE_MS;
+      const [group, imageUrl] = await Promise.all([
+        withDeadline(ctx.sock.groupMetadata(jid), deadline),
+        withDeadline(Promise.resolve().then(() => ctx.sock.profilePictureUrl(jid, 'image')), deadline).catch(() => undefined),
+      ]);
+      return {
+        id: group.id,
+        name: group.subject,
+        description: group.desc ?? null,
+        image_url: imageUrl ?? null,
+        created_at: group.creation ? new Date(group.creation * 1000).toISOString() : null,
+        owner: group.ownerPn ?? group.owner ?? null,
+        announcement_only: Boolean(group.announce),
+        restricted: Boolean(group.restrict),
+        member_add_mode: group.memberAddMode ? 'all_member_add' : 'admin_add',
+        join_approval: Boolean(group.joinApprovalMode),
+        ephemeral_duration: group.ephemeralDuration ?? 0,
+        participants: (group.participants ?? []).map((participant) => ({
+          id: participant.phoneNumber ?? participant.id,
+          name: participant.name ?? participant.notify ?? participant.verifiedName ?? null,
+          role: participant.isSuperAdmin || participant.admin === 'superadmin' ? 'owner' : participant.isAdmin || participant.admin === 'admin' ? 'admin' : 'member',
+        })),
+      };
+    }
+    case 'whatsapp.group.picture': {
+      const { jid, image_base64 } = payload as { jid: string; image_base64: string };
+      await ctx.assertMayTransmit?.();
+      await withDeadline(ctx.sock.updateProfilePicture(jid, Buffer.from(image_base64, 'base64') as never), (ctx.deadlineMs ?? COMMAND_DEADLINE_MS) * 2);
+      return { success: true };
+    }
+    case 'whatsapp.group.invite': {
+      const { jid } = payload as { jid: string };
+      return { code: await withDeadline(ctx.sock.groupInviteCode(jid), ctx.deadlineMs ?? COMMAND_DEADLINE_MS) ?? null };
+    }
+    case 'whatsapp.group.invite.revoke': {
+      const { jid } = payload as { jid: string };
+      await ctx.assertMayTransmit?.();
+      return { code: await ctx.sock.groupRevokeInvite(jid) ?? null };
+    }
+    case 'whatsapp.group.settings': {
+      const p = payload as { jid: string; announcement_only?: boolean; restricted?: boolean; member_add_mode?: 'admin_add' | 'all_member_add'; join_approval?: boolean; ephemeral_duration?: number };
+      await ctx.assertMayTransmit?.();
+      if (p.announcement_only !== undefined) await ctx.sock.groupSettingUpdate(p.jid, p.announcement_only ? 'announcement' : 'not_announcement');
+      if (p.restricted !== undefined) await ctx.sock.groupSettingUpdate(p.jid, p.restricted ? 'locked' : 'unlocked');
+      if (p.member_add_mode !== undefined) await ctx.sock.groupMemberAddMode(p.jid, p.member_add_mode);
+      if (p.join_approval !== undefined) await ctx.sock.groupJoinApprovalMode(p.jid, p.join_approval ? 'on' : 'off');
+      if (p.ephemeral_duration !== undefined) await ctx.sock.groupToggleEphemeral(p.jid, p.ephemeral_duration);
+      return { id: p.jid, updated: Object.keys(p).filter((key) => key !== 'jid') };
+    }
+    case 'whatsapp.group.join-requests': {
+      const { jid } = payload as { jid: string };
+      const participants = await withDeadline(ctx.sock.groupRequestParticipantsList(jid), ctx.deadlineMs ?? COMMAND_DEADLINE_MS);
+      return participants.map((participant) => ({ id: participant['jid'] ?? participant['id'] ?? null, requested_at: participant['request_time'] ?? null }));
+    }
+    case 'whatsapp.group.join-requests.update': {
+      const p = payload as { jid: string; action: 'approve' | 'reject'; participants: string[] };
+      await ctx.assertMayTransmit?.();
+      return ctx.sock.groupRequestParticipantsUpdate(p.jid, p.participants, p.action);
+    }
     case 'whatsapp.community.create': {
       const p = payload as { name: string; description: string };
       await ctx.assertMayTransmit?.();
-      return ctx.sock.communityCreate(p.name, p.description);
+      const community = await ctx.sock.communityCreate(p.name, p.description);
+      if (!community?.id) {
+        throw new CommandFailure('COMMUNITY_CREATE_UNCONFIRMED', 'WhatsApp tidak mengonfirmasi pembuatan komunitas. Periksa daftar komunitas sebelum mencoba lagi.');
+      }
+      return community;
     }
     case 'whatsapp.community.update': {
       const p = payload as { jid: string; name?: string; description?: string };

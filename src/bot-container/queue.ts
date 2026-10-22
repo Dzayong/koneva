@@ -4,6 +4,7 @@ import { Queue, Worker, UnrecoverableError, type Job } from 'bullmq';
 import type Redis from 'ioredis';
 import {
   delay as baileysDelay,
+  generateMessageIDV2,
   WAMessageStatus,
   type WASocket,
   type AnyMessageContent,
@@ -26,6 +27,7 @@ import { withSpan } from './tracing';
 import type { EnqueueMessageInput, QueueJobData, MessageRecord, MessageStatus } from './types';
 import { getStoredRecipientConsent, withRecipientConsentLock } from '../shared/recipient-consent';
 import { ApiError } from './errors';
+import { withDeviceSendLock } from '../shared/device-send-lock';
 
 const defaultQueryFn: QueryFn = (text, params) => query(text, params);
 
@@ -33,6 +35,8 @@ const JOB_NAME = 'send';
 const MAX_ATTEMPTS = 3;
 const BACKOFF_BASE_MS = 5_000;
 const RETRY_LATER_DELAY_MS = 5 * 60_000;
+const MAX_NORMAL_QUEUE_AGE_MS = 15 * 60_000;
+const MAX_URGENT_QUEUE_AGE_MS = 2 * 60_000;
 
 class RecipientConsentDenied extends Error {
   constructor(readonly code: 'RECIPIENT_CONSENT_REQUIRED' | 'RECIPIENT_OPTED_OUT') { super(code); }
@@ -128,6 +132,8 @@ interface MessageRow {
   system_notification: boolean;
   reply_to_message_id: string | null;
   created_at: Date;
+  queue_started_at: Date;
+  send_started_at: Date | null;
 }
 
 function mapMessageRow(row: MessageRow): MessageRecord {
@@ -143,12 +149,15 @@ function mapMessageRow(row: MessageRow): MessageRecord {
     status: row.status,
     whatsappMessageId: row.whatsapp_message_id,
     errorMessage: row.error_message,
+    // Only the server-owned exemption makes a message urgent. A persisted
+    // request priority by itself is never authority for a privileged route.
     priority: row.quota_exempt ? 'urgent' : 'normal',
     quotaExempt: row.quota_exempt,
     ...(row.system_otp ? { systemOtp: true } : {}),
     ...(row.system_notification ? { systemNotification: true } : {}),
     ...(row.reply_to_message_id ? { replyToMessageId: row.reply_to_message_id } : {}),
     createdAt: row.created_at,
+    queueStartedAt: row.queue_started_at,
   };
 }
 
@@ -157,7 +166,7 @@ async function getMessageById(id: string, queryFn: QueryFn): Promise<MessageReco
     `SELECT id, tenant_id, device_id, device_key, to_number, content, media_url, type, status,
             whatsapp_message_id, error_message, priority, COALESCE(quota_exempt, false) AS quota_exempt,
             COALESCE(system_otp, false) AS system_otp, COALESCE(system_notification, false) AS system_notification,
-            reply_to_message_id, created_at
+            reply_to_message_id, created_at, queue_started_at, send_started_at
      FROM messages WHERE id = $1`,
     [id],
   );
@@ -217,6 +226,10 @@ async function updateMessageStatus(
   }
   if (fields.timestampColumn) {
     sets.push(`${fields.timestampColumn} = now()`);
+  }
+  if (['sent', 'failed', 'blocked'].includes(fields.status)
+    && !(fields.status === 'failed' && fields.errorMessage === 'delivery_uncertain')) {
+    sets.push('send_started_at = NULL');
   }
   if (['sent', 'failed', 'blocked'].includes(fields.status)) {
     sets.push("content = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE content END");
@@ -332,7 +345,17 @@ async function failAttempt(
   });
 
   if (job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) {
-    await updateMessageStatus(message.id, { status: 'failed', errorMessage }, queryFn);
+    const failed = await queryFn(
+      `UPDATE messages SET status = 'failed', send_started_at = NULL, error_message = $2,
+         content = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE content END,
+         to_number = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE to_number END
+       WHERE id = $1 AND status = 'sending' RETURNING id`,
+      [message.id, errorMessage],
+    );
+    if (failed.rows.length === 0) {
+      log.info('Transport failure arrived after a WhatsApp receipt; preserving confirmed message status', { messageId: message.id });
+      throw new UnrecoverableError('Message already confirmed by WhatsApp');
+    }
     await moveToDeadLetter(deviceKey, job.data, connection, log);
     messagesFailedTotal.inc({ device_key: deviceKey, reason: reasonLabel });
     if (!message.systemOtp) await dispatchWebhook(
@@ -346,6 +369,14 @@ async function failAttempt(
         timestamp: nowIso(),
       },
       { queryFn },
+    );
+  } else {
+    // A transport error classified as definitely-not-sent is safe to retry.
+    // Release the claim before BullMQ retries this job.
+    await queryFn(
+      `UPDATE messages SET status = 'queued', send_started_at = NULL, error_message = $2
+       WHERE id = $1 AND status = 'sending'`,
+      [message.id, errorMessage],
     );
   }
 
@@ -367,6 +398,11 @@ async function applyTransmitBlock(
   const reason = decision.reason ?? 'blocked';
   antiBanDenialsTotal.inc({ device_key: deviceKey, reason });
   if (reason === 'device_paused' && message.priority !== 'urgent') {
+    const now = Date.now();
+    const age = now - message.queueStartedAt.getTime();
+    if (age >= MAX_NORMAL_QUEUE_AGE_MS || RETRY_LATER_DELAY_MS >= MAX_NORMAL_QUEUE_AGE_MS - age) {
+      await expireQueuedMessage(message, deviceKey, queryFn, log, now);
+    }
     log.warn('Device paused, deferring message', { messageId: message.id });
     await updateMessageStatus(message.id, { status: 'queued', errorMessage: 'device_paused' }, queryFn);
     await getQueueByName(queueName(deviceKey), connection).add(
@@ -389,6 +425,26 @@ async function applyTransmitBlock(
 /** Internal signal: the job is finished for now because a fresh delayed job carries the message. */
 class DeferredForLater extends Error {
   constructor(readonly reason: string) { super(`deferred: ${reason}`); }
+}
+
+async function expireQueuedMessage(
+  message: MessageRecord,
+  deviceKey: string,
+  queryFn: QueryFn,
+  log: Logger,
+  now = Date.now(),
+): Promise<never> {
+  const reason = 'queue_expired';
+  await updateMessageStatus(message.id, { status: 'failed', errorMessage: reason }, queryFn);
+  messagesFailedTotal.inc({ device_key: deviceKey, reason });
+  if (!message.systemOtp && !message.systemNotification) await dispatchWebhook(message.tenantId, {
+    event: 'message.failed', device_key: message.deviceKey, message_id: message.id, to: message.to,
+    status: 'failed', reason, timestamp: new Date(now).toISOString(),
+  }, { queryFn });
+  log.warn('Queued message expired before delivery', {
+    messageId: message.id, deviceKey, ageMs: Math.max(0, now - message.queueStartedAt.getTime()), reason,
+  });
+  throw new UnrecoverableError('Message expired while waiting in the queue');
 }
 
 export async function processJob(
@@ -427,6 +483,12 @@ async function processJobBody(
     log.info('Message already handled, skipping', { messageId: message.id, status: message.status });
     return;
   }
+  const now = deps.now?.() ?? new Date();
+  const queueAgeMs = now.getTime() - message.queueStartedAt.getTime();
+  const maxQueueAgeMs = message.priority === 'urgent' ? MAX_URGENT_QUEUE_AGE_MS : MAX_NORMAL_QUEUE_AGE_MS;
+  if (queueAgeMs >= maxQueueAgeMs) {
+    await expireQueuedMessage(message, deviceKey, queryFn, log, now.getTime());
+  }
   if (message.systemOtp && Date.now() - message.createdAt.getTime() >= 10 * 60_000) {
     await updateMessageStatus(message.id, { status: 'failed', errorMessage: 'otp_expired' }, queryFn);
     throw new UnrecoverableError('Signup OTP expired before delivery');
@@ -437,6 +499,7 @@ async function processJobBody(
   const consentRecipient = groupReply ? (replyContext?.fromNumber ?? message.to) : message.to;
   const initialConsent = await getStoredRecipientConsent(queryFn, message.tenantId, consentRecipient);
   const initialReplyContext = Boolean(replyContext);
+  const isProactive = groupReply ? !initialReplyContext : !(await hasRecentInbound(message.deviceId, message.to, queryFn));
   if (!message.quotaExempt && (initialConsent === 'opted_out' || (initialConsent !== 'opted_in' && !initialReplyContext))) {
     const code = initialConsent === 'opted_out' ? 'RECIPIENT_OPTED_OUT' : 'RECIPIENT_CONSENT_REQUIRED';
     await updateMessageStatus(message.id, { status: 'blocked', errorMessage: code.toLocaleLowerCase() }, queryFn);
@@ -476,7 +539,7 @@ async function processJobBody(
     content: message.content,
     recipient: consentRecipient,
     hasMedia: message.type !== 'text',
-    isProactive: groupReply ? !initialReplyContext : !(await hasRecentInbound(message.deviceId, message.to, queryFn)),
+    isProactive,
     priority: message.priority,
     ...(deps.now ? { now: deps.now() } : {}),
   });
@@ -486,6 +549,10 @@ async function processJobBody(
     antiBanDenialsTotal.inc({ device_key: deviceKey, reason: reasonLabel });
 
     if (isTransientDenial(decision.reason) && message.priority !== 'urgent') {
+      const retryDelay = decision.retryAfterMs ?? RETRY_LATER_DELAY_MS;
+      if (retryDelay >= MAX_NORMAL_QUEUE_AGE_MS - queueAgeMs) {
+        await expireQueuedMessage(message, deviceKey, queryFn, log, now.getTime());
+      }
       log.warn('Anti-ban deferred message, re-queueing later', {
         messageId: message.id,
         reason: decision.reason,
@@ -496,7 +563,7 @@ async function processJobBody(
         JOB_NAME,
         { messageId: message.id } satisfies QueueJobData,
         {
-          delay: decision.retryAfterMs ?? RETRY_LATER_DELAY_MS,
+          delay: retryDelay,
           attempts: MAX_ATTEMPTS,
           backoff: { type: 'exponential', delay: BACKOFF_BASE_MS },
           removeOnComplete: { age: 24 * 3_600, count: 1_000 },
@@ -571,7 +638,12 @@ async function processJobBody(
   let sendResult;
   try {
     sendResult = await withRecipientConsentLock(message.tenantId, consentRecipient, async () => {
+      return withDeviceSendLock(message.deviceKey, async () => {
       const currentReply = await getReplyContext(message, queryFn, deps.now?.() ?? new Date());
+      const sendNow = deps.now?.() ?? new Date();
+      if (sendNow.getTime() - message.queueStartedAt.getTime() >= maxQueueAgeMs) {
+        await expireQueuedMessage(message, deviceKey, queryFn, log, sendNow.getTime());
+      }
       const currentConsent = await getStoredRecipientConsent(queryFn, message.tenantId,
         groupReply ? (currentReply?.fromNumber ?? message.to) : message.to);
       const currentReplyContext = Boolean(currentReply);
@@ -580,6 +652,16 @@ async function processJobBody(
       }
       const last = await checkTransmission(message.deviceKey, queryFn, deps.now?.());
       if (!last.allowed) await applyTransmitBlock(last, job, message, deviceKey, connection, queryFn, log);
+      const latestDecision = await (deps.canSend ?? canSendMessage)(message.deviceKey, {
+        queryFn,
+        content: message.content,
+        recipient: consentRecipient,
+        hasMedia: message.type !== 'text',
+        isProactive: groupReply ? !currentReplyContext : isProactive,
+        priority: message.priority,
+        ...(deps.now ? { now: deps.now() } : {}),
+      });
+      if (!latestDecision.allowed) return { denied: true as const, decision: latestDecision };
       const quoted: WAMessage | undefined = groupReply && currentReply?.whatsappMessageId ? {
         key: {
           remoteJid: message.to,
@@ -589,11 +671,32 @@ async function processJobBody(
         },
         message: { conversation: currentReply.content },
       } as WAMessage : undefined;
-      return withSpan(
+      // Store the WhatsApp correlation ID before touching the socket. A later
+      // SERVER_ACK can then reconcile even if the worker loses its connection.
+      const whatsappMessageId = generateMessageIDV2(sock.user?.id);
+      const claim = await queryFn(
+        `UPDATE messages SET status = 'sending', send_started_at = now(), error_message = NULL,
+             whatsapp_message_id = $2
+         WHERE id = $1 AND status = 'queued' RETURNING id`,
+        [message.id, whatsappMessageId],
+      );
+      if (claim.rows.length === 0) return { skipped: true as const };
+      const result = await withSpan(
         'message.send',
         { device_key: deviceKey, message_id: message.id, 'message.type': message.type },
-        () => sock.sendMessage(jid, toMessageContent(message), quoted ? { quoted } : undefined),
+        () => sock.sendMessage(jid, toMessageContent(message), { messageId: whatsappMessageId, ...(quoted ? { quoted } : {}) }),
       );
+      // sendMessage only confirms that the stanza was written to the socket;
+      // mark it sent only after WhatsApp's SERVER_ACK event arrives.
+      if (result?.key.id && result.key.id !== whatsappMessageId) {
+        log.error('WhatsApp returned an unexpected message ID; leaving send status pending', {
+          messageId: message.id,
+          expectedMessageId: whatsappMessageId,
+          returnedMessageId: result.key.id,
+        });
+      }
+      return { skipped: false as const, whatsappMessageId };
+      });
     });
   } catch (err) {
     if (err instanceof RecipientConsentDenied) {
@@ -617,7 +720,17 @@ async function processJobBody(
     // The outcome is UNCERTAIN (a timeout may follow a message WhatsApp already accepted). Never retry automatically:
     // mark it, tell the tenant, and keep the job in the dead-letter queue for inspection. A person may retry it by hand.
     log.error('Send outcome uncertain; not retrying automatically', { messageId: message.id, error: errorMessage });
-    await updateMessageStatus(message.id, { status: 'failed', errorMessage: 'delivery_uncertain' }, queryFn);
+    const uncertain = await queryFn(
+      `UPDATE messages SET status = 'failed', error_message = 'delivery_uncertain',
+         content = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE content END,
+         to_number = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE to_number END
+       WHERE id = $1 AND status = 'sending' RETURNING id`,
+      [message.id],
+    );
+    if (uncertain.rows.length === 0) {
+      log.info('Late WhatsApp confirmation arrived before uncertain status was recorded', { messageId: message.id });
+      return;
+    }
     await moveToDeadLetter(deviceKey, job.data, connection, log);
     messagesFailedTotal.inc({ device_key: deviceKey, reason: 'delivery_uncertain' });
     if (!message.systemOtp) await dispatchWebhook(message.tenantId, {
@@ -627,30 +740,44 @@ async function processJobBody(
     throw new UnrecoverableError('delivery_uncertain');
   }
 
+  // Another delivery attempt already owns the send claim, or the status was
+  // changed while this job waited. In either case the transport must not run.
+  if (sendResult.skipped) {
+    log.info('Message send claim already taken; skipping duplicate job', { messageId: message.id });
+    return;
+  }
+
+  if ('denied' in sendResult && sendResult.denied) {
+    const reason = sendResult.decision.reason ?? 'content_rejected';
+    antiBanDenialsTotal.inc({ device_key: deviceKey, reason });
+    if (isTransientDenial(sendResult.decision.reason) && message.priority !== 'urgent') {
+      const retryDelay = sendResult.decision.retryAfterMs ?? RETRY_LATER_DELAY_MS;
+      const deniedAt = deps.now?.() ?? new Date();
+      if (retryDelay >= MAX_NORMAL_QUEUE_AGE_MS - (deniedAt.getTime() - message.queueStartedAt.getTime())) {
+        await expireQueuedMessage(message, deviceKey, queryFn, log, deniedAt.getTime());
+      }
+      await updateMessageStatus(message.id, { status: 'queued', errorMessage: reason }, queryFn);
+      await getQueueByName(queueName(deviceKey), connection).add(JOB_NAME, { messageId: message.id }, {
+        delay: retryDelay, attempts: MAX_ATTEMPTS,
+        backoff: { type: 'exponential', delay: BACKOFF_BASE_MS },
+        removeOnComplete: { age: 24 * 3_600, count: 1_000 }, removeOnFail: false,
+      });
+      return;
+    }
+    await updateMessageStatus(message.id, { status: 'failed', errorMessage: reason }, queryFn);
+    messagesFailedTotal.inc({ device_key: deviceKey, reason });
+    if (!message.systemOtp) await dispatchWebhook(message.tenantId, {
+      event: 'message.failed', device_key: message.deviceKey, message_id: message.id,
+      to: message.to, status: 'failed', reason, timestamp: nowIso(),
+    }, { queryFn });
+    throw new UnrecoverableError(`Anti-ban rejected message at dispatch: ${reason}`);
+  }
+
   void deps.presence?.afterSend();
-  const whatsappMessageId = sendResult?.key.id ?? undefined;
-  await updateMessageStatus(
-    message.id,
-    { status: 'sent', timestampColumn: 'sent_at', errorMessage: null, ...(whatsappMessageId ? { whatsappMessageId } : {}) },
-    queryFn,
-  );
-  messagesSentTotal.inc({ device_key: deviceKey, type: message.type });
-
-  if (!message.systemOtp) await dispatchWebhook(
-    message.tenantId,
-    {
-      event: 'message.sent',
-      device_key: message.deviceKey,
-      message_id: message.id,
-      ...(whatsappMessageId ? { whatsapp_message_id: whatsappMessageId } : {}),
-      to: message.to,
-      status: 'sent',
-      timestamp: nowIso(),
-    },
-    { queryFn },
-  );
-
-  log.info('Message sent', { messageId: message.id, ...(!message.systemOtp ? { recipientLast4: message.to.replace(/\D/g, '').slice(-4) } : {}) });
+  log.info('Message stanza handed to WhatsApp socket; awaiting server confirmation', {
+    messageId: message.id,
+    whatsappMessageId: sendResult.whatsappMessageId,
+  });
 }
 
 /**
@@ -670,7 +797,7 @@ export async function failStuckMessages(
     `SELECT id, tenant_id, device_key, to_number, COALESCE(system_otp, false) AS system_otp,
        COALESCE(system_notification, false) AS system_notification FROM messages
      WHERE device_key = $1 AND direction = 'outbound' AND status = 'queued'
-       AND created_at < now() - CASE WHEN priority = 'urgent' THEN interval '2 minutes' ELSE interval '15 minutes' END`,
+       AND queue_started_at < now() - CASE WHEN priority = 'urgent' THEN interval '2 minutes' ELSE interval '15 minutes' END`,
     [deviceKey],
   );
   let failed = 0;
@@ -692,6 +819,47 @@ export async function failStuckMessages(
         to: row.to_number, status: 'failed', reason: 'lost_in_queue', timestamp: nowIso(),
       }, { queryFn }).catch((error: unknown) => {
         log.error('Failed to dispatch lost-message webhook', { error: error instanceof Error ? error.message : String(error) });
+      });
+    }
+  }
+  return failed;
+}
+
+/**
+ * A process can die after claiming a send and before saving the WhatsApp result.
+ * Such outcomes are unknowable, so close them as uncertain and never enqueue a retry.
+ */
+export async function failStuckSendingMessages(
+  deviceKey: string,
+  queryFn: QueryFn,
+  log: Logger,
+  dispatch: typeof dispatchWebhook = dispatchWebhook,
+): Promise<number> {
+  const { rows } = await queryFn(
+    `SELECT id, tenant_id, device_key, to_number, COALESCE(system_otp, false) AS system_otp,
+       COALESCE(system_notification, false) AS system_notification FROM messages
+     WHERE device_key = $1 AND direction = 'outbound' AND status = 'sending'
+       AND send_started_at < now() - interval '2 minutes'`,
+    [deviceKey],
+  );
+  let failed = 0;
+  for (const row of rows as { id: string; tenant_id: string; device_key: string; to_number: string; system_otp: boolean; system_notification: boolean }[]) {
+    const updated = await queryFn(
+      `UPDATE messages SET status = 'failed', error_message = 'delivery_uncertain',
+         content = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE content END,
+         to_number = CASE WHEN system_otp OR system_notification THEN '[redacted]' ELSE to_number END
+       WHERE id = $1 AND status = 'sending' RETURNING id`,
+      [row.id],
+    );
+    if (!updated.rows.length) continue;
+    failed += 1;
+    log.error('Stuck send claim marked delivery uncertain; automatic retry prohibited', { messageId: row.id, deviceKey });
+    if (!row.system_otp && !row.system_notification) {
+      await dispatch(row.tenant_id, {
+        event: 'message.failed', device_key: row.device_key, message_id: row.id,
+        to: row.to_number, status: 'failed', reason: 'delivery_uncertain', timestamp: nowIso(),
+      }, { queryFn }).catch((error: unknown) => {
+        log.error('Failed to dispatch uncertain-delivery webhook', { error: error instanceof Error ? error.message : String(error) });
       });
     }
   }
@@ -740,6 +908,7 @@ export function startQueueProcessor(
       ))).flat();
       const live = new Set(jobs.map((job) => job.data.messageId));
       await failStuckMessages(deviceKey, live, queryFn, log);
+      await failStuckSendingMessages(deviceKey, queryFn, log);
       // Keeps the score shown in the dashboard current; it used to change only when a send was attempted.
       await calculateHealthScore(deviceKey, queryFn);
     } catch (error) {
@@ -769,17 +938,17 @@ export async function handleReceiptUpdate(
     return;
   }
 
-  let newStatus: 'delivered' | 'read' | undefined;
-  let timestampColumn: 'delivered_at' | 'read_at' | undefined;
+  let newStatus: 'sent' | 'delivered' | 'read' | undefined;
   let event: WebhookEventType | undefined;
 
-  if (update.status === WAMessageStatus.DELIVERY_ACK) {
+  if (update.status === WAMessageStatus.SERVER_ACK) {
+    newStatus = 'sent';
+    event = 'message.sent';
+  } else if (update.status === WAMessageStatus.DELIVERY_ACK) {
     newStatus = 'delivered';
-    timestampColumn = 'delivered_at';
     event = 'message.delivered';
   } else if (update.status === WAMessageStatus.READ || update.status === WAMessageStatus.PLAYED) {
     newStatus = 'read';
-    timestampColumn = 'read_at';
     event = 'message.read';
   } else {
     log.debug('Ignoring non-terminal WhatsApp message update', {
@@ -801,13 +970,26 @@ export async function handleReceiptUpdate(
 
   const allowedStatuses = newStatus === 'read'
     ? ['queued', 'sending', 'sent', 'delivered']
-    : ['queued', 'sending', 'sent'];
+    : newStatus === 'delivered'
+      ? ['queued', 'sending', 'sent']
+      : ['sending'];
+  const uncertainStatusClause = newStatus === 'sent'
+    ? " OR (status = 'failed' AND error_message = 'delivery_uncertain')"
+    : newStatus === 'delivered' || newStatus === 'read'
+      ? " OR (status = 'failed' AND error_message = 'delivery_uncertain')"
+      : '';
+  const timestampSets = newStatus === 'read'
+    ? "sent_at = COALESCE(sent_at, now()), delivered_at = COALESCE(delivered_at, now()), read_at = COALESCE(read_at, now())"
+    : newStatus === 'delivered'
+      ? "sent_at = COALESCE(sent_at, now()), delivered_at = COALESCE(delivered_at, now())"
+      : "sent_at = COALESCE(sent_at, now())";
   const { rows } = await queryFn(
     `UPDATE messages
-     SET status = $1, ${timestampColumn} = COALESCE(${timestampColumn}, now())
-     WHERE whatsapp_message_id = $2 AND status = ANY($3::varchar[])
+     SET status = $1, ${timestampSets}, error_message = NULL, send_started_at = NULL
+     WHERE whatsapp_message_id = $2
+       AND (status = ANY($3::varchar[])${uncertainStatusClause})
      RETURNING id, tenant_id, device_key, to_number, COALESCE(system_otp, false) AS system_otp,
-       COALESCE(system_notification, false) AS system_notification`,
+       COALESCE(system_notification, false) AS system_notification, type`,
     [newStatus, key.id, allowedStatuses],
   );
   const row = rows[0] as
@@ -835,6 +1017,11 @@ export async function handleReceiptUpdate(
       },
       { queryFn },
     );
+  }
+
+  if (newStatus === 'sent') {
+    const messageType = (row as typeof row & { type?: string }).type ?? 'text';
+    messagesSentTotal.inc({ device_key: row.device_key, type: messageType });
   }
 
   log.info('Message receipt updated', { messageId: row.id, status: newStatus });

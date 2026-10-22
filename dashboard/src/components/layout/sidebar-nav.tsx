@@ -22,7 +22,6 @@ import {
   Settings,
   ShieldCheck,
   Smartphone,
-  UserPlus,
   Users,
 } from "lucide-react";
 import { KonevaMark } from "@/components/brand/koneva-logo";
@@ -62,7 +61,6 @@ const groups: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "ADMINISTRASI",
     items: [
-      { name: "Tim", href: "/team", icon: UserPlus, permission: "team:manage" },
       { name: "Tagihan", href: "/billing", icon: CreditCard, permission: "billing:manage" },
       { name: "Aktivitas", href: "/activity", icon: History, permission: "audit:read" },
       { name: "Pengaturan", href: "/settings", icon: Settings, permission: "devices:read" },

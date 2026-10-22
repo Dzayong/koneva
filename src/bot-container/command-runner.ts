@@ -81,7 +81,9 @@ export class CommandRunner {
     };
     const ctx: CommandContext = { sock, queryFn: this.queryFn, deviceKey: this.deviceKey, deviceId: row.device_id, presence: this.presence, log: this.log, assertMayTransmit: guard };
     const writes = row.type === 'status.post' || row.type === 'profile.update' || row.type === 'profile.picture'
-      || row.type.startsWith('whatsapp.group.') || row.type.startsWith('whatsapp.community.');
+      || ['whatsapp.group.create', 'whatsapp.group.update', 'whatsapp.group.leave', 'whatsapp.group.members', 'whatsapp.group.invite.revoke', 'whatsapp.group.settings', 'whatsapp.group.picture', 'whatsapp.group.join-requests.update'].includes(row.type)
+      || row.type.startsWith('whatsapp.community.')
+      || ['whatsapp.channel.follow', 'whatsapp.channel.create', 'whatsapp.channel.update', 'whatsapp.channel.unfollow', 'whatsapp.channel.post'].includes(row.type);
     try {
       if (writes) await guard(); // first check; the commands repeat it right before the actual write
       const result = await executeCommand(row.type, row.payload, ctx);

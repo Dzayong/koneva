@@ -7,7 +7,6 @@ import { getRedisClient } from '../../shared/redis';
 import type { PaginatedResponse, SendMessageRequest } from '../../shared/types/api';
 import { ServiceError } from './service-error';
 import { assertSubscriptionActive, currentUsage } from './billing.service';
-import { looksLikeTransactional, reserveTransactionalExemption } from './message-exempt-limits';
 import { assertRecipientConsent, assertReplyRecipientAllowed } from './recipient-consent.service';
 import logger from '../../shared/utils/logger';
 import { withRecipientConsentLock } from '../../shared/recipient-consent';
@@ -89,7 +88,6 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
       [input.reply_to_message_id, tenantId, input.device_key, input.to],
     )).rows[0]?.from_number ?? input.to)
     : input.to;
-  return withRecipientConsentLock(tenantId, groupLockRecipient, async () => {
   const systemOtp = systemKind === 'otp';
   const systemNotification = systemKind === 'notification';
   const systemManaged = systemOtp || systemNotification;
@@ -123,7 +121,7 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
         await enqueueStoredMessage(prior.device_key, prior.id, prior.id, 'normal', notificationDelayMs);
       } else if (prior.status === 'failed' && prior.error_message === 'QUEUE_UNAVAILABLE') {
         const restored = await pool.query<MessageRow>(
-          `UPDATE messages SET status='queued', error_message=NULL, content=$2, to_number=$3
+          `UPDATE messages SET status='queued', queue_started_at=now(), error_message=NULL, content=$2, to_number=$3
            WHERE id=$1 AND status='failed' AND error_message='QUEUE_UNAVAILABLE' RETURNING *`,
           [prior.id, input.message, input.to],
         );
@@ -140,14 +138,38 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
       return prior;
     }
   }
-  // Classification happens BEFORE the send transaction and is never the client's `priority` field: it requires the
-  // request's own otp_code to genuinely appear in the message content (short, no media) AND a per-recipient/tenant
-  // rate limit not already spent. See message-exempt-limits.ts. A failed/skipped claim never blocks the send --
-  // it just means this particular send counts against quota like any other.
-  const exempt = systemManaged || (looksLikeTransactional({ message: input.message, mediaUrl: input.media_url, otpCode: input.otp_code })
-    && await reserveTransactionalExemption(tenantId, input.to));
+  // Only internal platform flows can classify messages as transactional. A tenant
+  // cannot self-declare an OTP based on text they supplied, or gain an exemption.
+  const exempt = systemManaged;
 
-  const message = await transaction(async (client: PoolClient) => {
+  const transactionResult = await transaction(async (client: PoolClient) => {
+    // Use the same tenant/recipient lock key as STOP/START handling, but keep
+    // it transaction-scoped so a burst of sends does not pin one pool client
+    // for the lock and a second client for the insert transaction.
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `${tenantId}:${groupLockRecipient.replace(/\D/g, '')}`,
+    ]);
+    // Serialize retries carrying the same tenant-scoped external_id. The lock
+    // and recheck happen inside the insertion transaction, so simultaneous API
+    // retries cannot both create a row.
+    if (input.external_id && !input.external_id.startsWith('cmp_') && !systemNotification) {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [tenantId, input.external_id]);
+      const prior = (await client.query<MessageRow & { media_url?: string | null; reply_to_message_id?: string | null }>(
+        `SELECT id, tenant_id, device_id, device_key, to_number, content, status, external_id,
+                priority, quota_exempt, created_at, type, media_url, reply_to_message_id
+         FROM messages WHERE tenant_id=$1 AND external_id=$2 LIMIT 1`,
+        [tenantId, input.external_id],
+      )).rows[0];
+      if (prior) {
+        const expectedType = input.media_url ? (input.media_type ?? 'image') : 'text';
+        if (prior.device_key !== input.device_key || prior.to_number !== input.to || prior.content !== input.message
+          || prior.type !== expectedType || (prior.media_url ?? null) !== (input.media_url ?? null)
+          || (prior.reply_to_message_id ?? null) !== (input.reply_to_message_id ?? null)) {
+          throw new ServiceError(409, 'IDEMPOTENCY_KEY_CONFLICT', 'external_id sudah digunakan untuk isi pesan yang berbeda');
+        }
+        return { message: prior, reused: true };
+      }
+    }
     if (systemManaged) {
       const platformTenant = (await client.query<{ is_system: boolean }>(
         'SELECT is_system FROM tenants WHERE id=$1 FOR SHARE', [tenantId],
@@ -211,8 +233,16 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
         input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt, systemOtp, systemNotification, input.reply_to_message_id ?? null],
     );
     if (status === 'queued' && !exempt) await client.query('UPDATE tenants SET used_messages = used_messages + 1 WHERE id = $1', [tenantId]);
-    return result.rows[0]!;
+    return { message: result.rows[0]!, reused: false };
   });
+  const { message, reused } = transactionResult;
+
+  if (reused) {
+    if (message.status === 'queued') {
+      await enqueueStoredMessage(message.device_key, message.id, message.id, (message.priority as 'normal' | 'urgent' | undefined) ?? 'normal');
+    }
+    return message;
+  }
 
   if (message.status === 'quota_hold') return message; // held, not enqueued; released later without ever being dropped
 
@@ -229,8 +259,7 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
     throw new ServiceError(503, 'QUEUE_UNAVAILABLE', 'Unable to enqueue message');
   }
 
-    return message;
-  });
+  return message;
 }
 
 /**
@@ -249,7 +278,7 @@ export async function releaseHeldMessages(tenantId: string, now: Date = new Date
       [tenantId, remaining],
     )).rows;
     if (held.length === 0) return [];
-    await client.query(`UPDATE messages SET status = 'queued' WHERE id = ANY($1::uuid[])`, [held.map((h) => h.id)]);
+    await client.query(`UPDATE messages SET status = 'queued', queue_started_at = now() WHERE id = ANY($1::uuid[])`, [held.map((h) => h.id)]);
     await client.query('UPDATE tenants SET used_messages = used_messages + $2 WHERE id = $1', [tenantId, held.length]);
     return held;
   });
@@ -300,6 +329,7 @@ export async function listMessages(
     direction?: 'inbound' | 'outbound' | undefined;
     created_today?: boolean | undefined;
     search?: string | undefined;
+    chat_jid?: string | undefined;
     limit: number;
     offset: number;
   },
@@ -326,6 +356,10 @@ export async function listMessages(
     values.push(`%${filter.search}%`);
     conditions.push(`(content ILIKE $${values.length} OR from_number ILIKE $${values.length}
       OR to_number ILIKE $${values.length} OR external_id ILIKE $${values.length})`);
+  }
+  if (filter.chat_jid) {
+    values.push(filter.chat_jid);
+    conditions.push(`chat_jid = $${values.length}`);
   }
   const where = conditions.join(' AND ');
   const count = await pool.query<{ total: number }>(
@@ -356,6 +390,9 @@ export async function retryMessage(tenantId: string, messageId: string): Promise
             m.error_message, m.reply_to_message_id
      FROM messages m LEFT JOIN devices d ON d.id = m.device_id WHERE m.id = $1 AND m.tenant_id = $2 AND m.system_otp = false AND system_notification = false`, [messageId, tenantId])).rows[0];
   const retry = async (): Promise<MessageRow> => {
+  if (target?.error_message === 'delivery_uncertain') {
+    throw new ServiceError(409, 'DELIVERY_UNCERTAIN_MANUAL_REVIEW_REQUIRED', 'WhatsApp may already have accepted this message. Check the chat before composing a new message; this message cannot be retried.');
+  }
   if (target?.error_message === 'recipient_opted_out' || target?.error_message === 'recipient_consent_required') {
     logger.warn('Consent-suppressed message retry refused', {
       tenant_id: tenantId, message_id: messageId,
@@ -381,14 +418,21 @@ export async function retryMessage(tenantId: string, messageId: string): Promise
   }
   if (target && target.device_status !== 'online') throw new ServiceError(503, 'DEVICE_OFFLINE', 'Device is not online');
   const result = await pool.query<MessageRow>(
-    `UPDATE messages SET status='queued', error_message=NULL
-     WHERE id=$1 AND tenant_id=$2 AND system_otp=false AND system_notification=false AND status IN ('failed','blocked') RETURNING *`,
+    `UPDATE messages SET status='queued', queue_started_at=now(), error_message=NULL
+     WHERE id=$1 AND tenant_id=$2 AND system_otp=false AND system_notification=false
+       AND status IN ('failed','blocked') AND COALESCE(error_message,'') <> 'delivery_uncertain' RETURNING *`,
     [messageId, tenantId],
   );
   const message = result.rows[0];
   if (!message) {
-    const exists = await pool.query('SELECT status FROM messages WHERE id=$1 AND tenant_id=$2 AND system_otp=false AND system_notification=false', [messageId, tenantId]);
+    const exists = await pool.query<{ status: string; error_message: string | null }>(
+      'SELECT status,error_message FROM messages WHERE id=$1 AND tenant_id=$2 AND system_otp=false AND system_notification=false',
+      [messageId, tenantId],
+    );
     if (!exists.rows[0]) throw new ServiceError(404, 'MESSAGE_NOT_FOUND', 'Message not found');
+    if (exists.rows[0].error_message === 'delivery_uncertain') {
+      throw new ServiceError(409, 'DELIVERY_UNCERTAIN_MANUAL_REVIEW_REQUIRED', 'WhatsApp may already have accepted this message. Check the chat before composing a new message; this message cannot be retried.');
+    }
     throw new ServiceError(409, 'MESSAGE_NOT_RETRYABLE', 'Only failed or blocked messages can be retried');
   }
   try {

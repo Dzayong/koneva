@@ -58,9 +58,10 @@ export async function startBotConnection(
       browser: BOT_BROWSER,
       printQRInTerminal: false,
       // Stay "offline" until a message is actually sent, like a phone whose
-      // owner is not staring at the screen, and skip the full history pull.
+      // owner is not staring at the screen. Request WhatsApp history so group
+      // conversations can be shown; history-sync persists group messages only.
       markOnlineOnConnect: false,
-      syncFullHistory: false,
+      syncFullHistory: true,
     });
 
     sock.ev.on('creds.update', bindCredsUpdate(saveCreds, config.botId, logger));

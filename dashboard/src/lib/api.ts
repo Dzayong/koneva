@@ -13,8 +13,11 @@ declare module "axios" {
 import type {
   ApiKeyRecord,
   DeviceCommand,
+  CommandStatus,
   DeviceProfile,
   WhatsAppGroupSummary,
+  WhatsAppGroupDetails,
+  WhatsAppGroupJoinRequest,
   WhatsAppChannelSummary,
   ProfileUpdate,
   StatusPost,
@@ -245,13 +248,53 @@ class ApiClient {
     return response.data.data;
   }
 
+  async getWhatsAppGroupDetails(deviceKey: string, jid: string): Promise<WhatsAppGroupDetails> {
+    const response = await this.client.get<ApiSuccess<WhatsAppGroupDetails>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}/details`);
+    return response.data.data;
+  }
+
+  async updateWhatsAppGroupPicture(deviceKey: string, jid: string, image_base64: string): Promise<unknown> {
+    const response = await this.client.post<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}/picture`, { image_base64 });
+    return response.data.data;
+  }
+
+  async getWhatsAppGroupInvite(deviceKey: string, jid: string): Promise<{ code: string | null }> {
+    const response = await this.client.get<ApiSuccess<{ code: string | null }>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}/invite`);
+    return response.data.data;
+  }
+
+  async revokeWhatsAppGroupInvite(deviceKey: string, jid: string): Promise<{ code: string | null }> {
+    const response = await this.client.post<ApiSuccess<{ code: string | null }>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}/invite/revoke`);
+    return response.data.data;
+  }
+
+  async updateWhatsAppGroupSettings(deviceKey: string, jid: string, payload: { announcement_only?: boolean; restricted?: boolean; member_add_mode?: "admin_add" | "all_member_add"; join_approval?: boolean; ephemeral_duration?: number }): Promise<unknown> {
+    const response = await this.client.patch<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}/settings`, payload);
+    return response.data.data;
+  }
+
+  async getWhatsAppGroupJoinRequests(deviceKey: string, jid: string): Promise<WhatsAppGroupJoinRequest[]> {
+    const response = await this.client.get<ApiSuccess<WhatsAppGroupJoinRequest[]>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}/join-requests`);
+    return response.data.data;
+  }
+
+  async updateWhatsAppGroupJoinRequests(deviceKey: string, jid: string, payload: { action: "approve" | "reject"; participants: string[] }): Promise<unknown> {
+    const response = await this.client.post<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}/join-requests`, payload);
+    return response.data.data;
+  }
+
   async leaveWhatsAppGroup(deviceKey: string, jid: string): Promise<unknown> {
     const response = await this.client.delete<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-groups/${encodeURIComponent(jid)}`);
     return response.data.data;
   }
 
-  async createWhatsAppCommunity(deviceKey: string, payload: { name: string; description: string }): Promise<unknown> {
-    const response = await this.client.post<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-communities`, payload);
+  async createWhatsAppCommunity(deviceKey: string, payload: { name: string; description: string }): Promise<{ command_id: string; status: CommandStatus }> {
+    const response = await this.client.post<ApiSuccess<{ command_id: string; status: CommandStatus }>>(`/api/v1/devices/${deviceKey}/whatsapp-communities`, payload);
+    return response.data.data;
+  }
+
+  async getDeviceCommand(deviceKey: string, id: string): Promise<{ id: string; status: CommandStatus; result: unknown; error: string | null }> {
+    const response = await this.client.get<ApiSuccess<{ id: string; status: CommandStatus; result: unknown; error: string | null }>>(`/api/v1/devices/${deviceKey}/commands/${id}`, { skipErrorToast: true });
     return response.data.data;
   }
 
@@ -272,6 +315,38 @@ class ApiClient {
 
   async lookupWhatsAppChannel(deviceKey: string, link: string): Promise<WhatsAppChannelSummary> {
     const response = await this.client.get<ApiSuccess<WhatsAppChannelSummary>>(`/api/v1/devices/${deviceKey}/whatsapp-channel`, { params: { link }, skipErrorToast: true });
+    return response.data.data;
+  }
+
+  async getWhatsAppChannels(deviceKey: string): Promise<WhatsAppChannelSummary[]> {
+    const response = await this.client.get<ApiSuccess<WhatsAppChannelSummary[]>>(`/api/v1/devices/${deviceKey}/whatsapp-channels`, { skipErrorToast: true });
+    return response.data.data;
+  }
+
+  async followWhatsAppChannel(deviceKey: string, link: string): Promise<WhatsAppChannelSummary> {
+    const response = await this.client.post<ApiSuccess<WhatsAppChannelSummary>>(`/api/v1/devices/${deviceKey}/whatsapp-channels/follow`, { link });
+    return response.data.data;
+  }
+
+  async createWhatsAppChannel(deviceKey: string, payload: { name: string; description: string }): Promise<WhatsAppChannelSummary> {
+    const response = await this.client.post<ApiSuccess<WhatsAppChannelSummary>>(`/api/v1/devices/${deviceKey}/whatsapp-channels`, payload);
+    return response.data.data;
+  }
+
+  async updateWhatsAppChannel(deviceKey: string, jid: string, payload: { name?: string; description?: string }): Promise<unknown> {
+    const response = await this.client.patch<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-channels/${encodeURIComponent(jid)}`, payload);
+    return response.data.data;
+  }
+
+  async unfollowWhatsAppChannel(deviceKey: string, jid: string): Promise<unknown> {
+    const response = await this.client.delete<ApiSuccess<unknown>>(`/api/v1/devices/${deviceKey}/whatsapp-channels/${encodeURIComponent(jid)}`);
+    return response.data.data;
+  }
+
+  async postWhatsAppChannel(deviceKey: string, jid: string, payload: { kind: 'text' | 'image' | 'video'; text?: string; media_url?: string; caption?: string }): Promise<{ id: string; message_id: string | null; kind: string }> {
+    const response = await this.client.post<ApiSuccess<{ id: string; message_id: string | null; kind: string }>>(
+      `/api/v1/devices/${deviceKey}/whatsapp-channels/${encodeURIComponent(jid)}/posts`, payload,
+    );
     return response.data.data;
   }
 

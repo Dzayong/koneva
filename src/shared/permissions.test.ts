@@ -124,3 +124,34 @@ test('status and profile: reading needs devices:read, publishing needs content:w
   assert.equal(can('viewer', 'content:write'), false);
   assert.equal(can('developer', 'content:write'), true);
 });
+
+test('WhatsApp group, community, and channel management writes require content:write', () => {
+  for (const [method, route] of [
+    ['POST', '/devices/WAPI-X/whatsapp-groups'],
+    ['PATCH', '/devices/WAPI-X/whatsapp-groups/120363000000-123456@g.us'],
+    ['POST', '/devices/WAPI-X/whatsapp-groups/120363000000-123456@g.us/members'],
+    ['POST', '/devices/WAPI-X/whatsapp-groups/120363000000-123456@g.us/invite/revoke'],
+    ['PATCH', '/devices/WAPI-X/whatsapp-groups/120363000000-123456@g.us/settings'],
+    ['POST', '/devices/WAPI-X/whatsapp-groups/120363000000-123456@g.us/join-requests'],
+    ['DELETE', '/devices/WAPI-X/whatsapp-groups/120363000000-123456@g.us'],
+    ['POST', '/devices/WAPI-X/whatsapp-communities'],
+    ['PATCH', '/devices/WAPI-X/whatsapp-communities/120363000000-123456@g.us'],
+    ['POST', '/devices/WAPI-X/whatsapp-communities/120363000000-123456@g.us/groups'],
+    ['DELETE', '/devices/WAPI-X/whatsapp-communities/120363000000-123456@g.us'],
+    ['POST', '/devices/WAPI-X/whatsapp-channels/follow'],
+    ['POST', '/devices/WAPI-X/whatsapp-channels'],
+    ['PATCH', '/devices/WAPI-X/whatsapp-channels/channel_abc@newsletter'],
+    ['DELETE', '/devices/WAPI-X/whatsapp-channels/channel_abc@newsletter'],
+    ['POST', '/devices/WAPI-X/whatsapp-channels/channel_abc@newsletter/posts'],
+  ] as const) {
+    assert.equal(permissionFor(method, route), 'content:write', `${method} ${route}`);
+  }
+  assert.equal(permissionFor('GET', '/devices/WAPI-X/whatsapp-groups'), 'devices:read');
+  assert.equal(permissionFor('GET', '/devices/WAPI-X/whatsapp-groups/120363000000-123456@g.us/details'), 'devices:read');
+  assert.equal(permissionFor('GET', '/devices/WAPI-X/whatsapp-groups/120363000000-123456@g.us/invite'), 'devices:read');
+  assert.equal(permissionFor('GET', '/devices/WAPI-X/whatsapp-groups/120363000000-123456@g.us/join-requests'), 'devices:read');
+  assert.equal(permissionFor('GET', '/devices/WAPI-X/whatsapp-channels'), 'devices:read');
+  assert.equal(can('owner', 'content:write'), true);
+  assert.equal(can('developer', 'content:write'), true);
+  assert.equal(can('viewer', 'content:write'), false);
+});

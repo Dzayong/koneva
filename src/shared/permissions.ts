@@ -51,11 +51,15 @@ const RULES: readonly Rule[] = [
   [['GET'], /^\/devices\/[^/]+\/qr$/, 'devices:write'],
   [['GET'], /^\/devices(\/[^/]+(\/[^/]+)?)?$/, 'devices:read'],
   [['GET'], /^\/devices\/[^/]+\/commands\/[^/]+(\/viewers)?$/, 'devices:read'],
+  [['GET'], /^\/devices\/[^/]+\/whatsapp-groups\/[^/]+\/(details|invite|join-requests)$/, 'devices:read'],
   // Status posts and profile edits are content the device publishes: developers may, viewers may not.
   [['POST'], /^\/devices\/[^/]+\/status$/, 'content:write'],
   [['POST'], /^\/devices\/[^/]+\/commands\/[^/]+\/cancel$/, 'content:write'],
   [['PATCH'], /^\/devices\/[^/]+\/profile$/, 'content:write'],
   [['POST', 'DELETE'], /^\/devices\/[^/]+\/profile\/picture$/, 'content:write'],
+  // Group, community, and channel management changes content/state on the linked WhatsApp account.
+  // Keep these write routes explicit so the global deny-by-default middleware can authorize them.
+  [ANY_WRITE, /^\/devices\/[^/]+\/whatsapp-(groups|communities|channels)(\/[^/]+)*$/, 'content:write'],
   [['POST'], /^\/devices$/, 'devices:write'],
   [['POST'], /^\/devices\/[^/]+\/(pause|resume|reconnect|preset)$/, 'devices:write'],
   [['GET'], /^\/presets$/, 'devices:read'],

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { WAMessage } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
-import { handleIncomingMessage, isIgnoredChat, resolveSenderNumber } from './incoming';
+import { handleIncomingMessage, isIgnoredChat, persistGroupMessage, resolveSenderNumber } from './incoming';
 import type { QueryFn } from './health-score';
 import { parseConsentKeyword } from '../shared/recipient-consent';
 
@@ -85,6 +85,34 @@ test('a direct message with participant "" is saved and returns a reply JID', as
   assert.equal(inserts[0]?.[3], '6281234567890');
 });
 
+test('concurrent delivery of the same inbound WhatsApp ID triggers persistence and webhook once', async () => {
+  const claimed = new Set<string>();
+  let persisted = 0;
+  let webhooks = 0;
+  const queryFn: QueryFn = async (sql, params) => {
+    if (sql.startsWith('SELECT id, tenant_id')) return { rows: [{ id: 'dev-1', tenant_id: 'ten-1', phone_number: '6285624509601' }] } as never;
+    if (sql.includes('INSERT INTO inbound_message_dedup')) {
+      const id = `${params?.[0]}:${params?.[1]}`;
+      if (claimed.has(id)) return { rows: [] } as never;
+      claimed.add(id);
+      persisted += 1;
+      return { rows: [{ id: `msg-${persisted}`, created_at: new Date() }] } as never;
+    }
+    return { rows: [] } as never;
+  };
+  const message = {
+    key: { remoteJid: '6281234567890@s.whatsapp.net', participant: '', fromMe: false, id: 'WA-CONCURRENT-1' },
+    message: { conversation: 'halo' }, messageTimestamp: 1_790_000_000,
+  } as unknown as WAMessage;
+  const receive = () => handleIncomingMessage(message, 'WAPI-1', queryFn, silent, async () => { webhooks += 1; });
+
+  const results = await Promise.all([receive(), receive()]);
+
+  assert.equal(results.filter(Boolean).length, 1);
+  assert.equal(persisted, 1);
+  assert.equal(webhooks, 1);
+});
+
 test('group messages persist their group JID as the chat and destination context', async () => {
   const inserts: unknown[][] = [];
   const queryFn: QueryFn = async (sql, params) => {
@@ -102,6 +130,29 @@ test('group messages persist their group JID as the chat and destination context
   assert.equal(inserts[0]?.[3], '6281234567890');
   assert.equal(inserts[0]?.[4], '120363000000-123456@g.us');
   assert.equal(inserts[0]?.[5], '120363000000-123456@g.us');
+});
+
+test('synced group messages are stored as inbound or outbound without triggering inbound handling', async () => {
+  const calls: Array<{ sql: string; params: unknown[] }> = [];
+  const queryFn: QueryFn = async (sql, params) => {
+    calls.push({ sql, params: params ?? [] });
+    if (sql.includes('SELECT id, tenant_id, phone_number')) return { rows: [{ id: 'device-id', tenant_id: 'tenant-id', phone_number: '628111111111' }] } as never;
+    if (sql.includes('INSERT INTO messages')) return { rows: [{ id: 'message-id' }] } as never;
+    return { rows: [] } as never;
+  };
+  const groupMessage = (fromMe: boolean) => ({
+    key: { id: `wa-${fromMe ? 'out' : 'in'}`, remoteJid: '120363000000000000@g.us', participant: '628222222222@s.whatsapp.net', fromMe },
+    messageTimestamp: 1_710_000_000,
+    message: { conversation: 'pesan grup' },
+  }) as unknown as WAMessage;
+
+  assert.equal(await persistGroupMessage(groupMessage(false), 'WAPI-TEST01', queryFn), true);
+  assert.equal(await persistGroupMessage(groupMessage(true), 'WAPI-TEST01', queryFn), true);
+  assert.equal(calls[1]?.params[3], '628222222222');
+  assert.equal(calls[1]?.params[5], '120363000000000000@g.us');
+  assert.equal(calls[1]?.params[9], 'inbound');
+  assert.equal(calls[3]?.params[3], '628111111111');
+  assert.equal(calls[3]?.params[9], 'outbound');
 });
 
 test('own messages are never stored', async () => {

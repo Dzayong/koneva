@@ -38,7 +38,7 @@ export default function ApiKeysPage() {
   const live = keys.filter((k) => !k.revoked_at);
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="w-full max-w-none space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-display">Kunci API</h2>

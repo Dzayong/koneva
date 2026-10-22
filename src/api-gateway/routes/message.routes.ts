@@ -9,7 +9,8 @@ export const sendSchema = z.object({
   device_key: z.string().min(1).max(32),
   to: z.union([
     z.string().regex(/^\+?[1-9]\d{6,19}$/),
-    z.string().regex(/^\d{5,32}-\d{5,32}@g\.us$/),
+    // WhatsApp uses both legacy <creation>-<creator>@g.us and newer numeric@g.us group IDs.
+    z.string().regex(/^(?:\d{5,32}-\d{5,32}|\d{5,32})@g\.us$/),
   ]),
   /** The text, or the caption when media_url is given (then it may be empty). */
   message: z.string().max(4096).default(''),
@@ -18,7 +19,8 @@ export const sendSchema = z.object({
   external_id: z.string().max(64).optional(),
   reply_to_message_id: z.string().uuid().optional(),
   priority: z.enum(['normal', 'urgent']).default('normal'),
-  otp_code: z.string().regex(/^[0-9]{4,10}$/).optional(),
+  // Tenant-provided OTP text is not proof that KONEVA generated a transactional OTP.
+  otp_code: z.never().optional(),
 }).superRefine((v, ctx) => {
   if (!v.media_url && v.message.trim().length === 0) ctx.addIssue({ code: 'custom', path: ['message'], message: 'message is required unless media_url is given' });
   if (v.to.endsWith('@g.us') && !v.reply_to_message_id) ctx.addIssue({ code: 'custom', path: ['reply_to_message_id'], message: 'Group messages must reply to a recent message in that group' });
@@ -29,6 +31,7 @@ const listSchema = z.object({
   direction: z.enum(['inbound', 'outbound']).optional(),
   created_today: z.enum(['true']).optional(),
   search: z.string().trim().max(200).optional(),
+  chat_jid: z.string().regex(/^(?:\+?[1-9]\d{6,19}|(?:\d{5,32}-\d{5,32}|\d{5,32})@g\.us)$/).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });

@@ -18,6 +18,7 @@ export DATABASE_URL="postgres://postgres:outbound_test_only@$(docker port "$pg" 
 export REDIS_URL="redis://$(docker port "$redis" 6379/tcp | head -1)"
 export NODE_ENV=test JWT_SECRET=outbound-test-jwt ADMIN_API_KEY=outbound-test-admin DOTENV_CONFIG_QUIET=true TS_NODE_TRANSPILE_ONLY=true
 export DEVICE_MANAGER_URL=http://127.0.0.1:1 OUTBOUND_GUARD_TEST=1
+export OUTBOUND_SUSTAINED_TEST="${OUTBOUND_SUSTAINED_TEST:-0}"
 # Tests never send email (see the note in test-operator-local.sh).
 export EMAIL_TRANSPORT=none GMAIL_OAUTH_CLIENT_ID= GMAIL_OAUTH_CLIENT_SECRET= GMAIL_OAUTH_REFRESH_TOKEN= GMAIL_SENDER_EMAIL= DEV_EMAIL_OUTBOX_FILE=
 ./node_modules/.bin/tsc --noEmit

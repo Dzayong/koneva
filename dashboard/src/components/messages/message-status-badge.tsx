@@ -21,18 +21,19 @@ function statusIcon(status: MessageStatus) {
   }
 }
 
-export function MessageStatusBadge({ status }: { status: MessageStatus }) {
+export function MessageStatusBadge({ status, errorMessage }: { status: MessageStatus; errorMessage?: string | null }) {
+  const uncertain = status === "failed" && errorMessage === "delivery_uncertain";
   const config = getMessageStatusConfig(status);
-  const problem = status === "failed" || status === "blocked";
+  const problem = !uncertain && (status === "failed" || status === "blocked");
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1 text-xs",
-        problem ? "font-medium text-destructive" : "text-muted-foreground",
+        problem ? "font-medium text-destructive" : uncertain ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground",
       )}
     >
-      {statusIcon(status)}
-      {config.label}
+      {uncertain ? <Clock className="h-3.5 w-3.5" /> : statusIcon(status)}
+      {uncertain ? "Belum terkonfirmasi" : config.label}
     </span>
   );
 }

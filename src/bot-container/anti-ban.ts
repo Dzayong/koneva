@@ -136,11 +136,12 @@ export async function countMessagesSince(
   queryFn: QueryFn,
 ): Promise<number> {
   const { rows } = await queryFn(
-    // Only messages actually sent count toward caps: inbound messages and the
-    // still-queued row being evaluated must not consume the send budget.
+    // Sending and delivery_uncertain rows are reservations: WhatsApp may have
+    // accepted the message even if the final database update failed.
     `SELECT COUNT(*) AS count FROM messages
-     WHERE device_id = $1 AND direction = 'outbound' AND status IN ('sent', 'delivered', 'read')
-       AND COALESCE(sent_at, created_at) >= $2`,
+     WHERE device_id = $1 AND direction = 'outbound'
+       AND (status IN ('sending', 'sent', 'delivered', 'read') OR (status = 'failed' AND error_message = 'delivery_uncertain'))
+       AND COALESCE(sent_at, send_started_at, created_at) >= $2`,
     [deviceId, since],
   );
   const row = rows[0] as { count: string } | undefined;

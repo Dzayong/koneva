@@ -23,6 +23,10 @@ test('media type defaults to image and only allows image, video, document', () =
   assert.equal(sendSchema.safeParse({ ...base, media_url: 'https://cdn.example/a.mp3', media_type: 'audio' }).success, false);
 });
 
+test('tenant send API rejects a caller-declared OTP exemption', () => {
+  assert.equal(sendSchema.safeParse({ ...base, message: 'Kode OTP 482913', otp_code: '482913' }).success, false);
+});
+
 test('broadcast accepts an image with a caption and a link, and rejects an empty one', () => {
   const recipients = ['6281234567890'];
   assert.equal(broadcastSchema.safeParse({ device_key: 'WAPI-X', recipients, message: 'Diskon! https://toko.example/promo', media_url: 'https://cdn.example/promo.jpg' }).success, true);

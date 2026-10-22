@@ -24,7 +24,7 @@ fields on send and QR responses remain temporarily for frontend compatibility.
 | POST | `/api/v1/message/send` | tenant | requires recipient opt-in for promotional sends; missing/opted-out consent returns 409 |
 | GET | `/api/v1/messages` | tenant | filters: `device_key`, `status`, `direction`, `search` |
 | GET | `/api/v1/messages/:id` | tenant | includes `status_history` |
-| POST | `/api/v1/messages/:id/retry` | tenant | retry failed/blocked messages |
+| POST | `/api/v1/messages/:id/retry` | tenant | retry failed/blocked messages; `delivery_uncertain` is refused with `DELIVERY_UNCERTAIN_MANUAL_REVIEW_REQUIRED` because WhatsApp may already have accepted it |
 | POST | `/api/v1/broadcast` | tenant | queue up to 500 recipients |
 | GET | `/api/v1/contacts/:id/consent` | tenant | read consent and its audit events |
 | PUT | `/api/v1/contacts/:id/consent` | signed-in workspace user | manual changes require `source_note`; API keys cannot record consent |
@@ -42,10 +42,18 @@ fields on send and QR responses remain temporarily for frontend compatibility.
 | GET/POST | `/api/v1/devices/:key/whatsapp-groups` | tenant | list groups/communities or create a group |
 | PATCH/DELETE | `/api/v1/devices/:key/whatsapp-groups/:jid` | tenant | edit group name/description or leave from this linked number |
 | POST | `/api/v1/devices/:key/whatsapp-groups/:jid/members` | tenant | add, remove, promote, or demote members; WhatsApp checks admin rights |
-| POST | `/api/v1/devices/:key/whatsapp-communities` | tenant | create a community |
+| GET | `/api/v1/devices/:key/whatsapp-groups/:jid/details` | tenant | group info and participant names/roles |
+| GET/POST | `/api/v1/devices/:key/whatsapp-groups/:jid/invite[/revoke]` | tenant | retrieve the current invite link or replace it (old link stops working) |
+| POST | `/api/v1/devices/:key/whatsapp-groups/:jid/picture` | tenant | upload a resized group profile photo as base64 |
+| PATCH | `/api/v1/devices/:key/whatsapp-groups/:jid/settings` | tenant | update posting/info permissions, member-add mode, join approval, or disappearing-message duration |
+| GET/POST | `/api/v1/devices/:key/whatsapp-groups/:jid/join-requests` | tenant | list pending membership requests and approve/reject selected participants |
+| POST | `/api/v1/devices/:key/whatsapp-communities` | tenant | enqueue community creation; returns `202` and a `command_id` to poll at `/api/v1/devices/:key/commands/:id` |
 | PATCH/DELETE | `/api/v1/devices/:key/whatsapp-communities/:jid` | tenant | edit community or leave it from this linked number |
 | POST | `/api/v1/devices/:key/whatsapp-communities/:jid/groups` | tenant | link or unlink an existing group |
 | GET | `/api/v1/devices/:key/whatsapp-channel?link=...` | tenant | look up channel metadata from its invite URL |
+| GET/POST | `/api/v1/devices/:key/whatsapp-channels` | tenant | list channels recorded by KONEVA or create a channel |
+| POST | `/api/v1/devices/:key/whatsapp-channels/follow` | tenant | follow a channel using its invite URL or newsletter JID |
+| PATCH/DELETE | `/api/v1/devices/:key/whatsapp-channels/:jid` | tenant | update an owned channel or unfollow it |
 | GET | `/api/v1/tenant` | tenant | authenticated tenant profile and quota usage |
 | PATCH | `/api/v1/tenant` | tenant | update the tenant webhook URL |
 | POST/GET | `/api/v1/contacts` | tenant | create or list tenant contacts |
@@ -90,9 +98,22 @@ to the recent-message window and still honor an opt-out from the participant who
 being answered. The inbox displays the group JID as its label until group names are synchronized
 into the message record.
 
-The existing saluran endpoint only looks up metadata. Channel create/update/follow/publish
-operations are not exposed yet, and a channel is a one-way publishing feed rather than a normal
-chat thread.
+### WhatsApp channels
+
+Channels followed or created through KONEVA are listed per device. This registry does not discover
+channels followed directly in the WhatsApp app. `DELETE` unfollows a channel; it does not delete
+the channel itself. Only a channel's owner can update its name or description. Channels are
+broadcast-only, so followers cannot reply in chat.
+
+```bash
+curl -X POST "https://<host>/api/v1/devices/<DEVICE_KEY>/whatsapp-channels/follow" \\
+  -H "apikey: <API_KEY>" -H "Content-Type: application/json" \\
+  -d '{"link":"https://whatsapp.com/channel/<INVITE_CODE>"}'
+
+curl -X POST "https://<host>/api/v1/devices/<DEVICE_KEY>/whatsapp-channels" \\
+  -H "apikey: <API_KEY>" -H "Content-Type: application/json" \\
+  -d '{"name":"Info Toko","description":"Pengumuman resmi toko"}'
+```
 | POST | `/admin/tenant/create` | admin | returns the new `api_key` |
 | POST | `/admin/device/create` | admin | proxies to Device Manager's `docker run` |
 | GET | `/admin/tenants` | admin | with device/message counts |
@@ -265,7 +286,7 @@ one rhythm. Editing pacing by hand afterwards makes the number `custom`.
 | Preset | For | Behaviour |
 |---|---|---|
 | `customer_service` | Answering customers | 24 hours, random delay 5-60 s |
-| `notifications` | Reminders and notices | 24 hours, delay 1-5 s, long runs. Use the server-verified `otp_code` flow for OTP |
+| `notifications` | Reminders and notices | 24 hours, delay 1-5 s, long runs. Tenant OTP messages use the ordinary consent, quota, and pacing rules |
 | `careful_marketing` | Messages to opted-in contacts | About 08:00-20:00, delay 20-90 s, frequent rests |
 
 ### New numbers and replies
@@ -285,39 +306,22 @@ the corresponding `error_code`. A STOP blocks pending promotional messages and r
 non-promotional confirmation. Manual consent changes are available only to a signed-in workspace
 user and require a source note; an API key cannot claim consent.
 
-`priority: "urgent"` is not a trust signal and cannot bypass consent or select a privileged path.
-The server recognizes OTP only when the request includes `otp_code` that passes all checks below.
-Verified OTP sends use the urgent queue, skip artificial pacing and remain allowed after STOP as
-transactional messages. They still respect a paused or banned number and the daily cap.
+`priority: "urgent"` is not a trust signal and cannot bypass consent, quota, or pacing. Tenant API
+requests cannot classify a message as an OTP: `otp_code` is rejected. Tenant-sent OTPs therefore use
+the ordinary queue and rules. Only OTPs generated by KONEVA's internal verification flow receive the
+platform-managed transactional handling.
 
 A new number is capped by warm-up (about 4-5
 messages on day 1), so a fresh number is not ready for OTP traffic. Templated, high-volume OTP
 sending to many strangers is the pattern WhatsApp is most likely to treat as automated; volume and
 risk on your own numbers are your responsibility.
 
-### Quota-exempt transactional sends (`otp_code`)
+### OTP messages
 
-The monthly plan quota (see [Plans and billing](#plans-and-billing)) counts every send except ones
-the server itself classifies as transactional. `priority: "urgent"` is **not** that classification —
-any caller could set it on an ordinary message. Instead, pass `otp_code`, a 4-10 digit numeric string:
-
-```json
-{ "device_key": "WAPI-XXXXXXXX", "to": "6281234567890", "priority": "urgent",
-  "message": "Kode OTP Anda: 482913", "otp_code": "482913" }
-```
-
-A send is exempt from the quota only when **all** of these hold, checked server-side:
-
-- `otp_code` is present and matches `^[0-9]{4,10}$`;
-- `message` actually contains that exact code as a substring, is 200 characters or fewer, and has no
-  `media_url` — the shape of a real one-time code, not a repurposed broadcast;
-- the (workspace, recipient) pair has not already claimed the exemption too many times recently (a
-  rolling per-recipient/per-workspace limit, so the exemption itself cannot become unlimited
-  quota-free volume).
-
-When any check fails the send is **never rejected because of it** — it is simply not exempt, so it
-counts against quota like any other message, and (see below) may be held rather than sent if the
-quota is already spent.
+Tenant API sends are ordinary messages even when their text contains a one-time code. The public send
+endpoint rejects `otp_code`; caller-provided text is not proof that KONEVA generated or verified the
+code. These sends require the same recipient consent, plan quota, and per-device pacing as other
+tenant messages. KONEVA-generated account-verification OTPs use an internal platform-only path.
 
 ### Pacing per number (persona)
 
@@ -396,9 +400,8 @@ Order errors: `400 ANNUAL_CHECKOUT_CLOSED`, `409 PRICE_NOT_FINAL`, `409 STUDENT_
 dropped or silently failed, and `GET /api/v1/billing`'s `usage.messages_held` reports how many are waiting.
 Held messages are released automatically, oldest first, the moment the workspace has headroom again (a new
 billing window, an upgrade, or another message finishing this period) — checked on every send and swept every
-few minutes server-side, so a hold never outlives the quota that caused it for long. A server-verified
-transactional send (`otp_code`, see above) is never held: it always sends immediately and never counts toward
-`usage.messages_used` (see `usage.exempt_used`). Other enforcement: `402 PLAN_INACTIVE` (send / add number),
+few minutes server-side, so a hold never outlives the quota that caused it for long. KONEVA-generated
+platform verification messages are managed internally and are outside tenant API usage. Other enforcement: `402 PLAN_INACTIVE` (send / add number),
 `402 PLAN_MEMBER_LIMIT` (invite). A late payment keeps working for a 7-day grace period, then sending stops;
 reading data still works.
 
@@ -412,6 +415,11 @@ Operator (admin key): `GET/PATCH /plans`, `GET /subscriptions`, `GET /invoices`,
 addresses are rejected) and `media_type` (`image` default, `video`, `document`). `message` then becomes the
 caption and may be empty. Links written in `message` are clickable for the recipient; no link preview card is
 generated. Numbers still in warm-up (days 1-4) cannot send media (`media_not_allowed_in_warmup`).
+
+`POST /api/v1/broadcast` requires an `Idempotency-Key` header (8–128 letters, digits, `.`, `:`, `_`, or `-`).
+Retry a request with the same key and identical body after a timeout; KONEVA reuses the same broadcast and
+recipient message IDs. Reusing that key with a different body returns `409 IDEMPOTENCY_KEY_CONFLICT`.
+Use a new key for a deliberately new broadcast. Broadcast idempotency records are tenant-scoped.
 
 ## Status and device profile
 

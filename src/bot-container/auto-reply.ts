@@ -7,6 +7,8 @@ import { checkTransmission, type TransmitDecision } from './send-guard';
 import { canSendMessage, type AntiBanDecision } from './anti-ban';
 import type { QueryFn } from './health-score';
 import { getStoredRecipientConsent, withRecipientConsentLock } from '../shared/recipient-consent';
+import { isSafeAutoReplyRegex } from '../shared/safe-auto-reply-regex';
+import { withDeviceSendLock } from '../shared/device-send-lock';
 
 export interface AutoReplyRule {
   id: string;
@@ -107,7 +109,8 @@ export function matchesAutoReply(rule: AutoReplyRule, content: string): boolean 
     return content.toLocaleLowerCase().includes(rule.trigger.pattern.toLocaleLowerCase());
   }
   try {
-    const truncated = content.slice(0, 2000);
+    if (!isSafeAutoReplyRegex(rule.trigger.pattern)) return false;
+    const truncated = content.slice(0, 512);
     return new RegExp(rule.trigger.pattern, 'i').test(truncated);
   }
   catch { return false; }
@@ -121,6 +124,7 @@ interface AutoReplyDependencies {
   /** When set, going online and reading are owned by the presence routine. */
   presence?: Pick<PresenceRoutine, 'beforeReply' | 'afterSend'>;
   consentLock?: <T>(tenantId: string, recipient: string, work: () => Promise<T>) => Promise<T>;
+  deviceSendLock?: <T>(deviceKey: string, work: () => Promise<T>) => Promise<T>;
 }
 
 async function logActivity(
@@ -223,11 +227,28 @@ export async function processAutoReply(
     // LAST CHECK before the transport call: the waits, reading and typing above can last many seconds.
     const lock = dependencies.consentLock ?? withRecipientConsentLock;
     const result = await lock(message.tenantId, message.from, async () => {
-      const consent = await getStoredRecipientConsent(queryFn, message.tenantId, message.from);
-      if (consent === 'opted_out') return { blocked: 'recipient_opted_out' };
-      const last = await guard(message.deviceKey);
-      if (!last.allowed) return { blocked: last.reason ?? 'blocked' };
-      return { sent: await sock.sendMessage(jid, { text: content }) };
+      const deviceLock = dependencies.deviceSendLock ?? withDeviceSendLock;
+      return deviceLock(message.deviceKey, async () => {
+        const consent = await getStoredRecipientConsent(queryFn, message.tenantId, message.from);
+        if (consent === 'opted_out') return { blocked: 'recipient_opted_out' };
+        const latestDecision = dependencies.canSend
+          ? await dependencies.canSend(message.deviceKey)
+          : await canSendMessage(message.deviceKey, {
+            queryFn, isProactive: false, content, recipient: message.from,
+            recipientName: contactName, requirePersonalization: false,
+          });
+        if (!latestDecision.allowed) return { blocked: latestDecision.reason ?? 'anti_ban_policy' };
+        const last = await guard(message.deviceKey);
+        if (!last.allowed) return { blocked: last.reason ?? 'blocked' };
+        const sent = await sock.sendMessage(jid, { text: content });
+        const inserted = await queryFn(
+          `INSERT INTO messages (tenant_id, device_id, device_key, from_number, to_number, content,
+           type, status, direction, whatsapp_message_id, sent_at)
+           VALUES ($1,$2,$3,$4,$5,$6,'text','sent','outbound',$7,NOW()) RETURNING id`,
+          [message.tenantId, message.deviceId, message.deviceKey, message.deviceKey, message.from, content, sent?.key.id ?? null],
+        );
+        return { sent, outboundId: (inserted.rows[0] as { id?: string } | undefined)?.id ?? null };
+      });
     });
     if ('blocked' in result) {
       const reason = result.blocked;
@@ -239,13 +260,7 @@ export async function processAutoReply(
     }
     const sent = result.sent;
     void dependencies.presence?.afterSend();
-    const inserted = await queryFn(
-      `INSERT INTO messages (tenant_id, device_id, device_key, from_number, to_number, content,
-       type, status, direction, whatsapp_message_id, sent_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'text','sent','outbound',$7,NOW()) RETURNING id`,
-      [message.tenantId, message.deviceId, message.deviceKey, message.deviceKey, message.from, content, sent?.key.id ?? null],
-    );
-    const outboundId = (inserted.rows[0] as { id?: string } | undefined)?.id ?? null;
+    const outboundId = result.outboundId;
     await logActivity(queryFn, rule, message, content, 'sent', null, outboundId);
     log.info('Auto-reply sent', { ruleId: rule.id, inboundMessageId: message.id, outboundMessageId: outboundId });
     return true;

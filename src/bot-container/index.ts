@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { WASocket } from '@whiskeysockets/baileys';
 import sharedConfig from '../shared/config';
 import pool, { query } from '../shared/database/connection';
+import { acquireDeviceProcessLease } from '../shared/device-process-lease';
 import logger from '../shared/utils/logger';
 import { getRedisClient, closeRedisClient } from '../shared/redis';
 import { startBotConnection } from './connection';
@@ -95,6 +96,11 @@ async function main(): Promise<void> {
 
   await pool.query('SELECT 1');
   log.info('Connected to PostgreSQL');
+
+  // A PostgreSQL session lock prevents duplicate bot containers from opening
+  // the same WhatsApp session or consuming its queue at the same time.
+  const deviceLease = await acquireDeviceProcessLease(pool, botConfig.botId);
+  log.info('Acquired exclusive device process lease');
 
   const redis = getRedisClient(botConfig.redisUrl);
   await redis.ping();
@@ -222,6 +228,11 @@ async function main(): Promise<void> {
     await closeQueueResources();
     await autoReplyEngine.close();
     await closeRedisClient();
+    await deviceLease.release().catch((err: unknown) => {
+      log.error('Failed to release device process lease cleanly', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
     await pool.end();
     await shutdownTracing();
     process.exit(0);

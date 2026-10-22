@@ -49,6 +49,7 @@ test('a profile picture is exactly one of a public https url or a base64 image',
 test('group sends require a reply context and only accept a group JID', () => {
   const base = { device_key: 'WAPI-1', message: 'Terima kasih' };
   assert.equal(sendSchema.safeParse({ ...base, to: '120363000000-123456@g.us' }).success, false);
+  assert.equal(sendSchema.safeParse({ ...base, to: '120363000000@g.us', reply_to_message_id: '00000000-0000-4000-8000-000000000001' }).success, true);
   assert.equal(sendSchema.safeParse({ ...base, to: 'not-a-group@g.us', reply_to_message_id: '00000000-0000-4000-8000-000000000001' }).success, false);
   assert.equal(sendSchema.safeParse({ ...base, to: '120363000000-123456@g.us', reply_to_message_id: '00000000-0000-4000-8000-000000000001' }).success, true);
 });

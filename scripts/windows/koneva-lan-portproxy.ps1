@@ -1,5 +1,10 @@
 $ErrorActionPreference = 'Stop'
-$listenerIp = '192.168.1.7'
+$networkProfile = Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -eq 'Private' } | Select-Object -First 1
+if (-not $networkProfile) { throw 'No active Private network profile found.' }
+$listenerIp = Get-NetIPAddress -InterfaceIndex $networkProfile.InterfaceIndex -AddressFamily IPv4 -AddressState Preferred |
+  Where-Object { $_.IPAddress -notlike '169.254.*' } |
+  Select-Object -ExpandProperty IPAddress -First 1
+if (-not $listenerIp) { throw 'Could not determine the active Windows LAN IPv4 address.' }
 $listenPort = 13000
 $ruleName = 'KONEVA HTTPS LAN 13000'
 $log = Join-Path $env:TEMP 'koneva-enable-lan-https-result.txt'
@@ -8,6 +13,7 @@ try {
   if ($wslIp -notmatch '^\d{1,3}(\.\d{1,3}){3}$') { throw 'Could not determine WSL IPv4 address.' }
   & netsh.exe interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=13000 2>$null | Out-Null
   & netsh.exe interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=18000 2>$null | Out-Null
+  & netsh.exe interface portproxy delete v4tov4 "listenaddress=0.0.0.0" "listenport=$listenPort" 2>$null | Out-Null
   & netsh.exe interface portproxy delete v4tov4 "listenaddress=$listenerIp" "listenport=$listenPort" 2>$null | Out-Null
   & netsh.exe interface portproxy add v4tov4 "listenaddress=$listenerIp" "listenport=$listenPort" "connectaddress=$wslIp" "connectport=$listenPort"
   if ($LASTEXITCODE -ne 0) { throw "netsh portproxy setup failed: $LASTEXITCODE" }

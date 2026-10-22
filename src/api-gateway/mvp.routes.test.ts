@@ -144,3 +144,13 @@ test('message list applies direction and search and returns standard pagination'
   assert.deepEqual(result.pagination, { total: 21, limit: 20, offset: 0, has_more: true });
   assert.equal(result.success, true);
 });
+
+test('message list can be scoped to one exact WhatsApp group conversation', async () => {
+  const sql: string[] = [];
+  let call = 0;
+  database.query = async (text) => { sql.push(text); return call++ === 0 ? { rows: [{ total: 1 }] } : { rows: [{ id: 'group-message' }] }; };
+  const result = await listMessages(tenant.id, { device_key: 'WAPI-TEST', chat_jid: '120363000000-123456@g.us', limit: 100, offset: 0 });
+  assert.match(sql[0]!, /device_key = \$2/);
+  assert.match(sql[0]!, /chat_jid = \$3/);
+  assert.deepEqual(result.data.map((message) => message.id), ['group-message']);
+});

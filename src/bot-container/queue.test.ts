@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WAMessageStatus, type WAMessageUpdate } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
-import { queueName, deadLetterQueueName, handleReceiptUpdate } from './queue';
+import { queueName, deadLetterQueueName, handleReceiptUpdate, failStuckSendingMessages } from './queue';
+import { processJob } from './queue';
+import { UnrecoverableError, type Job } from 'bullmq';
 import type { QueryFn } from './health-score';
 import type { WebhookPayload } from './webhook';
 
@@ -14,6 +16,68 @@ test('queueName is the bare device key (colon-free, valid as a BullMQ name)', ()
 
 test('deadLetterQueueName suffixes the device key with -dead', () => {
   assert.equal(deadLetterQueueName('WAPI-TEST01'), 'WAPI-TEST01-dead');
+});
+
+test('an expired queue job is failed without checking or calling the WhatsApp transport', async () => {
+  let statusUpdate = '';
+  let transportTouched = false;
+  const queryFn: QueryFn = async (sql) => {
+    if (sql.startsWith('SELECT id, tenant_id, device_id')) return { rows: [{
+      id: 'expired-1', tenant_id: 'tenant-1', device_id: 'device-1', device_key: 'WAPI-1',
+      to_number: '6281234567890', content: 'lama', media_url: null, type: 'text', status: 'queued',
+      whatsapp_message_id: null, error_message: null, priority: 'normal', quota_exempt: false,
+      system_otp: false, system_notification: false, reply_to_message_id: null,
+      created_at: new Date(Date.now() - 60 * 60_000), queue_started_at: new Date(Date.now() - 16 * 60_000),
+    }] };
+    if (sql.startsWith('UPDATE messages')) statusUpdate = sql;
+    return { rows: [] };
+  };
+  const job = { data: { messageId: 'expired-1' }, attemptsMade: 0, opts: { attempts: 3 } } as unknown as Job<{ messageId: string }>;
+  await assert.rejects(processJob(job, 'WAPI-1', {
+    getSocket: () => { transportTouched = true; return undefined; },
+    isConnected: () => { transportTouched = true; return true; },
+    now: () => new Date(),
+  }, undefined as never, queryFn, testLogger()), (error) => error instanceof UnrecoverableError);
+  assert.match(statusUpdate, /status = \$2/);
+  assert.equal(transportTouched, false);
+});
+
+test('a retry for a message with an existing send claim never touches WhatsApp again', async () => {
+  let transportTouched = false;
+  const queryFn: QueryFn = async (sql) => {
+    assert.match(sql, /SELECT id, tenant_id, device_id/);
+    return { rows: [{
+      id: 'uncertain-1', tenant_id: 'tenant-1', device_id: 'device-1', device_key: 'WAPI-1',
+      to_number: '6281234567890', content: 'uji', media_url: null, type: 'text', status: 'sending',
+      whatsapp_message_id: null, error_message: null, priority: 'normal', quota_exempt: false,
+      system_otp: false, system_notification: false, reply_to_message_id: null,
+      created_at: new Date(), queue_started_at: new Date(), send_started_at: new Date(),
+    }] };
+  };
+  const job = { data: { messageId: 'uncertain-1' }, attemptsMade: 1, opts: { attempts: 3 } } as unknown as Job<{ messageId: string }>;
+  await processJob(job, 'WAPI-1', {
+    getSocket: () => { transportTouched = true; return undefined; },
+    isConnected: () => { transportTouched = true; return true; },
+  }, undefined as never, queryFn, testLogger());
+  assert.equal(transportTouched, false);
+});
+
+test('stale send claims close as uncertain and are never requeued', async () => {
+  const updates: string[] = [];
+  const hooks: WebhookPayload[] = [];
+  const queryFn: QueryFn = async (sql, params) => {
+    if (sql.startsWith('SELECT id, tenant_id')) return { rows: [
+      { id: 'stuck-1', tenant_id: 'tenant-1', device_key: 'WAPI-1', to_number: '6281', system_otp: false, system_notification: false },
+    ] };
+    if (sql.startsWith('UPDATE messages')) { updates.push(sql); assert.deepEqual(params, ['stuck-1']); return { rows: [{ id: 'stuck-1' }] }; }
+    return { rows: [] };
+  };
+  const failed = await failStuckSendingMessages('WAPI-1', queryFn, testLogger(), async (_tenant, payload) => { hooks.push(payload); });
+  assert.equal(failed, 1);
+  assert.match(updates[0]!, /status = 'failed', error_message = 'delivery_uncertain'/);
+  assert.doesNotMatch(updates[0]!, /send_started_at = NULL/);
+  assert.match(updates[0]!, /WHERE id = \$1 AND status = 'sending'/);
+  assert.equal(hooks[0]?.reason, 'delivery_uncertain');
 });
 
 function receipt(status: NonNullable<WAMessageUpdate['update']['status']>): WAMessageUpdate {
@@ -44,7 +108,7 @@ for (const status of [WAMessageStatus.READ, WAMessageStatus.PLAYED]) {
       webhook = { tenantId, payload };
     });
 
-    assert.match(queries[0]!.text, /SET status = \$1, read_at = COALESCE\(read_at, now\(\)\)/);
+    assert.match(queries[0]!.text, /SET status = \$1, sent_at = COALESCE\(sent_at, now\(\)\), delivered_at = COALESCE\(delivered_at, now\(\)\), read_at = COALESCE\(read_at, now\(\)\)/);
     assert.deepEqual(queries[0]!.params, [
       'read', 'wamid-read-1', ['queued', 'sending', 'sent', 'delivered'],
     ]);
@@ -56,7 +120,7 @@ for (const status of [WAMessageStatus.READ, WAMessageStatus.PLAYED]) {
 
 test('delivery receipt updates delivered_at and dispatches message.delivered', async () => {
   const queryFn: QueryFn = async (text, params) => {
-    assert.match(text, /delivered_at = COALESCE\(delivered_at, now\(\)\)/);
+    assert.match(text, /sent_at = COALESCE\(sent_at, now\(\)\), delivered_at = COALESCE\(delivered_at, now\(\)\)/);
     assert.deepEqual(params, ['delivered', 'wamid-read-1', ['queued', 'sending', 'sent']]);
     return { rows: [{
       id: 'message-1', tenant_id: 'tenant-1', device_key: 'WAPI-TEST01',
@@ -73,6 +137,55 @@ test('delivery receipt updates delivered_at and dispatches message.delivered', a
   );
 
   assert.equal(event, 'message.delivered');
+});
+
+test('server acknowledgement is the first point a message becomes sent', async () => {
+  let sql = '';
+  let params: unknown[] = [];
+  let event: string | undefined;
+  const queryFn: QueryFn = async (text, values) => {
+    sql = text;
+    params = values ?? [];
+    return { rows: [{
+      id: 'message-1', tenant_id: 'tenant-1', device_key: 'WAPI-TEST01',
+      to_number: '6281234567890', type: 'text',
+    }] };
+  };
+
+  await handleReceiptUpdate(
+    receipt(WAMessageStatus.SERVER_ACK),
+    queryFn,
+    testLogger(),
+    async (_tenantId, payload) => { event = payload.event; },
+  );
+
+  assert.match(sql, /status = ANY\(\$3::varchar\[\]\) OR \(status = 'failed' AND error_message = 'delivery_uncertain'\)/);
+  assert.match(sql, /sent_at = COALESCE\(sent_at, now\(\)\)/);
+  assert.deepEqual(params, ['sent', 'wamid-read-1', ['sending']]);
+  assert.equal(event, 'message.sent');
+});
+
+test('late WhatsApp acknowledgement reconciles an uncertain result to sent', async () => {
+  let sql = '';
+  let event: string | undefined;
+  const queryFn: QueryFn = async (text) => {
+    sql = text;
+    return { rows: [{
+      id: 'message-1', tenant_id: 'tenant-1', device_key: 'WAPI-TEST01',
+      to_number: '6281234567890', type: 'text',
+    }] };
+  };
+
+  await handleReceiptUpdate(
+    receipt(WAMessageStatus.SERVER_ACK),
+    queryFn,
+    testLogger(),
+    async (_tenantId, payload) => { event = payload.event; },
+  );
+
+  assert.match(sql, /status = 'failed' AND error_message = 'delivery_uncertain'/);
+  assert.match(sql, /error_message = NULL, send_started_at = NULL/);
+  assert.equal(event, 'message.sent');
 });
 
 test('system OTP delivery receipts update status without exposing the recipient to tenant webhooks', async () => {

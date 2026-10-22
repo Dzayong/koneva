@@ -48,14 +48,6 @@ export interface SendMessageRequest {
   /** Accepted for backward compatibility but ignored as a trust signal. Server-verified transactional messages
    * receive urgent routing; caller-supplied `urgent` never bypasses consent, quota, or pacing controls. */
   priority?: 'normal' | 'urgent' | undefined;
-  /**
-   * A short numeric code (4-10 digits) that must also appear inside `message`. When present and verified
-   * server-side (see message-exempt-limits.ts), the send is classified as transactional/OTP and does not count
-   * against the monthly quota. Not a trust-me flag: the code must genuinely be in the message, media is not
-   * allowed alongside it, and a per-recipient/tenant rate limit applies so the exemption itself cannot become
-   * unlimited free volume.
-   */
-  otp_code?: string | undefined;
 }
 
 export interface SendMessageResponse {
