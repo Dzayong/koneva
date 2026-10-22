@@ -126,6 +126,7 @@ export class DockerBotManager implements BotOrchestrator {
       '-e', `BOT_API_KEYS=${this.config.adminApiKey}`,
       '-e', `ADMIN_API_KEY=${this.config.adminApiKey}`,
       '-e', `JWT_SECRET=${this.config.jwtSecret}`,
+      '-e', 'API_GATEWAY_URL=http://api-gateway:8000',
       '-e', `DATABASE_URL=${containerUrl(this.config.databaseUrl)}`,
       '-e', `REDIS_URL=${containerUrl(this.config.redisUrl)}`,
       '-e', 'SESSION_PATH=/app/sessions',

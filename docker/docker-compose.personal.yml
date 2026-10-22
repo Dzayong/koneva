@@ -78,6 +78,7 @@ services:
       DOKU_CLIENT_ID: ${DOKU_CLIENT_ID:-}
       DOKU_SHARED_KEY: ${DOKU_SHARED_KEY:-}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-}
+      AI_REPLY_ENCRYPTION_KEY: ${AI_REPLY_ENCRYPTION_KEY:-}
     ports: ["${APP_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-18000}:8000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -94,7 +95,10 @@ services:
   device-manager:
     image: ${PERSONAL_PROJECT:-wa-personal}-manager:local
     build: { context: .., dockerfile: docker/app.Dockerfile, target: device-manager }
-    environment: { <<: *env, PORT: 8001, DOCKER_SOCKET: /var/run/docker.sock }
+    environment:
+      <<: *env
+      PORT: 8001
+      DOCKER_SOCKET: /var/run/docker.sock
     user: "${PERSONAL_UID:?Use start script}:${PERSONAL_GID:?Use start script}"
     group_add: ["${DOCKER_GID:?Use start script}"]
     volumes:

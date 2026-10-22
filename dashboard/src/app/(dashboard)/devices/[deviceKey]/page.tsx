@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DeviceBehavior } from "@/components/devices/device-behavior";
+import { DeviceApiKeyPanel } from "@/components/devices/device-api-key-panel";
 import { DeviceEvents } from "@/components/devices/device-events";
 import { DeviceProfileTab } from "@/components/devices/device-profile";
 import { DeviceStatusBadge } from "@/components/devices/device-status-badge";
@@ -179,6 +180,7 @@ export default function DeviceDetailPage(props: {
           <TabsTrigger value="ringkasan">Ringkasan</TabsTrigger>
           <TabsTrigger value="perilaku">Perilaku pengiriman</TabsTrigger>
           <TabsTrigger value="profil">Profil</TabsTrigger>
+          <TabsTrigger value="api-key">API key</TabsTrigger>
           <TabsTrigger value="riwayat">Riwayat status</TabsTrigger>
         </TabsList>
 
@@ -227,6 +229,10 @@ export default function DeviceDetailPage(props: {
 
         <TabsContent value="profil" className="mt-6">
           <DeviceProfileTab deviceKey={deviceKey} online={device?.status === "online"} canEdit={can("content:write")} />
+        </TabsContent>
+
+        <TabsContent value="api-key" className="mt-6">
+          <DeviceApiKeyPanel deviceKey={deviceKey} deviceLabel={device?.label || deviceKey} />
         </TabsContent>
 
         <TabsContent value="riwayat" className="mt-6">

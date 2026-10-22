@@ -75,7 +75,7 @@ export interface CreateDeviceRequest {
 /** Who is calling: a person signed in to the console, or a system using an API key. */
 export type Actor =
   | { kind: 'user'; userId: string; email: string; role: Role }
-  | { kind: 'api_key'; role: Role; scopes?: readonly Permission[]; keyId?: string };
+  | { kind: 'api_key'; role: Role; scopes?: readonly Permission[]; keyId?: string; deviceKey?: string | null };
 
 declare global {
   namespace Express {

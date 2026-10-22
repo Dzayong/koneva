@@ -338,6 +338,7 @@ export class KubernetesBotManager {
                 { name: 'BOT_API_KEYS', valueFrom: { secretKeyRef: { name: 'wa-gateway-secrets', key: 'ADMIN_API_KEY' } } },
                 { name: 'ADMIN_API_KEY', valueFrom: { secretKeyRef: { name: 'wa-gateway-secrets', key: 'ADMIN_API_KEY' } } },
                 { name: 'JWT_SECRET', valueFrom: { secretKeyRef: { name: 'wa-gateway-secrets', key: 'JWT_SECRET' } } },
+                { name: 'API_GATEWAY_URL', value: 'http://api-gateway:8000' },
                 { name: 'SESSION_PATH', value: '/app/sessions' },
               ],
               resources: {

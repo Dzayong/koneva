@@ -64,6 +64,13 @@ spec:
             name: wa-gateway-config
         - secretRef:
             name: wa-gateway-secrets
+        env:
+        - name: AI_REPLY_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: wa-gateway-ai-secrets
+              key: AI_REPLY_ENCRYPTION_KEY
+              optional: true
         resources:
           requests:
             memory: "256Mi"

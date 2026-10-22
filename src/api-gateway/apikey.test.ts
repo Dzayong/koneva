@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import type { NextFunction, Request, Response } from 'express';
 import pool from '../shared/database/connection';
-import { authorize } from './middleware/auth';
+import { authorize, enforceDeviceKeyScope } from './middleware/auth';
 import { sha256 } from './services/account.service';
 import {
   KEY_SCOPES, assertScopesAllowed, createApiKey, newApiKey, resolveApiKey, rotateApiKey, revokeApiKey,
@@ -132,6 +132,21 @@ test('a scoped key is limited to exactly its scopes, whatever the placeholder ro
   const readOnly = { kind: 'api_key', role: 'viewer', scopes: ['messages:read', 'devices:read'] };
   assert.equal(callAuthorize(readOnly, 'GET', '/messages').nexted, true);
   assert.equal(callAuthorize(readOnly, 'POST', '/message/send').status, 403);
+});
+
+test('a device-bound key cannot target another device or an unbound endpoint', async () => {
+  const check = async (deviceKey: string, body: unknown, path = '/message/send') => {
+    let status = 0; let nexted = false;
+    const response = { status(code: number) { status = code; return this; }, json() { return this; } } as unknown as Response;
+    await enforceDeviceKeyScope({ method: 'POST', actor: { kind: 'api_key', role: 'viewer', deviceKey }, tenant: { id: 't1' }, body, query: {}, params: {}, path } as unknown as Request,
+      response, (() => { nexted = true; }) as NextFunction);
+    return { status, nexted };
+  };
+  assert.equal((await check('WAPI-1', { device_key: 'WAPI-1' })).nexted, true);
+  assert.equal((await check('WAPI-1', { device_key: 'WAPI-2' })).status, 403);
+  assert.equal((await check('WAPI-1', {} as unknown, '/devices')).status, 403);
+  assert.equal((await check('WAPI-1', { device_key: 'WAPI-1' }, '/unrelated-endpoint')).status, 403);
+  assert.equal((await check('WAPI-1', {}, '/devices/WAPI-1')).nexted, true);
 });
 
 test('the legacy tenant key (no scopes) keeps admin-level access', () => {

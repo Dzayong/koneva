@@ -213,6 +213,15 @@ export interface SystemWhatsappOtpSender {
     sent_at: string | null; delivered_at: string | null; read_at: string | null }>;
   qr_code?: string;
 }
+
+export interface AiReplyProviderSettings {
+  configured: boolean; enabled: boolean; base_url: string; model: string; updated_at: string | null;
+}
+export function parseAiReplyProviderSettings(v: unknown): AiReplyProviderSettings {
+  const d = obj(v);
+  return { configured: d["configured"] === true, enabled: d["enabled"] === true, base_url: str(d["base_url"]),
+    model: str(d["model"]), updated_at: strOrNull(d["updated_at"]) };
+}
 export function parseSystemWhatsappOtpSender(v: unknown): SystemWhatsappOtpSender {
   const d = obj(v);
   const qr = str(d["qr_code"]);

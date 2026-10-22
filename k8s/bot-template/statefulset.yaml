@@ -72,6 +72,7 @@ spec:
             - { name: BOT_ID, value: REPLACE_WITH_DEVICE_KEY }
             - { name: BOT_CONTAINER_PORT, value: "9000" }
             - { name: BOT_API_KEYS, valueFrom: { secretKeyRef: { name: wa-gateway-secrets, key: ADMIN_API_KEY } } }
+            - { name: API_GATEWAY_URL, value: "http://api-gateway:8000" }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { cpu: "1", memory: 1Gi }

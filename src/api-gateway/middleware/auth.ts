@@ -75,7 +75,7 @@ export async function tenantAuth(
     return;
   }
   request.tenant = resolved.tenant;
-  request.actor = { kind: 'api_key', role: 'viewer', scopes: resolved.scopes, keyId: resolved.keyId };
+  request.actor = { kind: 'api_key', role: 'viewer', scopes: resolved.scopes, keyId: resolved.keyId, deviceKey: resolved.deviceKey };
   next();
 }
 
@@ -91,6 +91,44 @@ export function authorize(request: Request, response: Response, next: NextFuncti
       success: false,
       error: { code: 'FORBIDDEN', message: permission ? `Your role cannot perform this action (${permission})` : 'This route is not available' },
     });
+    return;
+  }
+  next();
+}
+
+/** A device-bound API key may only read or operate on the device it was issued for. */
+export async function enforceDeviceKeyScope(request: Request, response: Response, next: NextFunction): Promise<void> {
+  const actor = request.actor;
+  if (actor?.kind !== 'api_key' || !actor.deviceKey) { next(); return; }
+  const path = request.path.replace(/\/+$/, '') || '/';
+  let target: string | undefined;
+  // Device routes are scoped by their path segment (the public route aliases use :key or :deviceKey).
+  if (/^\/devices\/[^/]+(?:\/.*)?$/.test(path)) {
+    target = typeof request.params['deviceKey'] === 'string' ? request.params['deviceKey']
+      : typeof request.params['key'] === 'string' ? request.params['key'] : (path.split('/')[2] ?? '');
+  } else if ((request.method === 'POST' && ['/message/send', '/broadcast'].includes(path))) {
+    target = typeof request.body?.device_key === 'string' ? request.body.device_key : undefined;
+  } else if (request.method === 'GET' && ['/messages', '/auto-reply-rules'].includes(path)) {
+    target = typeof request.query['device_key'] === 'string' ? request.query['device_key'] : undefined;
+  } else if (/^\/messages\/[^/]+(?:\/retry)?$/.test(path)) {
+    const messageId = path.split('/')[2];
+    const result = await pool.query<{ device_key: string }>(
+      'SELECT device_key FROM messages WHERE id=$1 AND tenant_id=$2', [messageId, request.tenant!.id],
+    );
+    target = result.rows[0]?.device_key;
+  } else if (/^\/auto-reply-rules\/[^/]+$/.test(path)) {
+    const ruleId = path.split('/')[2];
+    const result = await pool.query<{ device_key: string }>(
+      'SELECT device_key FROM auto_reply_rules WHERE id=$1 AND tenant_id=$2', [ruleId, request.tenant!.id],
+    );
+    target = result.rows[0]?.device_key;
+    // A rule cannot be moved onto another device by a bound key.
+    if (typeof request.body?.device_key === 'string' && request.body.device_key !== actor.deviceKey) target = undefined;
+  } else if (request.method === 'POST' && path === '/auto-reply-rules') {
+    target = typeof request.body?.device_key === 'string' ? request.body.device_key : undefined;
+  }
+  if (target !== actor.deviceKey) {
+    response.status(403).json({ success: false, error: { code: 'API_KEY_DEVICE_SCOPE', message: 'This API key is restricted to its assigned device.' } });
     return;
   }
   next();

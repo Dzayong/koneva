@@ -1,13 +1,13 @@
 import { operatorClient } from "./client";
 import {
-  parseAudit, parseOtpAlerts, parseOwnerInsights, parseOwnerDeviceSummary, parseOwnerDeviceDetail, parseOwnerSystemHealth, parseSystemWhatsappOtpSender, parseOwnerWorkspaceSummary, parseOwnerWorkspaceDetailData,
+  parseAudit, parseOtpAlerts, parseOwnerInsights, parseOwnerDeviceSummary, parseOwnerDeviceDetail, parseOwnerSystemHealth, parseSystemWhatsappOtpSender, parseAiReplyProviderSettings, parseOwnerWorkspaceSummary, parseOwnerWorkspaceDetailData,
   parseConfirmResult, parseDecisionResult, parseInvoiceDetail, parseInvoiceSummary, parseMe, parsePagination, parseSignedIn,
   parseStudentDetail, parseStudentSummary, parseWorkspace, parseOwnerWorkspaceCostMeter,
   type AuditEntry, type OtpAlerts, type SignedIn, type ConfirmPaymentInput, type ConfirmPaymentResult, type DecisionInput, type DecisionResult, type InvoiceDetail,
   type InvoiceSummary, type InvoiceStatus, type OperatorMe, type OwnerInsights, type OwnerDeviceSummary, type OwnerDeviceDetail, type OwnerSystemHealth, type SystemWhatsappOtpSender,
   type OwnerWorkspaceSummary, type OwnerWorkspaceDetailData, type OwnerWorkspaceCostMeter, type Page, type StudentRequestDetail, type StudentRequestSummary,
   type StudentStatus, type WorkspaceDetail,
-  type CloseOwnerWorkspaceInput, type CloseOwnerWorkspaceResult,
+  type CloseOwnerWorkspaceInput, type CloseOwnerWorkspaceResult, type AiReplyProviderSettings,
 } from "./types";
 
 /** Every path below is part of the PROPOSED contract (dashboard/docs/operator-panel-contract.md). */
@@ -98,6 +98,12 @@ export const operatorApi = {
   async testSystemWhatsappNotifications(): Promise<{ queued: boolean; status: string; recipient_last4: string }> {
     const d = object((await operatorClient.request("/system/whatsapp-otp-sender/notifications/test", { method: "POST", body: {} }))?.data);
     return { queued: d["queued"] === true, status: typeof d["status"] === "string" ? d["status"] : "unknown", recipient_last4: typeof d["recipient_last4"] === "string" ? d["recipient_last4"] : "" };
+  },
+  async getAiReplySettings(): Promise<AiReplyProviderSettings> {
+    return parseAiReplyProviderSettings((await operatorClient.request("/system/ai-reply"))?.data);
+  },
+  async saveAiReplySettings(input: { base_url: string; model: string; api_key?: string; enabled: boolean }): Promise<AiReplyProviderSettings> {
+    return parseAiReplyProviderSettings((await operatorClient.request("/system/ai-reply", { method: "PUT", body: input }))?.data);
   },
   async listOwnerWorkspaces(params: { q?: string; limit?: number; offset?: number; plan?: string; status?: string }): Promise<Page<OwnerWorkspaceSummary>> {
     return page(await operatorClient.request("/insights/workspaces", { query: { q: params.q, limit: params.limit ?? OWNER_PAGE_SIZE, offset: params.offset ?? 0, plan: params.plan, status: params.status } }), parseOwnerWorkspaceSummary);

@@ -43,7 +43,7 @@ test('matched inbound message sends and records an auto-reply', async () => {
   const silent = { info() {}, warn() {}, error() {} } as unknown as Logger;
 
   const sent = await processAutoReply(
-    { id: 'in-1', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?' },
+    { id: 'in-1', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?', isGroup: true, replyJid: '120363000000@g.us' },
     [baseRule], sock, queryFn, silent,
     { wait: async () => undefined, guard: async () => ({ allowed: true }), canSend: async () => ({ allowed: true, delayMs: 0,
       typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }),
@@ -67,7 +67,7 @@ test('auto-reply answers an inbound chat without a prior START opt-in', async ()
   const sock = { sendMessage: async () => { sends += 1; return { key: { id: 'reply-wa-1' } }; } } as unknown as WASocket;
   const silent = { info() {}, warn() {}, error() {} } as unknown as Logger;
   const sent = await processAutoReply(
-    { id: 'in-no-consent', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?' },
+    { id: 'in-no-consent', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?', isGroup: true, replyJid: '120363000000@g.us' },
     [baseRule], sock, queryFn, silent,
     { wait: async () => undefined, guard: async () => ({ allowed: true }), canSend: async () => ({ allowed: true, delayMs: 0,
       typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }),
@@ -85,7 +85,7 @@ test('auto-reply still respects an explicit STOP', async () => {
   const sock = { sendMessage: async () => { sends += 1; return { key: { id: 'unexpected' } }; } } as unknown as WASocket;
   const silent = { info() {}, warn() {}, error() {} } as unknown as Logger;
   const sent = await processAutoReply(
-    { id: 'in-opted-out', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?' },
+    { id: 'in-opted-out', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?', isGroup: true, replyJid: '120363000000@g.us' },
     [baseRule], sock, queryFn, silent,
     { consentLock: async (_tenant, _recipient, work) => work() },
   );
@@ -139,8 +139,8 @@ test('auto-reply total delay includes reading and typing, so a flat 5 s is 5 s',
   const rule = { ...baseRule, response: { type: 'text' as const, content: 'Halo', delay_ms: 0 } };
 
   await processAutoReply(
-    { id: 'in-2', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?',
-      key: { remoteJid: '62812@s.whatsapp.net', id: 'K1', fromMe: false } },
+    { id: 'in-2', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?', isGroup: true,
+      replyJid: '120363000000@g.us', key: { remoteJid: '120363000000@g.us', participant: '62812@s.whatsapp.net', id: 'K1', fromMe: false } },
     [rule], sock, queryFn, silent,
     { wait: async (ms) => { waits.push(ms); }, guard: async () => ({ allowed: true }),
       consentLock: async (_tenant, _recipient, work) => work(),
@@ -150,4 +150,21 @@ test('auto-reply total delay includes reading and typing, so a flat 5 s is 5 s',
 
   assert.equal(waits.reduce((a, b) => a + b, 0), 5000);
   assert.ok(waits.every((ms) => ms >= 0));
+});
+
+test('auto-reply never processes private chats or channel traffic', async () => {
+  let sends = 0;
+  const queryFn: QueryFn = async () => ({ rows: [] }) as never;
+  const sock = { sendMessage: async () => { sends += 1; return { key: { id: 'unexpected' } }; } } as unknown as WASocket;
+  const silent = { info() {}, warn() {}, error() {} } as unknown as Logger;
+  for (const isGroup of [false, undefined]) {
+    const message = { id: `in-private-${String(isGroup)}`, tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?',
+      ...(isGroup !== undefined ? { isGroup } : {}) };
+    const sent = await processAutoReply(
+      message,
+      [baseRule], sock, queryFn, silent,
+    );
+    assert.equal(sent, false);
+  }
+  assert.equal(sends, 0);
 });

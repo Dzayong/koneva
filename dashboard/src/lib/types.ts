@@ -257,6 +257,7 @@ export interface AutoReplyRule {
   device_key: string;
   trigger_type: AutoReplyTriggerType;
   trigger_pattern: string;
+  response_type: "text" | "template" | "ai";
   response_content: string;
   delay_ms: number;
   is_active: boolean;
@@ -267,6 +268,7 @@ export interface AutoReplyRuleInput {
   device_key: string;
   trigger_type: AutoReplyTriggerType;
   trigger_pattern: string;
+  response_type?: "text" | "template" | "ai";
   response_content: string;
   delay_ms: number;
 }
@@ -362,6 +364,7 @@ export interface ApiKeyRecord {
   name: string;
   prefix: string;
   scopes: string[];
+  device_key?: string | null;
   created_at: string;
   last_used_at: string | null;
   expires_at: string | null;

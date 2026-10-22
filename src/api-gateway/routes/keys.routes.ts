@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import pool from '../../shared/database/connection';
 import { validate } from '../middleware/validate';
 import { KEY_SCOPES, createApiKey, listApiKeys, revokeApiKey, rotateApiKey } from '../services/apikey.service';
 import { ServiceError } from '../services/service-error';
@@ -11,6 +12,7 @@ export const createKeySchema = z.object({
   name: z.string().trim().min(1).max(80),
   scopes: z.array(z.enum(KEY_SCOPES as unknown as [string, ...string[]])).min(1),
   expires_in_days: z.number().int().min(1).max(730).optional(),
+  device_key: z.string().min(1).max(32).optional(),
 }).strict();
 
 export const rotateSchema = z.object({ overlap_hours: z.number().int().min(0).max(168).default(24) }).strict();
@@ -25,12 +27,18 @@ function person(request: Request): { userId: string; role: NonNullable<Request['
 }
 
 export async function listKeys(request: Request, response: Response): Promise<void> {
-  response.json({ success: true, data: await listApiKeys(request.tenant!.id), available_scopes: KEY_SCOPES });
+  const deviceKey = typeof request.query?.['device_key'] === 'string' ? request.query['device_key'] : undefined;
+  response.json({ success: true, data: await listApiKeys(request.tenant!.id, deviceKey), available_scopes: KEY_SCOPES });
 }
 
 export async function createKey(request: Request, response: Response): Promise<void> {
   const { userId, role } = person(request);
-  const created = await createApiKey(request.tenant!.id, userId, role, request.validated!.body as z.infer<typeof createKeySchema>);
+  const input = request.validated!.body as z.infer<typeof createKeySchema>;
+  if (input.device_key) {
+    const device = await pool.query('SELECT 1 FROM devices WHERE tenant_id=$1 AND device_key=$2', [request.tenant!.id, input.device_key]);
+    if (!device.rows[0]) throw new ServiceError(404, 'DEVICE_NOT_FOUND', 'Device not found');
+  }
+  const created = await createApiKey(request.tenant!.id, userId, role, input, input.device_key);
   response.status(201).json({ success: true, data: created, notice: 'Copy the key now. It is shown only once.' });
 }
 

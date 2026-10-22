@@ -109,6 +109,16 @@ export function useTestSystemWhatsappNotifications() {
     void qc.invalidateQueries({ queryKey: [OP, "audit"] });
   } });
 }
+export function useAiReplySettings(enabled = true) {
+  return useQuery({ queryKey: [OP, "ai-reply-settings"], queryFn: () => operatorApi.getAiReplySettings(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always" });
+}
+export function useSaveAiReplySettings() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: operatorApi.saveAiReplySettings, onSuccess: () => {
+    void qc.invalidateQueries({ queryKey: [OP, "ai-reply-settings"] });
+    void qc.invalidateQueries({ queryKey: [OP, "audit"] });
+  } });
+}
 export function useOwnerWorkspaces(params: { q?: string; limit?: number; offset?: number; plan?: string; status?: string }, enabled = true) {
   return useQuery({ queryKey: [OP, "owner-workspaces", params], queryFn: () => operatorApi.listOwnerWorkspaces(params), enabled, retry: retryTransient, placeholderData: keepPreviousData, refetchInterval: 60_000 });
 }

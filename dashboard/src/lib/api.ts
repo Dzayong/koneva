@@ -662,12 +662,13 @@ class ApiClient {
 
   // ---- API keys, team, audit ----------------------------------------------
 
-  async getApiKeys(): Promise<{ keys: ApiKeyRecord[]; scopes: string[] }> {
-    const response = await this.client.get<{ data: ApiKeyRecord[]; available_scopes: string[] }>("/api/v1/keys", { skipErrorToast: true });
+  async getApiKeys(deviceKey?: string): Promise<{ keys: ApiKeyRecord[]; scopes: string[] }> {
+    const query = deviceKey ? `?device_key=${encodeURIComponent(deviceKey)}` : "";
+    const response = await this.client.get<{ data: ApiKeyRecord[]; available_scopes: string[] }>(`/api/v1/keys${query}`, { skipErrorToast: true });
     return { keys: response.data.data, scopes: response.data.available_scopes };
   }
 
-  async createApiKey(data: { name: string; scopes: string[]; expires_in_days?: number }): Promise<CreatedApiKey> {
+  async createApiKey(data: { name: string; scopes: string[]; expires_in_days?: number; device_key?: string }): Promise<CreatedApiKey> {
     const response = await this.client.post<ApiSuccess<CreatedApiKey>>("/api/v1/keys", data, { skipErrorToast: true });
     return response.data.data;
   }

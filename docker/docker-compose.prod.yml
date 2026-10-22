@@ -51,7 +51,8 @@ services:
 
   migrate:
     image: ${API_IMAGE:-wa-gateway-api:${IMAGE_TAG:-latest}}
-    environment: *app-environment
+    environment:
+      <<: *app-environment
     command: ["node", "dist/scripts/migrate.js"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -61,7 +62,9 @@ services:
   api-gateway:
     image: ${API_IMAGE:-wa-gateway-api:${IMAGE_TAG:-latest}}
     restart: unless-stopped
-    environment: *app-environment
+    environment:
+      <<: *app-environment
+      AI_REPLY_ENCRYPTION_KEY: ${AI_REPLY_ENCRYPTION_KEY:-}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -75,7 +78,8 @@ services:
   device-manager:
     image: ${MANAGER_IMAGE:-wa-gateway-manager:${IMAGE_TAG:-latest}}
     restart: unless-stopped
-    environment: *app-environment
+    environment:
+      <<: *app-environment
     user: "10001:${DOCKER_GID:-999}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

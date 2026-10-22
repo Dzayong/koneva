@@ -11,6 +11,7 @@ import { closeWorkspace, confirmPayment, decideStudent } from './mutations';
 import { otpAlerts } from './alerts';
 import { ownerInsights, ownerDeviceList, ownerDeviceDetail, ownerSystemHealth, ownerWorkspaceList, ownerWorkspaceDetail, ownerWorkspaceCostMeter } from './insights';
 import { getSystemWhatsappOtpSender, pairSystemWhatsappOtpSender, queueSystemWhatsappNotificationTest, saveSystemWhatsappNotificationSettings } from './system-whatsapp-otp';
+import { getAiReplySettings, saveAiReplySettings } from './ai-reply-settings';
 import { invoiceDetail, listAudit, listInvoices, listStudents, listWorkspaces, studentDetail, workspaceDetail } from './reads';
 
 const uuid = z.string().uuid().transform((v) => v.toLowerCase());
@@ -176,6 +177,15 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
   });
   router.post('/system/whatsapp-otp-sender/notifications/test', permit('owner:insights'), async (request, response) => {
     response.json({ success: true, data: await queueSystemWhatsappNotificationTest(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown') });
+  });
+  router.get('/system/ai-reply', permit('owner:insights'), async (request, response) => {
+    response.json({ success: true, data: await getAiReplySettings(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown') });
+  });
+  router.put('/system/ai-reply', permit('owner:insights'), async (request, response) => {
+    const input = z.object({ base_url: z.string().trim().min(1).max(500), model: z.string().trim().min(1).max(160),
+      api_key: z.string().max(500).optional(), enabled: z.boolean() }).strict().parse(request.body);
+    response.json({ success: true, data: await saveAiReplySettings(db, actorOf(response), response.locals['requestId'] as string,
+      request.ip ?? 'unknown', { baseUrl: input.base_url, model: input.model, ...(input.api_key !== undefined ? { apiKey: input.api_key } : {}), enabled: input.enabled }) });
   });
   router.get('/insights/workspaces', permit('owner:insights'), async (request, response) => {
     const { limit, offset, q } = ownerPageSchema.parse(request.query);

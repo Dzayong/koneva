@@ -15,7 +15,7 @@ export interface AutoReplyRule {
   tenant_id: string;
   device_key: string;
   trigger: { type: 'keyword' | 'regex' | 'all'; pattern: string };
-  response: { type: 'text' | 'template'; content: string; delay_ms: number };
+  response: { type: 'text' | 'template' | 'ai'; content: string; delay_ms: number };
   is_active: boolean;
 }
 
@@ -148,8 +148,9 @@ export async function processAutoReply(
   log: Logger,
   dependencies: AutoReplyDependencies = {},
 ): Promise<boolean> {
-  // A bot answering inside groups reads as spam; auto-reply is for direct chats only.
-  if (message.isGroup) return false;
+  // Auto-replies are deliberately limited to groups the connected number is
+  // already part of. Direct chats and channel/newsletter traffic are excluded.
+  if (!message.isGroup) return false;
 
   const rule = rules.find((candidate) => candidate.tenant_id === message.tenantId && matchesAutoReply(candidate, message.content));
   if (!rule) return false;
@@ -171,12 +172,25 @@ export async function processAutoReply(
     [message.tenantId, message.from, `+${message.from}`],
   );
   const contactName = (contactResult.rows[0] as { name?: string } | undefined)?.name;
-  const content = rule.response.type === 'template'
-    ? renderMessageTemplate(rule.response.content, {
-      nama: contactName ?? message.from, nomor: message.from,
-      tanggal: new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeZone: 'Asia/Jakarta' }).format(new Date()),
-    })
-    : rule.response.content;
+  let content: string;
+  try {
+    content = rule.response.type === 'ai'
+      ? await generateAiReply(rule.id, message.deviceKey, message.content)
+      : rule.response.type === 'template'
+        ? renderMessageTemplate(rule.response.content, {
+          nama: contactName ?? message.from, nomor: message.from,
+          tanggal: new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeZone: 'Asia/Jakarta' }).format(new Date()),
+        })
+        : rule.response.content;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (rule.response.type === 'ai') {
+      await logActivity(queryFn, rule, message, '[AI reply unavailable]', 'failed', reason, null);
+      log.error('AI auto-reply generation failed', { ruleId: rule.id, error: reason });
+      return false;
+    }
+    throw error;
+  }
 
   const decision = dependencies.canSend
     ? await dependencies.canSend(message.deviceKey)
@@ -270,4 +284,22 @@ export async function processAutoReply(
     log.error('Auto-reply failed', { ruleId: rule.id, error: reason });
     return false;
   }
+}
+
+/** Bots proxy only the matched rule id and message; provider key/prompt remain inside the API gateway. */
+async function generateAiReply(ruleId: string, deviceKey: string, inboundText: string): Promise<string> {
+  const baseUrl = process.env['API_GATEWAY_URL'] ?? 'http://api-gateway:8000';
+  const adminKey = process.env['ADMIN_API_KEY'];
+  if (!adminKey) throw new Error('ai_reply_gateway_unavailable');
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/internal/ai-reply`, {
+    method: 'POST',
+    headers: { 'x-admin-key': adminKey, 'content-type': 'application/json' },
+    body: JSON.stringify({ rule_id: ruleId, device_key: deviceKey, message: inboundText.slice(0, 4000) }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`ai_reply_gateway_http_${response.status}`);
+  const payload = await response.json() as { data?: { message?: unknown } };
+  const content = payload.data?.message;
+  if (typeof content !== 'string' || !content.trim()) throw new Error('ai_reply_empty_response');
+  return content.trim().slice(0, 4096);
 }

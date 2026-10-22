@@ -5,14 +5,14 @@ import { apiFailure } from "@/lib/errors";
 
 const fail = (title: string) => (error: unknown) => toast.error(title, { description: apiFailure(error).message });
 
-export function useApiKeys() {
-  return useQuery({ queryKey: ["api-keys"], queryFn: () => api.getApiKeys(), retry: false });
+export function useApiKeys(deviceKey?: string) {
+  return useQuery({ queryKey: ["api-keys", deviceKey], queryFn: () => api.getApiKeys(deviceKey), retry: false });
 }
 
 export function useCreateApiKey() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; scopes: string[]; expires_in_days?: number }) => api.createApiKey(data),
+    mutationFn: (data: { name: string; scopes: string[]; expires_in_days?: number; device_key?: string }) => api.createApiKey(data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["api-keys"] }),
     onError: fail("Gagal membuat kunci"),
   });

@@ -207,6 +207,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
   const [deviceKey, setDeviceKey] = useState(rule?.device_key ?? "");
   const [type, setType] = useState<AutoReplyTriggerType>(rule?.trigger_type ?? "keyword");
   const [pattern, setPattern] = useState(rule?.trigger_pattern ?? "");
+  const [responseType, setResponseType] = useState<"text" | "ai">(rule?.response_type === "ai" ? "ai" : "text");
   const [content, setContent] = useState(rule?.response_content ?? "");
   const [delaySeconds, setDelaySeconds] = useState(String((rule?.delay_ms ?? 3000) / 1000));
 
@@ -233,6 +234,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           device_key: deviceKey,
           trigger_type: type,
           trigger_pattern: type === "all" ? "" : pattern.trim(),
+          response_type: responseType,
           response_content: content,
           delay_ms: Math.round(delay * 1000),
         },
@@ -243,6 +245,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">Balasan otomatis hanya memproses pesan grup/komunitas yang device ini ikuti. Chat pribadi dan saluran tidak diproses.</p>
       <div className="space-y-2">
         <Label>Nomor</Label>
         <Select value={deviceKey} onValueChange={setDeviceKey}>
@@ -273,6 +276,17 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
         </Select>
       </div>
 
+      <div className="space-y-2">
+        <Label>Jenis balasan</Label>
+        <Select value={responseType} onValueChange={(v) => setResponseType(v as "text" | "ai")}>
+          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="text">Balasan tetap</SelectItem>
+            <SelectItem value="ai">AI memakai prompt</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       {type !== "all" && (
         <div className="space-y-2">
           <Label htmlFor="rule-pattern">{type === "keyword" ? "Kata kunci atau frasa" : "Pola"}</Label>
@@ -293,20 +307,20 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
       )}
 
       <div className="space-y-2">
-        <Label htmlFor="rule-content">Isi balasan</Label>
+        <Label htmlFor="rule-content">{responseType === "ai" ? "Prompt: peran dan aturan AI" : "Isi balasan"}</Label>
         <Textarea
           id="rule-content"
           value={content}
           onChange={(e) => setContent(e.target.value)}
           rows={4}
-          placeholder="Halo {nama}! Ada yang bisa kami bantu?"
+          placeholder={responseType === "ai" ? "Kamu adalah admin toko. Jawab pertanyaan tentang harga dengan ramah dan singkat." : "Halo {nama}! Ada yang bisa kami bantu?"}
         />
         <p className="text-xs text-muted-foreground">
-          Variables: {"{nama}"}, {"{nomor}"}, {"{tanggal}"} · Spintax: {"{Halo|Hai|Hi}"}
+          {responseType === "ai" ? "API key dan model AI dikelola admin server. AI dipanggil hanya jika pesan grup cocok dengan pemicu." : <>Variables: {"{nama}"}, {"{nomor}"}, {"{tanggal}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
         </p>
       </div>
 
-      {content.trim() && (
+      {responseType === "text" && content.trim() && (
         <div className="space-y-2">
           <Label>Pratinjau</Label>
           <div className="rounded-2xl bg-muted/60 p-4">

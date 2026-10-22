@@ -1,4 +1,5 @@
 import express, { type ErrorRequestHandler } from 'express';
+import { z } from 'zod';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -6,7 +7,7 @@ import config from '../shared/config';
 import pool from '../shared/database/connection';
 import { getRedisClient } from '../shared/redis';
 import logger from '../shared/utils/logger';
-import { adminAuth, authorize, tenantAuth } from './middleware/auth';
+import { adminAuth, authorize, enforceDeviceKeyScope, tenantAuth } from './middleware/auth';
 import { adminNetworkGuard } from './middleware/admin-access';
 import { assertMailerConfig } from './services/mailer';
 import adminRoutes from './routes/admin.routes';
@@ -35,6 +36,7 @@ import { sweepQuotaHolds } from './services/message.service';
 import { auditTrail } from './middleware/audit';
 import { ServiceError } from './services/service-error';
 import { createOperatorRouter } from './operator/router';
+import { generateInternalAiReply } from './operator/ai-reply-settings';
 import { readOperatorConfig } from './operator/config';
 import { cleanupOperatorData, idempotencyRetentionDays } from './operator/maintenance';
 import { startOtpMaintenance } from './services/otp-maintenance';
@@ -92,10 +94,19 @@ app.get('/ready', async (_request, response) => {
     response.status(503).json({ status: 'not_ready' });
   }
 });
+
+// Private bot-to-gateway proxy: provider credentials and prompts are never injected into bot containers.
+app.post('/internal/ai-reply', adminAuth, async (request, response, next) => {
+  try {
+    const input = z.object({ rule_id: z.string().uuid(), device_key: z.string().regex(/^WAPI-[A-Z0-9-]+$/i).max(64), message: z.string().min(1).max(4000) }).strict().parse(request.body);
+    const message = await generateInternalAiReply(pool, { ruleId: input.rule_id, deviceKey: input.device_key, inboundText: input.message });
+    response.json({ success: true, data: { message } });
+  } catch (error) { next(error); }
+});
 app.use('/auth', authRoutes);
 app.use('/public', publicRoutes);
 app.use(dokuWebhookRoutes);
-app.use('/api/v1', tenantAuth, authorize, auditTrail, messageRoutes, deviceRoutes, tenantRoutes,
+app.use('/api/v1', tenantAuth, enforceDeviceKeyScope, authorize, auditTrail, messageRoutes, deviceRoutes, tenantRoutes,
   contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, campaignRoutes, deviceContentRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes, billingRoutes);
 app.use('/admin', adminNetworkGuard(), adminAuth, adminRoutes);
 app.use((_request, response) => response.status(404).json({
