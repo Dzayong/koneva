@@ -54,7 +54,11 @@ test('PAYG reserves a send before enqueue and rejects an empty wallet', async ()
   db.available = 99;
   await assert.rejects(
     reserveMessageCharge(queryable(db), 'tenant-1', 'message-2', 0),
-    (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'INSUFFICIENT_WALLET_BALANCE'),
+    (error: unknown) => Boolean(
+      error && typeof error === 'object' && 'code' in error && error.code === 'INSUFFICIENT_WALLET_BALANCE'
+      && 'message' in error && typeof error.message === 'string'
+      && error.message.includes('Rp 99') && error.message.includes('Rp 100') && error.message.includes('Rp 1'),
+    ),
   );
   assert.equal(db.reservations.has('message-2:0'), false);
 });

@@ -137,6 +137,7 @@ export default function BroadcastPage() {
     let queuedCount = 0;
     let quotaHoldCount = 0;
     let failedCount = 0;
+    let firstFailureMessage: string | undefined;
 
     for (let i = 0; i < list.length; i++) {
       const recipient = list[i]!;
@@ -157,6 +158,7 @@ export default function BroadcastPage() {
       } catch (err) {
         failedCount++;
         const failure = apiFailure(err, "Gagal");
+        firstFailureMessage ??= failure.message;
         const guidance = sendRejectionGuidance(failure.code);
         const message = guidance ? `${guidance.title}: ${guidance.description}` : failure.message;
         setRecipients((prev) =>
@@ -172,11 +174,11 @@ export default function BroadcastPage() {
     if (failedCount === 0 && quotaHoldCount === 0) {
       toast.success("Semua pesan masuk antrean", { description: outcome });
     } else if (queuedCount > 0) {
-      toast.warning("Broadcast selesai dengan kendala", { description: outcome });
+      toast.warning("Broadcast selesai dengan kendala", { description: [outcome, firstFailureMessage].filter(Boolean).join(". ") });
     } else if (quotaHoldCount > 0 && failedCount === 0) {
       toast.warning("Pesan belum masuk antrean", { description: outcome });
     } else {
-      toast.error("Tidak ada pesan yang masuk antrean", { description: outcome });
+      toast.error("Tidak ada pesan yang masuk antrean", { description: [outcome, firstFailureMessage].filter(Boolean).join(". ") });
     }
   };
 

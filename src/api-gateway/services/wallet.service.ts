@@ -33,7 +33,15 @@ export async function reserveMessageCharge(db: Db, tenantId: string, messageId: 
   )).rows[0];
   const available = idr(account?.available_idr);
   if (available < settings.pricePerMessageIdr) {
-    throw new ServiceError(402, 'INSUFFICIENT_WALLET_BALANCE', 'Saldo tidak cukup untuk mengirim pesan. Isi saldo terlebih dahulu.');
+    const rupiah = (amount: number) => new Intl.NumberFormat('id-ID', {
+      style: 'currency', currency: 'IDR', maximumFractionDigits: 0,
+    }).format(amount);
+    const shortfall = settings.pricePerMessageIdr - available;
+    throw new ServiceError(
+      402,
+      'INSUFFICIENT_WALLET_BALANCE',
+      `Saldo PAYG tidak cukup. Saldo tersedia ${rupiah(available)}; tarif ${rupiah(settings.pricePerMessageIdr)} per pesan. Tambahkan minimal ${rupiah(shortfall)} untuk mengantrekan satu pesan berikutnya. Isi saldo melalui Tagihan → Saldo PAYG.`,
+    );
   }
 
   const reserved = await db.query(
