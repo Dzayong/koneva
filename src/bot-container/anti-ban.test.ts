@@ -30,6 +30,28 @@ test('warm-up stages match the spec tiers', () => {
   assert.equal(getWarmupStage(30).maxMessagesPerDay, 50);
 });
 
+test('one-message warm-up approval bypasses only the warm-up gate, not caps or paused-device checks', async () => {
+  const now = new Date('2026-09-24T05:00:00Z');
+  const newDevice: FakeDeviceRow = {
+    id: 'device-warmup-approval', tenant_id: 'tenant-1', device_key: 'WAPI-WARMUP-APPROVAL', status: 'online', health_score: 50,
+    created_at: new Date(now.getTime() - 60 * 60_000), warmup_started_at: null, warmup_completed_at: null, paused_until: null,
+  };
+  const queryFn = makeFakeQueryFn(newDevice, 0);
+  const input = { queryFn, isProactive: true, recipient: '6281234567890', content: 'Hai', now };
+  const held = await canSendMessage(newDevice.device_key, input);
+  assert.equal(held.reason, 'proactive_not_allowed_in_warmup');
+
+  const approved = await canSendMessage(newDevice.device_key, { ...input, allowWarmupOverride: true });
+  assert.equal(approved.allowed, true, `denied: ${approved.reason}`);
+
+  const capped = await canSendMessage(newDevice.device_key, { ...input, allowWarmupOverride: true, queryFn: makeFakeQueryFn(newDevice, 5) });
+  assert.equal(capped.reason, 'daily_cap_reached');
+
+  const paused = { ...newDevice, status: 'paused' };
+  const blocked = await canSendMessage(paused.device_key, { ...input, allowWarmupOverride: true, queryFn: makeFakeQueryFn(paused, 0) });
+  assert.equal(blocked.reason, 'device_paused');
+});
+
 test('daily cap follows health score tiers', () => {
   assert.equal(getDailyCapByHealthScore(95), 100);
   assert.equal(getDailyCapByHealthScore(90), 100);

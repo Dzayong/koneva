@@ -3,8 +3,14 @@
 import { messageErrorText } from "@/lib/message-errors";
 
 import { ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import { RotateCcw } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { MessageStatusBadge } from "@/components/messages/message-status-badge";
 import { cn, formatDate, formatPhoneNumber, formatShortRelative } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { apiFailure } from "@/lib/errors";
 import type { Message } from "@/lib/types";
 
 export function messageNumber(message: Message): string {
@@ -65,6 +71,17 @@ export function MessageRow({
 }
 
 export function MessageDetail({ message, contactName }: { message: Message; contactName?: string }) {
+  const queryClient = useQueryClient();
+  const canRetry = message.direction === "outbound" && message.status === "failed" && message.error_message !== "delivery_uncertain";
+  const retry = useMutation({
+    mutationFn: () => api.retryMessage(message.id),
+    onSuccess: () => {
+      toast.success("Pesan dipilih masuk antrean kirim ulang");
+      void queryClient.invalidateQueries({ queryKey: ["messages"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+    },
+    onError: (error) => toast.error("Pesan tidak bisa dikirim ulang", { description: apiFailure(error).message }),
+  });
   const inbound = message.direction === "inbound";
   const number = messageNumber(message);
   const rows: Array<[string, React.ReactNode]> = [
@@ -92,6 +109,23 @@ export function MessageDetail({ message, contactName }: { message: Message; cont
         )}>
           {messageErrorText(message.error_message)}
         </p>
+      )}
+      {canRetry && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-3">
+          <p className="text-sm text-muted-foreground">Kirim ulang hanya untuk pesan gagal yang kamu pilih. Pesan ini tidak akan dicoba ulang otomatis.</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={retry.isPending}
+            onClick={() => {
+              if (window.confirm("Kirim ulang pesan ini satu kali? Pastikan pesan memang belum terkirim ke WhatsApp.")) retry.mutate();
+            }}
+          >
+            <RotateCcw className="mr-2 h-4 w-4" />
+            {retry.isPending ? "Memasukkan…" : "Kirim ulang pesan ini"}
+          </Button>
+        </div>
       )}
       <dl className="divide-y rounded-2xl border text-sm">
         {rows.map(([label, value]) => (

@@ -108,6 +108,7 @@ export interface SendMessageRequest {
   media_type?: "image" | "video" | "document";
   external_id?: string;
   reply_to_message_id?: string;
+  allow_warmup_override?: boolean;
 }
 
 export interface SendMessageResponse {

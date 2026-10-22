@@ -131,6 +131,7 @@ interface MessageRow {
   system_otp: boolean;
   system_notification: boolean;
   reply_to_message_id: string | null;
+  allow_warmup_override: boolean;
   created_at: Date;
   queue_started_at: Date;
   send_started_at: Date | null;
@@ -156,6 +157,7 @@ function mapMessageRow(row: MessageRow): MessageRecord {
     ...(row.system_otp ? { systemOtp: true } : {}),
     ...(row.system_notification ? { systemNotification: true } : {}),
     ...(row.reply_to_message_id ? { replyToMessageId: row.reply_to_message_id } : {}),
+    ...(row.allow_warmup_override ? { allowWarmupOverride: true } : {}),
     createdAt: row.created_at,
     queueStartedAt: row.queue_started_at,
   };
@@ -166,7 +168,7 @@ async function getMessageById(id: string, queryFn: QueryFn): Promise<MessageReco
     `SELECT id, tenant_id, device_id, device_key, to_number, content, media_url, type, status,
             whatsapp_message_id, error_message, priority, COALESCE(quota_exempt, false) AS quota_exempt,
             COALESCE(system_otp, false) AS system_otp, COALESCE(system_notification, false) AS system_notification,
-            reply_to_message_id, created_at, queue_started_at, send_started_at
+            reply_to_message_id, allow_warmup_override, created_at, queue_started_at, send_started_at
      FROM messages WHERE id = $1`,
     [id],
   );
@@ -540,6 +542,7 @@ async function processJobBody(
     recipient: consentRecipient,
     hasMedia: message.type !== 'text',
     isProactive,
+    allowWarmupOverride: message.allowWarmupOverride,
     priority: message.priority,
     ...(deps.now ? { now: deps.now() } : {}),
   });
@@ -658,6 +661,7 @@ async function processJobBody(
         recipient: consentRecipient,
         hasMedia: message.type !== 'text',
         isProactive: groupReply ? !currentReplyContext : isProactive,
+        allowWarmupOverride: message.allowWarmupOverride,
         priority: message.priority,
         ...(deps.now ? { now: deps.now() } : {}),
       });

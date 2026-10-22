@@ -198,6 +198,8 @@ export interface CanSendMessageOptions {
   /** 'urgent' (OTP, transactional) skips pacing, active hours, rests and content rules; caps and pauses still apply. */
   priority?: MessagePriority | undefined;
   isProactive?: boolean | undefined;
+  /** Explicit user approval for this message only; never bypasses other anti-ban checks. */
+  allowWarmupOverride?: boolean | undefined;
   hasMedia?: boolean | undefined;
   content?: string | undefined;
   recipient?: string | undefined;
@@ -322,12 +324,16 @@ export async function canSendMessage(
     }
   }
 
-  if (!urgent && options.isProactive && !stage.proactiveAllowed) {
+  if (!urgent && options.isProactive && !stage.proactiveAllowed && !options.allowWarmupOverride) {
     return denial('proactive_not_allowed_in_warmup', { healthScore, dailyCap, sentToday, warmupDay });
   }
 
-  if (!urgent && options.hasMedia && !stage.mediaAllowed) {
+  if (!urgent && options.hasMedia && !stage.mediaAllowed && !options.allowWarmupOverride) {
     return denial('media_not_allowed_in_warmup', { healthScore, dailyCap, sentToday, warmupDay });
+  }
+
+  if (options.allowWarmupOverride && ((!stage.proactiveAllowed && options.isProactive) || (!stage.mediaAllowed && options.hasMedia))) {
+    logger.warn('User approved warm-up restriction override for one message', { deviceKey, deviceId: device.id, warmupDay });
   }
 
   if (!urgent && options.content !== undefined) {

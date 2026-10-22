@@ -187,9 +187,23 @@ class ApiClient {
 
   // ---- Tenant API (/api/v1/*, `apikey` header) ---------------------------
 
+  private async postWithWarmupApproval<T>(path: string, body: object): Promise<T> {
+    try {
+      const response = await this.client.post<T>(path, body, { skipErrorToast: true });
+      return response.data;
+    } catch (error) {
+      const failure = error as AxiosError<{ error?: { code?: string; message?: string } }>;
+      const warning = failure.response?.data?.error;
+      if (warning?.code !== "WARMUP_CONFIRMATION_REQUIRED" || (body as { allow_warmup_override?: boolean }).allow_warmup_override === true || typeof window === "undefined") throw error;
+      const approved = window.confirm(`${warning.message ?? "Nomor masih dalam masa pemanasan."}\n\nKirim satu pesan ini sekarang? Persetujuan ini hanya berlaku untuk pesan yang dipilih. Batas harian, persetujuan penerima, koneksi, dan pemeriksaan keselamatan lainnya tetap berlaku.`);
+      if (!approved) throw error;
+      const response = await this.client.post<T>(path, { ...body, allow_warmup_override: true }, { skipErrorToast: true });
+      return response.data;
+    }
+  }
+
   async sendMessage(data: SendMessageRequest): Promise<SendMessageResponse> {
-    const response = await this.client.post<SendMessageResponse>("/api/v1/message/send", data);
-    return response.data;
+    return this.postWithWarmupApproval<SendMessageResponse>("/api/v1/message/send", data);
   }
 
   async recordBroadcastConsent(recipients: string[]): Promise<{ recorded: number }> {
@@ -216,6 +230,10 @@ class ApiClient {
   async getMessage(id: string): Promise<Message> {
     const response = await this.client.get<ApiSuccess<Message>>(`/api/v1/messages/${id}`);
     return response.data.data;
+  }
+
+  async retryMessage(id: string): Promise<{ message_id: string; status: string }> {
+    return this.postWithWarmupApproval<{ message_id: string; status: string }>(`/api/v1/messages/${id}/retry`, {});
   }
 
   async getDevices(): Promise<Device[]> {

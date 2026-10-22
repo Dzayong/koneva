@@ -9,6 +9,7 @@ const REASONS: Record<string, string> = {
   health_score_too_low: "Kesiapan nomor terlalu rendah, pengiriman ditahan untuk melindungi nomor.",
   proactive_not_allowed_in_warmup: "Nomor baru belum boleh memulai percakapan selama 2 hari pertama. Pesan menunggu sampai hari ke-3, atau bisa dikirim lebih cepat jika penerima menghubungi Anda lebih dulu.",
   media_not_allowed_in_warmup: "Nomor baru belum boleh mengirim media.",
+  queue_expired: "Pesan tidak dikirim karena terlalu lama menunggu di antrean (batas saat ini 15 menit). Periksa koneksi dan status nomor, lalu pilih Kirim ulang jika pesan masih perlu dikirim.",
   content_rejected: "Isi pesan ditolak filter spam.",
   recipient_opted_out: "Penerima pernah meminta berhenti, jadi pesan proaktif tidak dikirim.",
   lost_in_queue: "Pesan hilang dari antrean saat sistem dimulai ulang. Kirim ulang bila perlu.",

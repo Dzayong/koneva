@@ -18,6 +18,7 @@ export const sendSchema = z.object({
   media_type: z.enum(MEDIA_TYPES).default('image'),
   external_id: z.string().max(64).optional(),
   reply_to_message_id: z.string().uuid().optional(),
+  allow_warmup_override: z.boolean().default(false),
   priority: z.enum(['normal', 'urgent']).default('normal'),
   // Tenant-provided OTP text is not proof that KONEVA generated a transactional OTP.
   otp_code: z.never().optional(),
@@ -61,10 +62,11 @@ router.get(
 
 router.post(
   '/messages/:id/retry',
-  validate({ params: z.object({ id: z.string().uuid() }) }),
+  validate({ params: z.object({ id: z.string().uuid() }), body: z.object({ allow_warmup_override: z.boolean().default(false) }).strict() }),
   async (request, response) => {
     const { id } = request.validated!.params as { id: string };
-    const message = await retryMessage(request.tenant!.id, id);
+    const body = request.validated!.body as { allow_warmup_override: boolean };
+    const message = await retryMessage(request.tenant!.id, id, body.allow_warmup_override);
     response.status(202).json({ success: true, data: { message_id: message.id, status: 'queued' } });
   },
 );

@@ -79,6 +79,46 @@ export async function queueSystemNotification(tenantId: string, eventId: string,
   return queueMessageInternal(tenantId, { ...input, external_id: `snotif_${eventId}` }, 'notification', delayMs);
 }
 
+function assertWarmupApproval(
+  warmupStartedAt: Date | null,
+  deviceCreatedAt: Date,
+  hasMedia: boolean,
+  isProactive: boolean,
+  approved: boolean,
+): void {
+  if (approved) return;
+  const startedAt = warmupStartedAt ?? deviceCreatedAt;
+  const minimumHours = hasMedia ? 96 : 48;
+  const deadline = new Date(startedAt.getTime() + minimumHours * 60 * 60_000);
+  const now = Date.now();
+  const warmupDay = Math.floor((now - startedAt.getTime()) / 86_400_000) + 1;
+  const proactiveBlocked = isProactive && warmupDay < 3;
+  const mediaBlocked = hasMedia && warmupDay < 5;
+  if (!proactiveBlocked && !mediaBlocked) return;
+  const remainingMs = Math.max(0, deadline.getTime() - now);
+  const hours = Math.floor(remainingMs / 3_600_000);
+  const minutes = Math.ceil((remainingMs % 3_600_000) / 60_000);
+  const waitText = hours ? `${hours} jam ${minutes} menit` : `${minutes} menit`;
+  throw new ServiceError(
+    409,
+    'WARMUP_CONFIRMATION_REQUIRED',
+    `Nomor masih dalam masa pemanasan KONEVA. Perkiraan tunggu ${waitText}. Pilih “Kirim sekarang” hanya jika kamu memahami risiko pembatasan WhatsApp.`,
+  );
+}
+
+async function hasRecentInboundForRecipient(client: Pick<PoolClient, 'query'>, deviceId: string, recipient: string): Promise<boolean> {
+  if (recipient.endsWith('@g.us')) return false;
+  const row = (await client.query<{ found: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM messages WHERE device_id=$1 AND direction='inbound'
+         AND regexp_replace(COALESCE(from_number,''), '[^0-9]', '', 'g')=$2
+         AND created_at >= now()-interval '24 hours'
+     ) AS found`,
+    [deviceId, recipient.replace(/\D/g, '')],
+  )).rows[0];
+  return row?.found === true;
+}
+
 async function queueMessageInternal(tenantId: string, input: SendMessageRequest, systemKind: 'otp' | 'notification' | null, notificationDelayMs = 0): Promise<MessageRow> {
   const groupLockRecipient = input.to.endsWith('@g.us') && input.reply_to_message_id
     ? ((await pool.query<{ from_number: string | null }>(
@@ -178,8 +218,8 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
     } else {
       await assertSubscriptionActive(client, tenantId);
     }
-    const deviceResult = await client.query<{ id: string; status: string }>(
-      'SELECT id, status FROM devices WHERE tenant_id = $1 AND device_key = $2',
+    const deviceResult = await client.query<{ id: string; status: string; created_at: Date; warmup_started_at: Date | null }>(
+      'SELECT id, status, created_at, warmup_started_at FROM devices WHERE tenant_id = $1 AND device_key = $2',
       [tenantId, input.device_key],
     );
     const device = deviceResult.rows[0];
@@ -212,6 +252,17 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
     if (replyContext) await assertReplyRecipientAllowed(client, tenantId, replyRecipient);
     else await assertRecipientConsent(client, tenantId, input.to, exempt);
 
+    if (!systemManaged) {
+      const recentInbound = replyContext || await hasRecentInboundForRecipient(client, device.id, input.to);
+      assertWarmupApproval(
+        device.warmup_started_at,
+        device.created_at,
+        Boolean(input.media_url),
+        !recentInbound,
+        input.allow_warmup_override === true,
+      );
+    }
+
     // Exempt sends skip the quota check entirely and never count toward used_messages. Everything else is held,
     // not dropped or rejected, once the regular quota is spent -- a periodic sweep (see sweepQuotaHolds) and every
     // fresh billing window release held messages in order once headroom exists (see releaseHeldMessages).
@@ -225,12 +276,13 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
 
     const result = await client.query<MessageRow>(
       `INSERT INTO messages
-         (tenant_id, device_id, device_key, to_number, chat_jid, content, external_id, status, priority, type, media_url, quota_exempt, system_otp, system_notification, reply_to_message_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
+         (tenant_id, device_id, device_key, to_number, chat_jid, content, external_id, status, priority, type, media_url, quota_exempt, system_otp, system_notification, reply_to_message_id, allow_warmup_override)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
       [tenantId, device.id, input.device_key, input.to,
         input.to.endsWith('@g.us') ? input.to : `${input.to.replace(/\D/g, '')}@s.whatsapp.net`,
         input.message, input.external_id ?? null, status, priority,
-        input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt, systemOtp, systemNotification, input.reply_to_message_id ?? null],
+        input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt, systemOtp, systemNotification, input.reply_to_message_id ?? null,
+        !systemManaged && input.allow_warmup_override === true],
     );
     if (status === 'queued' && !exempt) await client.query('UPDATE tenants SET used_messages = used_messages + 1 WHERE id = $1', [tenantId]);
     return { message: result.rows[0]!, reused: false };
@@ -382,14 +434,19 @@ export async function listMessages(
   };
 }
 
-export async function retryMessage(tenantId: string, messageId: string): Promise<MessageRow> {
+export async function retryMessage(tenantId: string, messageId: string, allowWarmupOverride = false): Promise<MessageRow> {
   // A retry is a new send: it needs a live plan and an online number, exactly like the first attempt (it does not use quota again).
   await assertSubscriptionActive(pool, tenantId);
-  const target = (await pool.query<{ device_status: string | null; device_id: string | null; to_number: string; quota_exempt: boolean; error_message: string | null; reply_to_message_id: string | null }>(
+  const target = (await pool.query<{ device_status: string | null; device_id: string | null; to_number: string; quota_exempt: boolean; error_message: string | null; reply_to_message_id: string | null; type: string; device_created_at: Date | null; warmup_started_at: Date | null }>(
     `SELECT d.status AS device_status, m.device_id, m.to_number, COALESCE(m.quota_exempt, false) AS quota_exempt,
-            m.error_message, m.reply_to_message_id
+            m.error_message, m.reply_to_message_id, m.type, d.created_at AS device_created_at, d.warmup_started_at
      FROM messages m LEFT JOIN devices d ON d.id = m.device_id WHERE m.id = $1 AND m.tenant_id = $2 AND m.system_otp = false AND system_notification = false`, [messageId, tenantId])).rows[0];
   const retry = async (): Promise<MessageRow> => {
+  if (target?.device_id && target.device_created_at) {
+    const recentInbound = Boolean(target.reply_to_message_id)
+      || await hasRecentInboundForRecipient(pool, target.device_id, target.to_number);
+    assertWarmupApproval(target.warmup_started_at, target.device_created_at, target.type !== 'text', !recentInbound, allowWarmupOverride);
+  }
   if (target?.error_message === 'delivery_uncertain') {
     throw new ServiceError(409, 'DELIVERY_UNCERTAIN_MANUAL_REVIEW_REQUIRED', 'WhatsApp may already have accepted this message. Check the chat before composing a new message; this message cannot be retried.');
   }
@@ -418,10 +475,10 @@ export async function retryMessage(tenantId: string, messageId: string): Promise
   }
   if (target && target.device_status !== 'online') throw new ServiceError(503, 'DEVICE_OFFLINE', 'Device is not online');
   const result = await pool.query<MessageRow>(
-    `UPDATE messages SET status='queued', queue_started_at=now(), error_message=NULL
+    `UPDATE messages SET status='queued', queue_started_at=now(), error_message=NULL, allow_warmup_override=$3
      WHERE id=$1 AND tenant_id=$2 AND system_otp=false AND system_notification=false
        AND status IN ('failed','blocked') AND COALESCE(error_message,'') <> 'delivery_uncertain' RETURNING *`,
-    [messageId, tenantId],
+    [messageId, tenantId, allowWarmupOverride],
   );
   const message = result.rows[0];
   if (!message) {
