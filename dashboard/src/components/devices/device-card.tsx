@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
-import { MoreHorizontal, Pause, Play, QrCode, RefreshCw, Trash2 } from "lucide-react";
+import { KeyRound, Loader2, MoreHorizontal, Pause, Play, Plus, QrCode, RefreshCw, RotateCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,8 +17,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DeviceStatusBadge } from "@/components/devices/device-status-badge";
 import { usePermissions } from "@/hooks/use-me";
 import { useDeleteDevice, usePauseDevice, useReconnectDevice, useResumeDevice } from "@/hooks/use-devices";
+import { useCreateApiKey, useRotateApiKey } from "@/hooks/use-developer";
+import { SecretReveal } from "@/components/developers/secret-reveal";
 import { cn, formatDate, formatPhoneNumber, getHealthConfig } from "@/lib/utils";
-import type { Device } from "@/lib/types";
+import type { ApiKeyRecord, CreatedApiKey, Device } from "@/lib/types";
 
 const RING_RADIUS = 28;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
@@ -49,12 +53,111 @@ function HealthRing({ score }: { score: number }) {
   );
 }
 
+function DeviceCardApiKeyAction({
+  deviceKey,
+  deviceLabel,
+  apiKey,
+  loading,
+  error,
+  onRetry,
+}: {
+  deviceKey: string;
+  deviceLabel: string;
+  apiKey?: ApiKeyRecord;
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+}) {
+  const create = useCreateApiKey();
+  const rotate = useRotateApiKey();
+  const [confirmRotate, setConfirmRotate] = useState(false);
+  const [created, setCreated] = useState<CreatedApiKey | null>(null);
+
+  const createKey = () => create.mutate({
+    name: `${deviceLabel || deviceKey} integration`.slice(0, 80),
+    device_key: deviceKey,
+    scopes: ["messages:send", "messages:read", "devices:read"],
+  }, { onSuccess: setCreated });
+
+  const rotateKey = () => {
+    if (!apiKey) return;
+    rotate.mutate(apiKey.id, { onSuccess: (key) => { setConfirmRotate(false); setCreated(key); } });
+  };
+
+  return (
+    <>
+      <div className="relative mt-4 flex min-w-0 items-center justify-between gap-2 rounded-xl border bg-muted/20 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+          <div className="min-w-0">
+            <p className="text-[11px] leading-4 text-muted-foreground">API key device</p>
+            {loading ? <p className="text-xs">Memeriksa…</p> : error ? (
+              <button type="button" className="text-xs text-destructive underline underline-offset-2" onClick={onRetry}>Gagal dimuat · coba lagi</button>
+            ) : apiKey ? (
+              <p className="truncate font-mono text-xs">{apiKey.prefix}••••••••</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">Belum dibuat</p>
+            )}
+          </div>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          disabled={loading || error || create.isPending || rotate.isPending}
+          onClick={() => apiKey ? setConfirmRotate(true) : createKey()}
+        >
+          {create.isPending || rotate.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : apiKey ? <RotateCw className="mr-1.5 h-3.5 w-3.5" /> : <Plus className="mr-1.5 h-3.5 w-3.5" />}
+          {apiKey ? "Putar & salin" : "Buat & salin"}
+        </Button>
+      </div>
+
+      <Dialog open={confirmRotate} onOpenChange={setConfirmRotate}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Putar API key device?</DialogTitle>
+            <DialogDescription>
+              KONEVA hanya menyimpan hash, jadi key lama tidak bisa ditampilkan lagi. Key baru akan ditampilkan sekali untuk disalin. Key lama masih berlaku 24 jam; setelah itu, perbarui key di sistem integrasi Anda.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmRotate(false)}>Batal</Button>
+            <Button type="button" onClick={rotateKey} disabled={rotate.isPending}>
+              {rotate.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Putar dan tampilkan
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {created && (
+        <SecretReveal
+          open
+          title="API key siap disalin"
+          description={`Key untuk ${deviceLabel || deviceKey} terikat ke device ini dan hanya ditampilkan sekarang.`}
+          secret={created.key}
+          onDone={() => setCreated(null)}
+        />
+      )}
+    </>
+  );
+}
+
 export function DeviceCard({
   device,
   onShowQr,
+  apiKey,
+  apiKeysLoading = false,
+  apiKeysError = false,
+  onRetryApiKeys = () => undefined,
 }: {
   device: Device;
   onShowQr: (deviceKey: string) => void;
+  apiKey?: ApiKeyRecord;
+  apiKeysLoading?: boolean;
+  apiKeysError?: boolean;
+  onRetryApiKeys?: () => void;
 }) {
   const reduceMotion = useReducedMotion();
   const pauseDevice = usePauseDevice();
@@ -62,7 +165,7 @@ export function DeviceCard({
   const reconnectDevice = useReconnectDevice();
   const deleteDevice = useDeleteDevice();
   const { can } = usePermissions();
-  const canWrite = can("devices:write"), canDelete = can("devices:delete");
+  const canWrite = can("devices:write"), canDelete = can("devices:delete"), canManageKeys = can("keys:manage");
 
   const handleDelete = () => {
     if (window.confirm(`Hapus device "${device.label || device.device_key}"? Device akan diputus dan tidak bisa dikembalikan.`)) {
@@ -99,6 +202,17 @@ export function DeviceCard({
         <DeviceStatusBadge status={device.status} />
         <span>{device.last_connected ? formatDate(device.last_connected) : "Belum pernah tersambung"}</span>
       </div>
+
+      {canManageKeys && (
+        <DeviceCardApiKeyAction
+          deviceKey={device.device_key}
+          deviceLabel={device.label || ""}
+          apiKey={apiKey}
+          loading={apiKeysLoading}
+          error={apiKeysError}
+          onRetry={onRetryApiKeys}
+        />
+      )}
 
       <div className="relative mt-5 flex items-center gap-2">
         <Button variant="outline" size="sm" asChild>

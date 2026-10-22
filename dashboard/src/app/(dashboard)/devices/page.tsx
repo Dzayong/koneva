@@ -23,6 +23,7 @@ import {
 import { AddDeviceForm } from "@/components/devices/add-device-form";
 import { DeviceCard, DeviceCardSkeleton } from "@/components/devices/device-card";
 import { QRCodeDialog } from "@/components/devices/qr-code-dialog";
+import { useApiKeys } from "@/hooks/use-developer";
 import { useDevices } from "@/hooks/use-devices";
 import { usePermissions } from "@/hooks/use-me";
 import { useUrlFlag } from "@/hooks/use-url-flag";
@@ -31,6 +32,8 @@ export default function DevicesPage() {
   const { data: devices, isLoading, refetch, isRefetching } = useDevices();
   const router = useRouter();
   const { can } = usePermissions();
+  const canManageKeys = can("keys:manage");
+  const { data: apiKeyData, isLoading: apiKeysLoading, isError: apiKeysError, refetch: refetchApiKeys } = useApiKeys(undefined, canManageKeys);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [manualAdd, setManualAdd] = useState(false);
@@ -111,7 +114,15 @@ export default function DevicesPage() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <AnimatePresence mode="popLayout">
             {filtered.map((device) => (
-              <DeviceCard key={device.id} device={device} onShowQr={setQrDeviceKey} />
+              <DeviceCard
+                key={device.id}
+                device={device}
+                onShowQr={setQrDeviceKey}
+                apiKey={apiKeyData?.keys.find((key) => key.device_key === device.device_key && !key.revoked_at && (!key.expires_at || new Date(key.expires_at) > new Date()))}
+                apiKeysLoading={apiKeysLoading}
+                apiKeysError={apiKeysError}
+                onRetryApiKeys={() => void refetchApiKeys()}
+              />
             ))}
           </AnimatePresence>
         </div>

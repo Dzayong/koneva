@@ -5,8 +5,8 @@ import { apiFailure } from "@/lib/errors";
 
 const fail = (title: string) => (error: unknown) => toast.error(title, { description: apiFailure(error).message });
 
-export function useApiKeys(deviceKey?: string) {
-  return useQuery({ queryKey: ["api-keys", deviceKey], queryFn: () => api.getApiKeys(deviceKey), retry: false });
+export function useApiKeys(deviceKey?: string, enabled = true) {
+  return useQuery({ queryKey: ["api-keys", deviceKey], queryFn: () => api.getApiKeys(deviceKey), retry: false, enabled });
 }
 
 export function useCreateApiKey() {
