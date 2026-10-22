@@ -25,7 +25,7 @@ Implementation checklist:
 - [x] Add per-device sent/failed counts and charged totals.
 - [ ] Send the owner a WhatsApp OTP-number notification when remaining balance reaches 20% of the last top-up amount. This threshold needs to be defined against top-up amount now that package balances are retired.
 - [ ] Add concurrency, duplicate-delivery, crash/uncertain-outcome, and insufficient-funds integration tests; unit coverage is in place for reserve, insufficient balance, and idempotent top-up.
-- [ ] Deploy migrations and code, verify runtime, then push the completed PAYG change.
+- [x] Apply migration 061 and deploy the PAYG code to the local personal stack; post-deploy health checks passed and PAYG remains disabled pending operator pricing/activation. Code pushed in `cb59d8a`.
 
 ## Remaining after PAYG
 
