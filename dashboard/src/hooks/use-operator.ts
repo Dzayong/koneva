@@ -129,6 +129,23 @@ export function useSavePaygSettings() {
     void qc.invalidateQueries({ queryKey: [OP, "audit"] });
   } });
 }
+export function useSignupVouchers(enabled = true) {
+  return useQuery({ queryKey: [OP, "signup-vouchers"], queryFn: () => operatorApi.listSignupVouchers(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always" });
+}
+export function useCreateSignupVoucher() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: operatorApi.createSignupVoucher, onSuccess: () => {
+    void qc.invalidateQueries({ queryKey: [OP, "signup-vouchers"] });
+    void qc.invalidateQueries({ queryKey: [OP, "audit"] });
+  } });
+}
+export function useDisableSignupVoucher() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: operatorApi.disableSignupVoucher, onSuccess: () => {
+    void qc.invalidateQueries({ queryKey: [OP, "signup-vouchers"] });
+    void qc.invalidateQueries({ queryKey: [OP, "audit"] });
+  } });
+}
 export function useOwnerWorkspaces(params: { q?: string; limit?: number; offset?: number; plan?: string; status?: string }, enabled = true) {
   return useQuery({ queryKey: [OP, "owner-workspaces", params], queryFn: () => operatorApi.listOwnerWorkspaces(params), enabled, retry: retryTransient, placeholderData: keepPreviousData, refetchInterval: 60_000 });
 }

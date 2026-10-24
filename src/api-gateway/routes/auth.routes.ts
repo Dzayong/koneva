@@ -23,6 +23,7 @@ export const signupSchema = z.object({
   workspace_name: z.string().trim().min(2).max(80).optional(),
   verification_method: z.literal('whatsapp').default('whatsapp'),
   phone_number: z.string().trim().min(8).max(24).regex(/^\+?[0-9\s().-]+$/),
+  voucher_code: z.string().trim().max(40).optional(),
   accept_terms: z.literal(true, { error: 'You must accept the terms to create an account' }),
 }).strict();
 

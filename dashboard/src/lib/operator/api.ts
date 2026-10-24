@@ -1,13 +1,13 @@
 import { operatorClient } from "./client";
 import {
-  parseAudit, parseOtpAlerts, parseOwnerInsights, parseOwnerDeviceSummary, parseOwnerDeviceDetail, parseOwnerSystemHealth, parseSystemWhatsappOtpSender, parseAiReplyProviderSettings, parseOwnerWorkspaceSummary, parseOwnerWorkspaceDetailData,
+  parseAudit, parseOtpAlerts, parseOwnerInsights, parseOwnerDeviceSummary, parseOwnerDeviceDetail, parseOwnerSystemHealth, parseSystemWhatsappOtpSender, parseAiReplyProviderSettings, parseOwnerWorkspaceSummary, parseOwnerWorkspaceDetailData, parseSignupVoucher, parseCreatedSignupVoucher,
   parseConfirmResult, parseDecisionResult, parseInvoiceDetail, parseInvoiceSummary, parseMe, parsePagination, parseSignedIn,
   parseStudentDetail, parseStudentSummary, parseWorkspace, parseOwnerWorkspaceCostMeter,
   type AuditEntry, type OtpAlerts, type SignedIn, type ConfirmPaymentInput, type ConfirmPaymentResult, type DecisionInput, type DecisionResult, type InvoiceDetail,
   type InvoiceSummary, type InvoiceStatus, type OperatorMe, type OwnerInsights, type OwnerDeviceSummary, type OwnerDeviceDetail, type OwnerSystemHealth, type SystemWhatsappOtpSender,
   type OwnerWorkspaceSummary, type OwnerWorkspaceDetailData, type OwnerWorkspaceCostMeter, type Page, type StudentRequestDetail, type StudentRequestSummary,
   type StudentStatus, type WorkspaceDetail,
-  type CloseOwnerWorkspaceInput, type CloseOwnerWorkspaceResult, type AiReplyProviderSettings,
+  type CloseOwnerWorkspaceInput, type CloseOwnerWorkspaceResult, type AiReplyProviderSettings, type SignupVoucher, type CreatedSignupVoucher,
 } from "./types";
 
 /** Every path below is part of the PROPOSED contract (dashboard/docs/operator-panel-contract.md). */
@@ -114,6 +114,15 @@ export const operatorApi = {
     const d = object((await operatorClient.request("/system/payg", { method: "PUT", body: input }))?.data);
     return { enabled: d["enabled"] === true, price_per_message_idr: typeof d["price_per_message_idr"] === "number" ? d["price_per_message_idr"] : null,
       updated_at: typeof d["updated_at"] === "string" ? d["updated_at"] : null };
+  },
+  async listSignupVouchers(params: { limit?: number; offset?: number } = {}): Promise<Page<SignupVoucher>> {
+    return page(await operatorClient.request("/signup-vouchers", { query: { limit: params.limit ?? PAGE_SIZE, offset: params.offset ?? 0 } }), parseSignupVoucher);
+  },
+  async createSignupVoucher(input: { credit_idr: number; max_redemptions: number; expires_at?: string | null }): Promise<CreatedSignupVoucher> {
+    return parseCreatedSignupVoucher((await operatorClient.request("/signup-vouchers", { method: "POST", body: input }))?.data);
+  },
+  async disableSignupVoucher(id: string): Promise<void> {
+    await operatorClient.request(`/signup-vouchers/${encodeURIComponent(id)}/disable`, { method: "POST", body: {} });
   },
   async listOwnerWorkspaces(params: { q?: string; limit?: number; offset?: number; plan?: string; status?: string }): Promise<Page<OwnerWorkspaceSummary>> {
     return page(await operatorClient.request("/insights/workspaces", { query: { q: params.q, limit: params.limit ?? OWNER_PAGE_SIZE, offset: params.offset ?? 0, plan: params.plan, status: params.status } }), parseOwnerWorkspaceSummary);

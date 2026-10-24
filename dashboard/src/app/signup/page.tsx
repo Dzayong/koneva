@@ -20,6 +20,7 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [phone, setPhone] = useState("");
+  const [voucherCode, setVoucherCode] = useState("");
   const [terms, setTerms] = useState(false);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
   const [code, setCode] = useState("");
@@ -45,6 +46,7 @@ export default function SignupPage() {
         name: name.trim(), email: email.trim(), password,
         ...(workspace.trim() ? { workspace_name: workspace.trim() } : {}),
         verification_method: 'whatsapp', phone_number: phone.trim(),
+        ...(voucherCode.trim() ? { voucher_code: voucherCode.trim().toUpperCase() } : {}),
         accept_terms: true,
       });
       setPendingEmail(result.email);
@@ -56,6 +58,8 @@ export default function SignupPage() {
       const failure = apiFailure(err);
       setError(
         failure.code === "EMAIL_TAKEN" ? { message: "Email ini sudah terdaftar.", taken: true }
+        : failure.code === "VOUCHER_INVALID" ? { message: "Kode voucher tidak ditemukan. Periksa kembali kodenya." }
+        : failure.code === "VOUCHER_UNAVAILABLE" ? { message: "Voucher sudah kedaluwarsa atau kuotanya habis." }
         : failure.status === 429 ? { message: "Terlalu banyak percobaan. Coba lagi nanti." }
         : failure.code === "SIGNUP_DISABLED" ? { message: "Pendaftaran sedang ditutup." }
         : { message: failure.message },
@@ -71,7 +75,11 @@ export default function SignupPage() {
       loginWithSession(await api.confirmSignupEmailVerification(pendingEmail, code, 'whatsapp'), "/dashboard?welcome=1");
     } catch (err) {
       const failure = apiFailure(err);
-      setError({ message: failure.code === "OTP_INVALID" ? "Kode salah, kedaluwarsa, atau sudah dipakai. Minta kode baru." : failure.message });
+      setError({ message:
+        failure.code === "OTP_INVALID" ? "Kode salah, kedaluwarsa, atau sudah dipakai. Minta kode baru."
+        : failure.code === "VOUCHER_UNAVAILABLE" || failure.code === "VOUCHER_EXHAUSTED"
+          ? "Voucher ini sudah tidak tersedia. Kembali ke formulir untuk mengganti atau menghapus kode voucher, lalu minta kode OTP baru."
+          : failure.message });
     } finally { setBusy(false); }
   };
 
@@ -140,6 +148,11 @@ export default function SignupPage() {
               <Label htmlFor="signup-phone">Nomor WhatsApp</Label>
               <Input id="signup-phone" type="tel" inputMode="tel" autoComplete="tel" required placeholder="08xxxxxxxxxx atau +628xxxxxxxxxx" value={phone} onChange={(e) => setPhone(e.target.value)} />
               <p className="text-xs text-muted-foreground">Kode pendaftaran dikirim ke nomor ini. Pastikan nomor aktif dan dapat menerima pesan WhatsApp.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="signup-voucher">Kode voucher <span className="font-normal text-muted-foreground">(opsional)</span></Label>
+              <Input id="signup-voucher" autoComplete="off" maxLength={40} placeholder="KONEVA-1234567890ABCDEF" value={voucherCode} onChange={(e) => setVoucherCode(e.target.value.toUpperCase())} />
+              <p className="text-xs text-muted-foreground">Masukkan voucher dari admin untuk menambahkan kredit saldo setelah nomor WhatsApp terverifikasi.</p>
             </div>
             <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm leading-snug">
               <input id="terms" type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--primary)]" checked={terms} onChange={(e) => setTerms(e.target.checked)} required />

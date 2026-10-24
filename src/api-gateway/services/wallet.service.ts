@@ -79,6 +79,31 @@ export async function creditWalletWithClient(db: Db, tenantId: string, amountIdr
   return { replay: false };
 }
 
+/** Apply a signup voucher as a distinct, idempotent wallet ledger credit. */
+export async function creditSignupVoucherWithClient(db: Db, tenantId: string, amountIdr: number,
+  idempotencyKey: string, invoiceNumber: string): Promise<{ id: string | number }> {
+  if (!Number.isSafeInteger(amountIdr) || amountIdr < 1 || amountIdr > 100_000_000) {
+    throw new ServiceError(503, 'VOUCHER_DATA_INVALID', 'Nominal voucher tidak valid.');
+  }
+  await db.query('INSERT INTO wallet_accounts(tenant_id) VALUES($1) ON CONFLICT(tenant_id) DO NOTHING', [tenantId]);
+  await db.query('SELECT tenant_id FROM wallet_accounts WHERE tenant_id=$1 FOR UPDATE', [tenantId]);
+  const prior = (await db.query<QueryResultRow & { id: string | number; amount_idr: number | string; event_type: string }>(
+    'SELECT id,amount_idr,event_type FROM wallet_ledger WHERE tenant_id=$1 AND idempotency_key=$2', [tenantId, idempotencyKey],
+  )).rows[0];
+  if (prior) {
+    if (prior.event_type !== 'voucher' || idr(prior.amount_idr) !== amountIdr) {
+      throw new ServiceError(409, 'WALLET_IDEMPOTENCY_CONFLICT', 'Voucher sudah diterapkan dengan nominal berbeda.');
+    }
+    return { id: prior.id };
+  }
+  await db.query('UPDATE wallet_accounts SET available_idr=available_idr+$2,updated_at=now() WHERE tenant_id=$1', [tenantId, amountIdr]);
+  const entry = (await db.query<QueryResultRow & { id: string | number }>(
+    `INSERT INTO wallet_ledger(tenant_id,event_type,amount_idr,available_delta_idr,reserved_delta_idr,idempotency_key,invoice_number)
+     VALUES($1,'voucher',$2,$2,0,$3,$4) RETURNING id`, [tenantId, amountIdr, idempotencyKey, invoiceNumber],
+  )).rows[0]!;
+  return { id: entry.id };
+}
+
 export async function getWalletState(tenantId: string) {
   const [account, settings, counts, devices, topups] = await Promise.all([
     pool.query<QueryResultRow & { available_idr: number | string; reserved_idr: number | string }>(
@@ -97,7 +122,12 @@ export async function getWalletState(tenantId: string) {
        WHERE m.tenant_id=$1 AND m.system_otp=false AND m.system_notification=false
        GROUP BY m.device_key ORDER BY m.device_key`, [tenantId]),
     pool.query<QueryResultRow & { invoice_number: string; amount_idr: number | string; status: string; created_at: Date }>(
-      `SELECT invoice_number,amount_idr,status,created_at FROM wallet_topups WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 10`, [tenantId]),
+      `SELECT invoice_number,amount_idr,status,created_at FROM (
+         SELECT invoice_number,amount_idr,status,created_at FROM wallet_topups WHERE tenant_id=$1
+         UNION ALL
+         SELECT invoice_number,amount_idr,'paid'::varchar AS status,created_at
+           FROM wallet_ledger WHERE tenant_id=$1 AND event_type='voucher'
+       ) credits ORDER BY created_at DESC LIMIT 10`, [tenantId]),
   ]);
   const wallet = account.rows[0];
   const setting = settings.rows[0];

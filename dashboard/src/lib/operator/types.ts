@@ -269,6 +269,11 @@ export interface OwnerWorkspaceCostMeter {
     cpuPercentAvg: number | null; memoryUsageBytesAvg: number | null; memoryUsageBytesMax: number | null; resourceSamples: number }>;
   pricing: { status: "not_calculated"; note: string };
 }
+export interface SignupVoucher {
+  id: string; code_hint: string; credit_idr: number; max_redemptions: number; redemptions_count: number;
+  active: boolean; expires_at: string | null; created_at: string; disabled_at: string | null;
+}
+export interface CreatedSignupVoucher extends SignupVoucher { code: string }
 
 export function parseOwnerDeviceSummary(v: unknown): OwnerDeviceSummary {
   const d = obj(v);
@@ -359,6 +364,21 @@ export function parseOwnerWorkspaceCostMeter(v: unknown): OwnerWorkspaceCostMete
     }; }),
     pricing: { status: "not_calculated", note: str(pricing["note"]) },
   };
+}
+
+export function parseSignupVoucher(v: unknown): SignupVoucher {
+  const d = obj(v);
+  return {
+    id: str(d["id"]), code_hint: str(d["code_hint"]), credit_idr: num(d["credit_idr"]),
+    max_redemptions: num(d["max_redemptions"]), redemptions_count: num(d["redemptions_count"]),
+    active: d["active"] === true, expires_at: strOrNull(d["expires_at"]),
+    created_at: str(d["created_at"]), disabled_at: strOrNull(d["disabled_at"]),
+  };
+}
+
+export function parseCreatedSignupVoucher(v: unknown): CreatedSignupVoucher {
+  const d = obj(v);
+  return { ...parseSignupVoucher(v), code: str(d["code"]) };
 }
 
 // ---- OTP sender-budget alerts (counts and times only; the parser drops anything else) ---------------------------------------------

@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
-import { Activity, BarChart3, BellRing, Building2, CreditCard, GraduationCap, HeartPulse, LayoutDashboard, LogOut, Menu, ScrollText, ShieldCheck, Smartphone, ScanLine, Bot, Wallet } from "lucide-react";
+import { Activity, BarChart3, BellRing, Building2, CreditCard, GraduationCap, HeartPulse, LayoutDashboard, LogOut, Menu, ScrollText, ShieldCheck, Smartphone, ScanLine, Bot, Wallet, TicketPercent } from "lucide-react";
 import { KonevaMark } from "@/components/brand/koneva-logo";
 import { LegalLinksFooter } from "@/components/layout/legal-links-footer";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
@@ -36,6 +36,7 @@ const NAV_GROUPS: Array<{ label: string; items: OperatorNavItem[] }> = [
     { href: "/operator/system/whatsapp-otp", label: "OTP WhatsApp", icon: ScanLine, permission: "owner:insights" },
     { href: "/operator/system/ai-reply", label: "Provider AI", icon: Bot, permission: "owner:insights" },
     { href: "/operator/system/payg", label: "PAYG & tarif", icon: Wallet, permission: "owner:insights" },
+    { href: "/operator/vouchers", label: "Voucher saldo", icon: TicketPercent, permission: "owner:insights" },
     { href: "/operator/insights/workspaces", label: "Workspace", icon: Building2, permission: "owner:insights" },
   ] },
 ];

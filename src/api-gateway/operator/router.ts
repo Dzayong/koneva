@@ -13,6 +13,7 @@ import { ownerInsights, ownerDeviceList, ownerDeviceDetail, ownerSystemHealth, o
 import { getSystemWhatsappOtpSender, pairSystemWhatsappOtpSender, queueSystemWhatsappNotificationTest, saveSystemWhatsappNotificationSettings } from './system-whatsapp-otp';
 import { getAiReplySettings, saveAiReplySettings } from './ai-reply-settings';
 import { getPaygSettings, savePaygSettings } from './payg-settings';
+import { createSignupVoucher, disableSignupVoucher, listSignupVouchers } from '../services/signup-voucher.service';
 import { invoiceDetail, listAudit, listInvoices, listStudents, listWorkspaces, studentDetail, workspaceDetail } from './reads';
 
 const uuid = z.string().uuid().transform((v) => v.toLowerCase());
@@ -195,6 +196,29 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
     const input = z.object({ enabled: z.boolean(), price_per_message_idr: z.number().int().min(1).max(100_000) }).strict().parse(request.body);
     response.json({ success: true, data: await savePaygSettings(db, actorOf(response), response.locals['requestId'] as string,
       request.ip ?? 'unknown', { enabled: input.enabled, pricePerMessageIdr: input.price_per_message_idr }) });
+  });
+  router.get('/signup-vouchers', permit('owner:insights'), async (request, response) => {
+    const { limit, offset } = pageSchema.parse(request.query);
+    const result = await listSignupVouchers(db, actorOf(response),
+      response.locals['requestId'] as string, request.ip ?? 'unknown', limit, offset);
+    response.json({ success: true, data: result.items,
+      pagination: { total: result.total, limit, offset, has_more: offset + result.items.length < result.total } });
+  });
+  router.post('/signup-vouchers', permit('owner:insights'), async (request, response) => {
+    const input = z.object({
+      credit_idr: z.number().int().min(1).max(100_000_000),
+      max_redemptions: z.number().int().min(1).max(100_000),
+      expires_at: z.iso.datetime({ offset: true }).nullable().optional(),
+    }).strict().parse(request.body);
+    response.status(201).json({ success: true, data: await createSignupVoucher(db, actorOf(response),
+      response.locals['requestId'] as string, request.ip ?? 'unknown', {
+        credit_idr: input.credit_idr, max_redemptions: input.max_redemptions,
+        expires_at: input.expires_at ? new Date(input.expires_at) : null,
+      }) });
+  });
+  router.post('/signup-vouchers/:id/disable', permit('owner:insights'), async (request, response) => {
+    response.json({ success: true, data: await disableSignupVoucher(db, actorOf(response),
+      uuid.parse(request.params['id']), response.locals['requestId'] as string, request.ip ?? 'unknown') });
   });
   router.get('/insights/workspaces', permit('owner:insights'), async (request, response) => {
     const { limit, offset, q } = ownerPageSchema.parse(request.query);

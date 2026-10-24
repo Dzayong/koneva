@@ -625,7 +625,7 @@ class ApiClient {
     );
   }
 
-  async signup(data: { email: string; password: string; name: string; workspace_name?: string; phone_number: string; verification_method: 'whatsapp'; accept_terms: true }): Promise<{ verification_required: true; verification_method: 'whatsapp'; email: string; resend_after: number }> {
+  async signup(data: { email: string; password: string; name: string; workspace_name?: string; phone_number: string; verification_method: 'whatsapp'; voucher_code?: string; accept_terms: true }): Promise<{ verification_required: true; verification_method: 'whatsapp'; email: string; resend_after: number }> {
     const response = await this.client.post<ApiSuccess<{ verification_required: true; verification_method: 'whatsapp'; email: string; resend_after: number }>>(
       "/auth/signup", data, { skipErrorToast: true, skipAuthRedirect: true },
     );

@@ -7,6 +7,7 @@ import type { TenantContext } from '../../shared/types/api';
 import { ServiceError } from './service-error';
 import { createTrial } from './billing.service';
 import { recordSystemNotification } from './system-notification-outbox';
+import { redeemSignupVoucherForTenant, validateSignupVoucher } from './signup-voucher.service';
 
 const BCRYPT_COST = 12;
 const SESSION_DAYS = 14;
@@ -64,6 +65,7 @@ async function listWorkspaces(db: Queryable, userId: string): Promise<Workspace[
 export interface SignupInput {
   email: string; password: string; name: string; workspace_name?: string | undefined;
   verification_method?: 'whatsapp' | undefined; phone_number?: string | undefined;
+  voucher_code?: string | undefined;
 }
 
 export interface PendingSignup { user_id: string; email: string }
@@ -94,19 +96,21 @@ export async function signup(input: SignupInput): Promise<PendingSignup> {
       if (existing && (existing.status !== 'pending_email' || existing.email_verified_at)) {
         throw new ServiceError(409, 'EMAIL_TAKEN', 'An account with this email already exists');
       }
+      const pendingVoucherId = await validateSignupVoucher(client, input.voucher_code);
       const user = existing
         ? (await client.query<{ id: string }>(
           `UPDATE users SET name=$2, password_hash=$3, pending_signup_workspace_name=$4,
              pending_signup_phone_number=$5, pending_signup_verification_method=$6,
-             terms_accepted_at=now(), terms_version=$7
+             pending_signup_voucher_id=$7, terms_accepted_at=now(), terms_version=$8
            WHERE id=$1 RETURNING id`,
-          [existing.id, input.name, passwordHash, workspaceName, pendingPhone, verificationMethod, TERMS_VERSION],
+          [existing.id, input.name, passwordHash, workspaceName, pendingPhone, verificationMethod, pendingVoucherId, TERMS_VERSION],
         )).rows[0]!
         : (await client.query<{ id: string }>(
           `INSERT INTO users (email, name, password_hash, status, pending_signup_workspace_name,
-             pending_signup_phone_number, pending_signup_verification_method, terms_accepted_at, terms_version)
-           VALUES ($1, $2, $3, 'pending_email', $4, $5, $6, now(), $7) RETURNING id`,
-          [input.email, input.name, passwordHash, workspaceName, pendingPhone, verificationMethod, TERMS_VERSION],
+             pending_signup_phone_number, pending_signup_verification_method, pending_signup_voucher_id,
+             terms_accepted_at, terms_version)
+           VALUES ($1, $2, $3, 'pending_email', $4, $5, $6, $7, now(), $8) RETURNING id`,
+          [input.email, input.name, passwordHash, workspaceName, pendingPhone, verificationMethod, pendingVoucherId, TERMS_VERSION],
         )).rows[0]!;
       // A pending signup restart may happen during the resend cooldown. Keep its still-valid proof
       // so the owner can verify the mailbox/phone while the pending name/password are refreshed.
@@ -122,8 +126,9 @@ export async function signup(input: SignupInput): Promise<PendingSignup> {
 
 /** Activate one pending signup only inside the verified-OTP transaction. */
 export async function activatePendingSignup(client: PoolClient, userId: string, meta: ClientMeta, method: 'email' | 'whatsapp' = 'email'): Promise<SessionResult> {
-  const user = (await client.query<{ email: string; name: string; workspace_name: string }>(
-    `SELECT email, name, pending_signup_workspace_name AS workspace_name FROM users
+  const user = (await client.query<{ email: string; name: string; workspace_name: string; voucher_id: string | null }>(
+    `SELECT email, name, pending_signup_workspace_name AS workspace_name,
+       pending_signup_voucher_id AS voucher_id FROM users
      WHERE id=$1 AND status='pending_email' AND
        (($2 = 'email' AND email_verified_at IS NOT NULL) OR ($2 = 'whatsapp' AND phone_verified_at IS NOT NULL)) FOR UPDATE`, [userId, method],
   )).rows[0];
@@ -138,7 +143,8 @@ export async function activatePendingSignup(client: PoolClient, userId: string, 
   await recordSystemNotification(client, `signup.created:${tenant.id}`, 'signup.created', `Signup baru KONEVA: workspace ${user.workspace_name}.`);
   await createTrial(client, tenant.id);
   await client.query(`INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`, [userId, tenant.id]);
-  await client.query("UPDATE users SET status='active', pending_signup_workspace_name=NULL, pending_signup_phone_number=NULL, pending_signup_verification_method='email', last_login_at=now() WHERE id=$1", [userId]);
+  await redeemSignupVoucherForTenant(client, userId, tenant.id, user.voucher_id);
+  await client.query("UPDATE users SET status='active', pending_signup_workspace_name=NULL, pending_signup_phone_number=NULL, pending_signup_verification_method='email', pending_signup_voucher_id=NULL, last_login_at=now() WHERE id=$1", [userId]);
   const session = await issueSessionToken(client, userId, meta);
   return {
     token: session.token, expires_at: session.expiresAt,
