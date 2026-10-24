@@ -6,7 +6,7 @@ import { usePublicInfo } from "@/hooks/use-billing";
 import { PhotoBackdrop } from "./photo-backdrop";
 
 const COLUMNS = [
-  { title: "Produk", links: [{ label: "Tampilan asli", href: "/#tur" }, { label: "Keamanan nomor", href: "/#features" }, { label: "Paket dan harga", href: "/#harga" }, { label: "Pertanyaan umum", href: "/#faq" }] },
+  { title: "Produk", links: [{ label: "Tampilan asli", href: "/#tur" }, { label: "Keamanan nomor", href: "/#features" }, { label: "Saldo dan tarif", href: "/#harga" }, { label: "Pertanyaan umum", href: "/#faq" }] },
   { title: "Mulai", links: [{ label: "Coba gratis 14 hari", href: "/signup" }, { label: "Masuk", href: "/login" }, { label: "Dokumentasi API", href: "/docs" }] },
   { title: "Legal", links: [{ label: "Syarat dan Ketentuan", href: "/syarat" }, { label: "Kebijakan Privasi", href: "/privasi" }] },
 ];

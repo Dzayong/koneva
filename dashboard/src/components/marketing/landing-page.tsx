@@ -5,7 +5,6 @@ import Link from "next/link";
 import { motion, useReducedMotion, useScroll, useTransform, type Variants } from "framer-motion";
 import { ArrowRight, BellRing, CheckCheck, Gauge, ShieldCheck, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { PlanCards } from "@/components/billing/plan-cards";
 import { KonevaLogo } from "@/components/brand/koneva-logo";
 import { Faq } from "@/components/marketing/faq";
 import { HeroDemo } from "@/components/marketing/hero-demo";
@@ -19,7 +18,6 @@ import { SiteFooter } from "@/components/marketing/site-footer";
 import { Stage } from "@/components/marketing/stage";
 import { UseCaseMarquee } from "@/components/marketing/use-case-marquee";
 import { useAuth } from "@/hooks/use-auth";
-import { usePublicPlans } from "@/hooks/use-billing";
 import { track } from "@/lib/track";
 import { cn } from "@/lib/utils";
 
@@ -70,30 +68,14 @@ function AuthLink() {
     );
 }
 
-/** The question everyone asks first. Shows the lowest published monthly price, or says plainly that it is not set yet. */
-function PriceHint() {
-  const plans = usePublicPlans();
-  const prices = (plans.data ?? []).filter((p) => p.price_is_final && p.price_month_idr !== null).map((p) => p.price_month_idr as number);
-  const from = prices.length ? Math.min(...prices) : null;
-  return (
-    <p className="text-sm text-muted-foreground">
-      {from !== null
-        ? <>Paket berbayar mulai <strong className="text-foreground">Rp {from.toLocaleString("id-ID")}/bulan</strong>. </>
-        : <>Harga paket Pelajar dan UMKM diumumkan sebentar lagi; sekarang Anda bisa mencoba dulu. </>}
-      <a href="#harga" className="underline underline-offset-2 hover:text-foreground">Lihat paket</a>
-    </p>
-  );
-}
-
 const AUDIENCES: Array<{ title: string; text: string; cta: string; href: string; from: RevealFrom }> = [
   { title: "Pemilik usaha dan UMKM", text: "Kirim info pesanan, pengingat, dan promo ke pelanggan dari nomor WhatsApp toko Anda. Ada dashboard untuk kontak, kirim massal, dan balasan otomatis, tanpa perlu coding.", cta: "Coba gratis", href: "/signup", from: "left" },
   { title: "Developer dan freelancer", text: "Satu API untuk mengirim dan menerima pesan, status waktu nyata, webhook bertanda tangan, dan kunci API berizin. Contoh kode Node.js, Python, dan PHP.", cta: "Baca dokumentasi", href: "/docs", from: "up" },
-  { title: "Pelajar dan proyek kuliah", text: "Paket khusus pelajar dengan verifikasi email kampus. Cocok untuk tugas akhir, bot pengingat, atau proyek kecil yang butuh WhatsApp.", cta: "Lihat paket", href: "#harga", from: "right" },
+  { title: "Pelajar dan proyek kuliah", text: "Bangun proyek dengan API, webhook, dan dashboard kontak. Isi saldo sesuai kebutuhan pemakaian.", cta: "Lihat biaya", href: "#harga", from: "right" },
 ];
 
 export function LandingPage() {
   const reduce = useReducedMotion();
-  const plans = usePublicPlans();
   const heroRef = useRef<HTMLElement>(null);
   const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
   const demoY = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : -70]);
@@ -129,14 +111,14 @@ export function LandingPage() {
               {" "}lewat WhatsApp API.
             </motion.h1>
             <motion.p initial="hidden" animate="show" custom={2} variants={rise} className="mx-auto mt-7 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
-              Sambungkan nomor WhatsApp Anda dengan memindai QR, lalu kirim pesan dari aplikasi atau dashboard. Nomor dijaga otomatis: dilatih bertahap, dijeda seperti manusia, dan dipantau kesehatannya.
+              Sambungkan nomor WhatsApp Anda dengan memindai QR, lalu kirim pesan dari aplikasi atau dashboard. Nomor bisa digunakan setelah tersambung, dengan kontrol jeda, persetujuan penerima, dan pemantauan status.
             </motion.p>
             <motion.div initial="hidden" animate="show" custom={3} variants={rise} className="mt-9 flex flex-wrap items-center justify-center gap-3">
               <Button asChild size="lg" className="h-12 px-7 text-base font-semibold"><Link href="/signup" onClick={() => track("cta_signup")}>Coba gratis 14 hari <ArrowRight className="ml-1" /></Link></Button>
               <Button asChild variant="outline" size="lg" className="h-12 px-7 text-base"><a href="#tur">Lihat cara kerjanya</a></Button>
             </motion.div>
             <motion.div initial="hidden" animate="show" custom={4} variants={rise} className="mt-5 space-y-1.5">
-              <PriceHint />
+              <p className="text-sm text-muted-foreground">Bayar sesuai pemakaian dengan saldo prabayar. <a href="#harga" className="underline underline-offset-2 hover:text-foreground">Cara kerja saldo</a></p>
               <p className="text-xs text-muted-foreground">Tanpa kartu kredit. Ini layanan tidak resmi, jadi WhatsApp bisa membatasi nomor; <a href="#faq" className="underline underline-offset-2 hover:text-foreground">baca risikonya</a>.</p>
             </motion.div>
           </div>
@@ -206,17 +188,14 @@ export function LandingPage() {
           <div className="mt-8"><HowItWorks /></div>
         </Section>
 
-        {/* Harga: sky = kepercayaan untuk keputusan uang. Angka muncul setelah operator menetapkan final.
-            Bulanan saja: checkout tahunan sudah ditutup untuk pesanan baru (T1.1). */}
-        <Section tone="sky" id="harga" label="Paket dan harga" backdrop={<PhotoBackdrop src="/media/photos/homeoffice.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
-          <Heading eyebrow="Paket" title="Harga yang jelas, tanpa kejutan" text="Percobaan gratis 14 hari saat mendaftar. Ditagih bulanan. Pembayaran dikonfirmasi manual oleh penyedia layanan." />
-          {plans.data && plans.data.length > 0 ? (
-            <Reveal from="pop" className="mt-10"><PlanCards plans={plans.data} cycle="monthly" /></Reveal>
-          ) : (
-            <p role={plans.isError ? "alert" : "status"} aria-live="polite" className="mt-10 rounded-xl border bg-card p-5 text-sm text-muted-foreground">
-              {plans.isPending ? "Memuat paket dan harga…" : plans.isError ? "Paket belum dapat dimuat. Silakan muat ulang halaman." : "Paket belum tersedia saat ini."}
-            </p>
-          )}
+        {/* PAYG replaced monthly plans; price and balance are visible in billing before sending. */}
+        <Section tone="sky" id="harga" label="Saldo dan tarif" backdrop={<PhotoBackdrop src="/media/photos/homeoffice.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[520px]" />}>
+          <Heading eyebrow="Bayar sesuai pemakaian" title="Isi saldo seperlunya" text="Tidak ada paket bulanan. Isi saldo prabayar dan gunakan beberapa device dalam satu workspace." />
+          <Reveal from="pop" className="mt-10 max-w-3xl rounded-xl border bg-card p-6 shadow-card">
+            <h3 className="text-xl font-semibold">Biaya mengikuti hasil pengiriman</h3>
+            <p className="mt-3 text-muted-foreground">Tarif per pesan terlihat di halaman Tagihan. Biaya final dikenakan untuk pesan yang terkonfirmasi berhasil; pesan dengan status belum pasti ditahan sementara untuk diperiksa.</p>
+            <p className="mt-3 text-sm text-muted-foreground">Pesan gagal tidak dikenai biaya. Saldo dan riwayat pemakaian dapat dipantau dari dashboard.</p>
+          </Reveal>
         </Section>
 
         {/* FAQ: jawaban jujur, juga terbaca mesin pencari dan asisten AI lewat data terstruktur */}

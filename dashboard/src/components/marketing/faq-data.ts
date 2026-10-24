@@ -18,7 +18,7 @@ export const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "Bagaimana dengan OTP yang harus cepat?",
-    a: "Pesan dengan prioritas urgent memakai antrean sendiri dan tidak menunggu jeda pengiriman biasa, sehingga cocok untuk kode OTP. Pesan OTP/transaksional yang diverifikasi otomatis oleh sistem juga tidak dihitung dalam kuota paket bulanan. Pesan biasa tetap diberi jeda agar pola pengiriman tidak terlihat seperti mesin. Karena jalur ini tidak resmi, jangan menjadikannya satu-satunya cara untuk login atau transaksi penting; siapkan jalur cadangan seperti SMS atau email.",
+    a: "Pesan dengan prioritas urgent memakai antrean sendiri dan tidak menunggu jeda pengiriman biasa, sehingga cocok untuk kode OTP. Pesan OTP/transaksional hanya memperoleh perlakuan khusus jika lolos pemeriksaan sistem. Pesan biasa tetap diberi jeda untuk mengendalikan laju pengiriman. Karena jalur ini tidak resmi, jangan menjadikannya satu-satunya cara untuk login atau transaksi penting; siapkan jalur cadangan seperti SMS atau email.",
   },
   {
     q: "Bagaimana saya tahu pesan terkirim, dibaca, atau nomor bermasalah?",
@@ -29,8 +29,8 @@ export const FAQ: Array<{ q: string; a: string }> = [
     a: "Saat ini layanan mengirim dan menerima di chat pribadi. Pesan masuk dari grup tercatat, tetapi pengiriman ke grup dan saluran belum tersedia.",
   },
   {
-    q: "Berapa harga dan apakah ada uji coba?",
-    a: "Setiap akun baru mendapat uji coba gratis 14 hari tanpa kartu kredit. Ada empat paket bulanan, dari Pelajar sampai Bisnis CS — lihat daftar harga di halaman ini. Checkout tahunan sudah ditutup untuk pesanan baru. Pembayaran saat ini dikonfirmasi manual oleh penyedia layanan.",
+    q: "Bagaimana biaya KONEVA dihitung?",
+    a: "KONEVA menggunakan saldo prabayar PAYG tanpa paket bulanan. Tarif per pesan ditampilkan di halaman Tagihan; biaya final dikenakan untuk pesan yang terkonfirmasi berhasil, sedangkan status yang belum pasti ditahan sementara untuk diperiksa. Akun baru mendapat masa percobaan 14 hari.",
   },
   {
     q: "Data apa yang disimpan?",

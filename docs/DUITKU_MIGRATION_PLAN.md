@@ -1,7 +1,7 @@
 # Rencana Migrasi Top-up PAYG dari DOKU ke Duitku
 
-**Status:** implementasi lokal dan tes sintetis tersedia; belum menjalankan migrasi database, belum menguji pembayaran sandbox sungguhan, dan belum deploy.
-**Tanggal audit:** 23 Oktober 2026.
+**Status:** integrasi POP sandbox dan migration 066 sudah ada di aplikasi; tes sintetis 8/8 pernah lulus dan fitur sudah dideploy ke stack lokal. Pembayaran sandbox sungguhan belum diuji karena credential Duitku di `.env.personal` masih kosong. Jangan memakai credential yang pernah dikirim melalui chat; rotasi lalu isi langsung di file lokal.
+**Tanggal audit:** 24 Oktober 2026.
 
 ## Rekomendasi
 
@@ -9,7 +9,7 @@ Gunakan **Duitku POP / Create Invoice** untuk sandbox pertama. API ini membuat `
 
 ## Alur KONEVA saat ini
 
-`POST /api/v1/billing/payg/topup-checkout` membuat baris top-up berstatus belum dibayar, lalu meminta URL checkout DOKU. Callback publik `/billing/doku/notify` memverifikasi signature dan timestamp, memproses event dalam transaksi database dengan idempotensi, memeriksa invoice dan jumlah, lalu memperbarui top-up dan mengkredit `wallet_ledger`. Perhitungan saldo dan pemotongan pesan berada di wallet/ledger; keduanya sebaiknya tetap menjadi sumber kebenaran selama penggantian gateway.
+`POST /api/v1/billing/payg/topup-checkout` membuat top-up belum dibayar lalu meminta URL checkout Duitku POP. Callback `POST /billing/duitku/notify` memverifikasi signature HMAC, mencocokkan invoice dan nominal, lalu mengkredit `wallet_ledger` dalam transaksi idempoten. Redirect browser hanya untuk navigasi, bukan bukti pembayaran. Callback DOKU untuk invoice paket lama tetap terpisah. Perhitungan saldo dan biaya pesan tetap memakai wallet/ledger KONEVA sebagai sumber kebenaran.
 
 ## Perbedaan protokol penting
 
@@ -51,8 +51,9 @@ Top-up baru memakai Duitku POP sandbox. Pemilik menyetujui menutup top-up DOKU y
 - Konfigurasi Duitku terpisah dan endpoint sandbox tetap (tidak ada toggle produksi).
 - Checkout PAYG memakai endpoint KONEVA yang sama; callback diverifikasi dan dikreditkan atomik/idempoten.
 - Migrasi `066_duitku_payg_topups.sql` menutup DOKU pending dan menambahkan provider/reference serta log callback.
-- Tes sintetis lewat `scripts/test-duitku-sandbox.sh` sudah lulus untuk alur checkout/callback dan kasus signature, nominal, replay, order tidak dikenal/void, serta transisi top-up pending DOKU.
-- Belum diverifikasi dengan credential Duitku sandbox milik pemilik, callback tunnel aktif, atau pembayaran nyata. Migrasi dan deploy juga belum dijalankan.
+- Tes sintetis lewat `scripts/test-duitku-sandbox.sh` lulus 8/8 untuk alur checkout/callback dan kasus signature, nominal, replay, order tidak dikenal/void, serta transisi top-up pending DOKU.
+- Integrasi dan migration 066 tersedia pada stack lokal. `.env.personal` saat audit belum berisi `DUITKU_MERCHANT_CODE` atau `DUITKU_API_KEY`; karena itu checkout provider dan callback pembayaran nyata belum teruji. `APP_PUBLIC_URL` memakai tunnel sementara untuk sandbox; siapkan domain publik milik usaha sebelum verifikasi merchant produksi.
+- Jangan mencatat atau mengirim credential Duitku lewat chat, PDF, dokumentasi, git, atau log. Isi hanya di `.env.personal` mode privat dan recreate `api-gateway` untuk memuatnya.
 
 ## Bukan bagian dari migrasi gateway ini
 

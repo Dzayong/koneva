@@ -9,7 +9,6 @@ const SHOTS = [
   { src: "/media/ringkasan.png", title: "Panduan langkah demi langkah", text: "Dashboard menunjukkan satu langkah berikutnya, tidak membiarkan Anda bingung mulai dari mana.", className: "md:col-span-2" },
   { src: "/media/sambungkan-qr.png", title: "Sambungkan dengan pindai QR", text: "Seperti WhatsApp Web. Tanpa instalasi.", className: "" },
   { src: "/media/webhook-kode.png", title: "Webhook dengan kode siap salin", text: "Contoh Node.js, Python, dan PHP. Ada tombol kirim tes.", className: "" },
-  { src: "/media/tagihan.png", title: "Paket dan tagihan yang jelas", text: "Sisa kuota, masa aktif, dan cara bayar di satu halaman.", className: "md:col-span-2" },
 ] as const;
 
 function Frame({ children }: { children: React.ReactNode }) {
