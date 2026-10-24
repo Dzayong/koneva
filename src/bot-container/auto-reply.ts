@@ -9,6 +9,8 @@ import type { QueryFn } from './health-score';
 import { getStoredRecipientConsent, withRecipientConsentLock } from '../shared/recipient-consent';
 import { isSafeAutoReplyRegex } from '../shared/safe-auto-reply-regex';
 import { withDeviceSendLock } from '../shared/device-send-lock';
+import { transaction } from '../shared/database/connection';
+import { reserveMessageCharge } from '../api-gateway/services/wallet.service';
 
 export interface AutoReplyRule {
   id: string;
@@ -218,6 +220,7 @@ export async function processAutoReply(
   // Answer on the chat the message arrived on; rebuilding a JID from the
   // number breaks for @lid chats.
   const jid = message.replyJid ?? `${message.from}@s.whatsapp.net`;
+  let outboundId: string | null = null;
   try {
     // Human order: notice and read the message, think, type, then send. The
     // configured delay is the total, so read and typing time fit inside it.
@@ -254,6 +257,46 @@ export async function processAutoReply(
         if (!latestDecision.allowed) return { blocked: latestDecision.reason ?? 'anti_ban_policy' };
         const last = await guard(message.deviceKey);
         if (!last.allowed) return { blocked: last.reason ?? 'blocked' };
+        const payg = await queryFn('SELECT enabled FROM payg_settings WHERE singleton=true');
+        if (Boolean((payg.rows[0] as { enabled?: boolean } | undefined)?.enabled)) {
+          // Auto-replies use the connected socket directly, so reserve their charge here before
+          // handing the message to WhatsApp. Updating status to sent invokes the wallet settlement
+          // trigger; an ambiguous socket failure remains held for manual reconciliation.
+          const preparedOutboundId = await transaction(async (client) => {
+            const settings = await client.query<{ enabled: boolean }>(
+              'SELECT enabled FROM payg_settings WHERE singleton=true FOR SHARE',
+            );
+            const inserted = await client.query<{ id: string }>(
+              `INSERT INTO messages (tenant_id, device_id, device_key, from_number, to_number, content,
+               chat_jid, type, status, direction, send_context, send_started_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,'text','sending','outbound','api',NOW()) RETURNING id`,
+              [message.tenantId, message.deviceId, message.deviceKey, message.deviceKey,
+                message.isGroup ? jid : message.from, content, jid],
+            );
+            if (settings.rows[0]?.enabled) {
+              await reserveMessageCharge(client, message.tenantId, inserted.rows[0]!.id, 0);
+            }
+            return inserted.rows[0]!.id;
+          });
+          outboundId = preparedOutboundId;
+
+          let sent: Awaited<ReturnType<WASocket['sendMessage']>>;
+          try {
+            sent = await sock.sendMessage(jid, { text: content });
+          } catch (error) {
+            await queryFn(
+              `UPDATE messages SET status='failed', error_message='delivery_uncertain' WHERE id=$1 AND status='sending'`,
+              [preparedOutboundId],
+            );
+            throw error;
+          }
+          await queryFn(
+            `UPDATE messages SET status='sent', whatsapp_message_id=$2, sent_at=NOW() WHERE id=$1`,
+            [preparedOutboundId, sent?.key.id ?? null],
+          );
+          return { sent, outboundId: preparedOutboundId };
+        }
+
         const sent = await sock.sendMessage(jid, { text: content });
         const inserted = await queryFn(
           `INSERT INTO messages (tenant_id, device_id, device_key, from_number, to_number, content,
@@ -262,7 +305,9 @@ export async function processAutoReply(
           [message.tenantId, message.deviceId, message.deviceKey, message.deviceKey,
             message.isGroup ? jid : message.from, content, jid, sent?.key.id ?? null],
         );
-        return { sent, outboundId: (inserted.rows[0] as { id?: string } | undefined)?.id ?? null };
+        const insertedOutboundId = (inserted.rows[0] as { id?: string } | undefined)?.id ?? null;
+        outboundId = insertedOutboundId;
+        return { sent, outboundId: insertedOutboundId };
       });
     });
     if ('blocked' in result) {
@@ -275,13 +320,12 @@ export async function processAutoReply(
     }
     const sent = result.sent;
     void dependencies.presence?.afterSend();
-    const outboundId = result.outboundId;
-    await logActivity(queryFn, rule, message, content, 'sent', null, outboundId);
-    log.info('Auto-reply sent', { ruleId: rule.id, inboundMessageId: message.id, outboundMessageId: outboundId });
+    await logActivity(queryFn, rule, message, content, 'sent', null, result.outboundId);
+    log.info('Auto-reply sent', { ruleId: rule.id, inboundMessageId: message.id, outboundMessageId: result.outboundId });
     return true;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    await logActivity(queryFn, rule, message, content, 'failed', reason, null);
+    await logActivity(queryFn, rule, message, content, 'failed', reason, outboundId);
     log.error('Auto-reply failed', { ruleId: rule.id, error: reason });
     return false;
   }

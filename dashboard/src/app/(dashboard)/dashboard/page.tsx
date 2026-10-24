@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatGrid, StatsCard } from "@/components/dashboard/stats-card";
 import { MessagesChart } from "@/components/dashboard/messages-chart";
-import { RecentAlerts } from "@/components/dashboard/recent-alerts";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { SetupChecklist } from "@/components/dashboard/setup-checklist";
 import { usePermissions } from "@/hooks/use-me";
@@ -15,7 +14,6 @@ import { useDevices } from "@/hooks/use-devices";
 import { useDashboardStats } from "@/hooks/use-messages";
 import { useContacts } from "@/hooks/use-contacts";
 import { useBilling } from "@/hooks/use-billing";
-import { ProductUpdates } from "@/components/dashboard/product-updates";
 
 export default function DashboardPage() {
   const { user, can } = usePermissions();
@@ -124,16 +122,7 @@ export default function DashboardPage() {
         />
       </StatGrid>
 
-      <div className="grid gap-5 lg:grid-cols-7 lg:gap-6">
-        <div className="lg:col-span-4">
-          <MessagesChart />
-        </div>
-        <div className="lg:col-span-3">
-          <RecentAlerts devices={devices ?? []} />
-        </div>
-      </div>
-
-      <ProductUpdates />
+      <MessagesChart />
     </div>
   );
 }
