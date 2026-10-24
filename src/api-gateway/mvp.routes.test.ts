@@ -14,9 +14,11 @@ import { listInboxConversations, listInboxMessages, listMessages, queueInboxRepl
 import { renderMessageTemplate, templateVariables } from '../shared/utils/message-template';
 
 type Query = (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
-const database = pool as unknown as { query: Query };
+type Client = { query: Query; release: () => void };
+const database = pool as unknown as { query: Query; connect: () => Promise<Client> };
 const originalQuery = database.query;
-afterEach(() => { database.query = originalQuery; });
+const originalConnect = database.connect;
+afterEach(() => { database.query = originalQuery; database.connect = originalConnect; });
 
 const tenant: TenantContext = {
   id: '8fca6485-b3df-47c2-b87e-0c235c0a4bb9', name: 'Test', email: null,
@@ -123,6 +125,10 @@ test('retry rejects a tenant-owned message that is not failed or blocked', async
     if (text.startsWith('UPDATE messages')) return { rows: [] }; // not failed/blocked: nothing updated
     return { rows: [{ status: 'sent' }] };
   };
+  database.connect = async () => ({
+    query: async () => ({ rows: [] }), // advisory consent lock and unlock
+    release() {},
+  });
   await assert.rejects(() => retryMessage(tenant.id, '00000000-0000-0000-0000-000000000001'),
     (error) => error instanceof ServiceError && error.code === 'MESSAGE_NOT_RETRYABLE');
 });
