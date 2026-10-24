@@ -107,7 +107,8 @@ export async function generateInternalAiReply(db: Pool, input: { deviceKey: stri
             t.name AS workspace_name,c.name AS contact_name
      FROM auto_reply_rules r JOIN devices d ON d.device_key=r.device_key AND d.tenant_id=r.tenant_id
      JOIN tenants t ON t.id=r.tenant_id
-     LEFT JOIN contacts c ON c.tenant_id=r.tenant_id AND c.phone_number IN ($3, '+' || $3)
+     LEFT JOIN contacts c ON c.tenant_id=r.tenant_id
+       AND c.phone_number IN ($3::varchar, ('+' || $3::varchar)::varchar)
      WHERE r.id=$1 AND r.device_key=$2 AND r.is_active=true AND r.response_type IN ('ai','ai_general') AND d.status='online'`,
     [input.ruleId, input.deviceKey, input.recipient ?? ''],
   )).rows[0];
