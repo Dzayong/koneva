@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Loader2, MessageSquare, Search, Send, Smartphone, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -31,6 +31,8 @@ export default function MessagesPage() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const autoScrolledConversationRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const devices = useInboxDevices();
   const onlineDevices = (devices.data ?? []).filter((device) => device.status === "online");
@@ -55,11 +57,20 @@ export default function MessagesPage() {
     const rows = conversations.data ?? [];
     return rows.find((item) => conversationId(item) === selectedKey) ?? rows[0] ?? null;
   }, [conversations.data, selectedKey]);
+  const selectedConversationId = selected ? conversationId(selected) : null;
   const messages = useInboxMessages(
     { device_key: selected?.device_key ?? "", chat_key: selected?.chat_key ?? "" },
     !!selected,
   );
   const orderedMessages = useMemo(() => messages.data?.messages ?? [], [messages.data]);
+  useEffect(() => {
+    if (!selectedConversationId || messages.isLoading || autoScrolledConversationRef.current === selectedConversationId) return;
+    autoScrolledConversationRef.current = selectedConversationId;
+    requestAnimationFrame(() => {
+      const chat = chatScrollRef.current;
+      if (chat) chat.scrollTop = chat.scrollHeight;
+    });
+  }, [selectedConversationId, messages.isLoading]);
   const latestInbound = useMemo(
     () => [...orderedMessages].reverse().find((message) => message.direction === "inbound"),
     [orderedMessages],
@@ -157,7 +168,7 @@ export default function MessagesPage() {
               <Avatar className="h-10 w-10 shrink-0"><AvatarImage src={groupMeta?.imageUrl ?? undefined} alt="" /><AvatarFallback className="bg-primary/10 text-primary">{isGroup ? <Users className="h-5 w-5" /> : initials(selected.contact_name || peerLabel(selected))}</AvatarFallback></Avatar>
               <div className="min-w-0 flex-1"><p className="truncate font-semibold">{peerLabel(selected, groupMeta?.name)}</p><p className="truncate text-xs text-muted-foreground">{selected.device_label || selected.device_key} · {sourceDevice?.status === "online" ? "Online" : sourceDevice?.status || "Device"}</p></div>
             </div>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-muted/20 px-4 py-5 sm:px-6">
+            <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-muted/20 px-4 py-5 sm:px-6">
               {messages.hasNextPage && <div className="flex justify-center"><Button type="button" variant="outline" size="sm" disabled={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}>{messages.isFetchingNextPage ? <><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />Memuat…</> : "Muat pesan sebelumnya"}</Button></div>}
               {messages.isLoading ? <div className="space-y-3"><Skeleton className="h-16 w-2/3" /><Skeleton className="ml-auto h-16 w-2/3" /></div>
                 : orderedMessages.map((message) => {
