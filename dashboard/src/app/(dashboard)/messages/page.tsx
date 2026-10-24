@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Loader2, MessageSquare, Search, Send, Smartphone, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -63,14 +63,13 @@ export default function MessagesPage() {
     !!selected,
   );
   const orderedMessages = useMemo(() => messages.data?.messages ?? [], [messages.data]);
-  useEffect(() => {
-    if (!selectedConversationId || messages.isLoading || autoScrolledConversationRef.current === selectedConversationId) return;
+  useLayoutEffect(() => {
+    if (!selectedConversationId || !messages.data || autoScrolledConversationRef.current === selectedConversationId) return;
+    const chat = chatScrollRef.current;
+    if (!chat) return;
+    chat.scrollTop = chat.scrollHeight;
     autoScrolledConversationRef.current = selectedConversationId;
-    requestAnimationFrame(() => {
-      const chat = chatScrollRef.current;
-      if (chat) chat.scrollTop = chat.scrollHeight;
-    });
-  }, [selectedConversationId, messages.isLoading]);
+  }, [selectedConversationId, messages.data]);
   const latestInbound = useMemo(
     () => [...orderedMessages].reverse().find((message) => message.direction === "inbound"),
     [orderedMessages],
