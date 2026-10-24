@@ -58,19 +58,22 @@ export default function DashboardPage() {
         <CardContent>
           {billingLoading ? <div className="h-16 animate-pulse rounded-lg bg-muted" aria-label="Memuat ringkasan paket" /> : billing ? (
             billing.wallet.enabled ? (
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <p className="text-xs text-muted-foreground">Saldo tersedia</p>
                   <p className="mt-1 text-xl font-semibold">Rp {billing.wallet.available_idr.toLocaleString("id-ID")}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Saldo ditahan · status belum pasti</p>
-                  <p className="mt-1 text-xl font-semibold">Rp {billing.wallet.reserved_idr.toLocaleString("id-ID")}</p>
+                  <p className="text-xs text-muted-foreground">Pesan dikenai biaya</p>
+                  <p className="mt-1 text-xl font-semibold">{billing.wallet.messages_charged.toLocaleString("id-ID")} pesan</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Tarif per pesan berhasil</p>
+                  <p className="text-xs text-muted-foreground">Total terpakai</p>
+                  <p className="mt-1 text-xl font-semibold">Rp {billing.wallet.spent_idr.toLocaleString("id-ID")}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Tarif per pesan</p>
                   <p className="mt-1 text-xl font-semibold">Rp {(billing.wallet.price_per_message_idr ?? 0).toLocaleString("id-ID")}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Saldo dipotong setelah WhatsApp mengonfirmasi.</p>
                 </div>
               </div>
             ) : (

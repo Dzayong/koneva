@@ -46,16 +46,15 @@ export async function reserveMessageCharge(db: Db, tenantId: string, messageId: 
 
   const reserved = await db.query(
     `INSERT INTO message_wallet_reservations(message_id,attempt_no,tenant_id,amount_idr,state)
-     VALUES($1,$2,$3,$4,'reserved') ON CONFLICT(message_id,attempt_no) DO NOTHING RETURNING message_id`,
+     VALUES($1,$2,$3,$4,'debited') ON CONFLICT(message_id,attempt_no) DO NOTHING RETURNING message_id`,
     [messageId, attemptNo, tenantId, settings.pricePerMessageIdr],
   );
   if (!reserved.rowCount) return { enabled: true, priceIdr: settings.pricePerMessageIdr };
 
-  await db.query(`UPDATE wallet_accounts SET available_idr=available_idr-$2,
-    reserved_idr=reserved_idr+$2, updated_at=now() WHERE tenant_id=$1`, [tenantId, settings.pricePerMessageIdr]);
+  await db.query(`UPDATE wallet_accounts SET available_idr=available_idr-$2, updated_at=now() WHERE tenant_id=$1`, [tenantId, settings.pricePerMessageIdr]);
   await db.query(`INSERT INTO wallet_ledger(tenant_id,event_type,amount_idr,available_delta_idr,reserved_delta_idr,idempotency_key,message_id,attempt_no)
-    VALUES($1,'reserve',$2::bigint,-($2::bigint),$2::bigint,$3,$4,$5)`, [tenantId, settings.pricePerMessageIdr,
-    `message:${messageId}:${attemptNo}:reserve`, messageId, attemptNo]);
+    VALUES($1,'adjustment',$2::bigint,-($2::bigint),0,$3,$4,$5)`, [tenantId, settings.pricePerMessageIdr,
+    `message:${messageId}:${attemptNo}:debit`, messageId, attemptNo]);
   return { enabled: true, priceIdr: settings.pricePerMessageIdr };
 }
 
@@ -105,19 +104,28 @@ export async function creditSignupVoucherWithClient(db: Db, tenantId: string, am
 }
 
 export async function getWalletState(tenantId: string) {
-  const [account, settings, counts, devices, topups] = await Promise.all([
-    pool.query<QueryResultRow & { available_idr: number | string; reserved_idr: number | string }>(
-      'SELECT available_idr,reserved_idr FROM wallet_accounts WHERE tenant_id=$1', [tenantId]),
+  const [account, settings, counts, usage, devices, topups] = await Promise.all([
+    pool.query<QueryResultRow & { available_idr: number | string }>(
+      'SELECT available_idr FROM wallet_accounts WHERE tenant_id=$1', [tenantId]),
     pool.query<PaygSettingsRow>('SELECT enabled,price_per_message_idr FROM payg_settings WHERE singleton=true'),
     pool.query<QueryResultRow & { sent: number; failed: number }>(
       `SELECT count(*) FILTER (WHERE status IN ('sent','delivered','read'))::int AS sent,
               count(*) FILTER (WHERE status IN ('failed','blocked'))::int AS failed
        FROM messages WHERE tenant_id=$1 AND system_otp=false AND system_notification=false`, [tenantId]),
+    pool.query<QueryResultRow & { messages_charged: number; spent_idr: number | string }>(
+      `SELECT count(DISTINCT (message_id,attempt_no)) FILTER (WHERE message_id IS NOT NULL
+                AND (event_type='charge' OR (event_type='adjustment' AND available_delta_idr < 0)))::int AS messages_charged,
+              COALESCE(sum(CASE
+                WHEN event_type='charge' THEN amount_idr
+                WHEN event_type='adjustment' THEN -available_delta_idr
+                ELSE 0
+              END) FILTER (WHERE message_id IS NOT NULL),0)::bigint AS spent_idr
+       FROM wallet_ledger WHERE tenant_id=$1 AND event_type IN ('charge','adjustment')`, [tenantId]),
     pool.query<QueryResultRow & { device_key: string; sent: number; failed: number; charged_idr: number | string }>(
       `SELECT m.device_key,
               count(DISTINCT m.id) FILTER (WHERE m.status IN ('sent','delivered','read'))::int AS sent,
               count(DISTINCT m.id) FILTER (WHERE m.status IN ('failed','blocked'))::int AS failed,
-              COALESCE(sum(r.amount_idr) FILTER (WHERE r.state='captured'),0)::bigint AS charged_idr
+              COALESCE(sum(r.amount_idr) FILTER (WHERE r.state IN ('captured','debited')),0)::bigint AS charged_idr
        FROM messages m LEFT JOIN message_wallet_reservations r ON r.message_id=m.id
        WHERE m.tenant_id=$1 AND m.system_otp=false AND m.system_notification=false
        GROUP BY m.device_key ORDER BY m.device_key`, [tenantId]),
@@ -134,7 +142,9 @@ export async function getWalletState(tenantId: string) {
   return {
     enabled: setting?.enabled ?? false,
     price_per_message_idr: setting?.price_per_message_idr == null ? null : idr(setting.price_per_message_idr),
-    available_idr: idr(wallet?.available_idr), reserved_idr: idr(wallet?.reserved_idr),
+    available_idr: idr(wallet?.available_idr),
+    messages_charged: usage.rows[0]?.messages_charged ?? 0,
+    spent_idr: idr(usage.rows[0]?.spent_idr),
     messages_sent: counts.rows[0]?.sent ?? 0, messages_failed: counts.rows[0]?.failed ?? 0,
     devices: devices.rows.map((row) => ({ device_key: row.device_key, messages_sent: row.sent, messages_failed: row.failed, charged_idr: idr(row.charged_idr) })),
     recent_topups: topups.rows.map((row) => ({ invoice_number: row.invoice_number, amount_idr: idr(row.amount_idr), status: row.status, created_at: row.created_at })),

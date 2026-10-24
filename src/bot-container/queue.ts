@@ -491,7 +491,7 @@ async function processJobBody(
   const paygGuard = await queryFn(
     `SELECT p.enabled, COALESCE(m.quota_exempt,false) AS quota_exempt,
        EXISTS(SELECT 1 FROM message_wallet_reservations r
-         WHERE r.message_id=m.id AND r.attempt_no=COALESCE(m.retry_count,0) AND r.state='reserved') AS has_reservation
+         WHERE r.message_id=m.id AND r.attempt_no=COALESCE(m.retry_count,0) AND r.state='debited') AS has_reservation
      FROM messages m CROSS JOIN payg_settings p WHERE m.id=$1 AND p.singleton=true`,
     [message.id],
   );

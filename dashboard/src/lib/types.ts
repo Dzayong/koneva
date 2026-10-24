@@ -509,7 +509,7 @@ export interface Invoice {
 }
 
 export interface BillingState {
-  wallet: { enabled: boolean; price_per_message_idr: number | null; available_idr: number; reserved_idr: number; messages_sent: number; messages_failed: number;
+  wallet: { enabled: boolean; price_per_message_idr: number | null; available_idr: number; messages_charged: number; spent_idr: number; messages_sent: number; messages_failed: number;
     devices: Array<{ device_key: string; messages_sent: number; messages_failed: number; charged_idr: number }>;
     recent_topups: Array<{ invoice_number: string; amount_idr: number; status: string; created_at: string }> };
   subscription: {

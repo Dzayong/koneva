@@ -193,12 +193,13 @@ export default function BillingPage() {
       } catch { /* Mutation error is shown below. */ }
     };
     return <div className="mx-auto max-w-4xl space-y-6">
-      <div><h1 className="text-2xl font-semibold tracking-tight">Saldo</h1><p className="text-sm text-muted-foreground">Paket bulanan sudah digantikan saldo prabayar. Saldo dipotong hanya setelah WhatsApp mengonfirmasi pesan terkirim.</p></div>
+      <div><h1 className="text-2xl font-semibold tracking-tight">Saldo</h1><p className="text-sm text-muted-foreground">Paket bulanan sudah digantikan saldo prabayar. Biaya dipotong saat pesan mulai dikirim dan otomatis dikembalikan jika WhatsApp memastikan pengiriman gagal.</p></div>
       {checkoutReturned && <div role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">{checkoutReturned === "cancel" ? "Pembayaran dibatalkan. Saldo belum berubah." : "Menunggu konfirmasi pembayaran. Saldo akan masuk otomatis setelah pembayaran terverifikasi."}</div>}
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Saldo tersedia</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.available_idr)}</p></div>
-        <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Saldo ditahan untuk status belum pasti</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.reserved_idr)}</p></div>
-        <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Tarif per pesan berhasil</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.price_per_message_idr ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">Balasan AI memakai tarif yang sama.</p></div>
+        <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Pesan dikenai biaya</p><p className="mt-2 text-2xl font-semibold">{data.wallet.messages_charged.toLocaleString("id-ID")} pesan</p></div>
+        <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Total terpakai</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.spent_idr)}</p></div>
+        <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Tarif per pesan</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.price_per_message_idr ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">Balasan AI memakai tarif yang sama.</p></div>
       </section>
       <section className="rounded-xl border bg-card p-5">
         <div className="flex items-center gap-2"><Wallet className="h-5 w-5 text-primary" aria-hidden /><h2 className="font-semibold">Isi saldo lewat Duitku</h2></div>
@@ -208,7 +209,7 @@ export default function BillingPage() {
           <Button type="submit" disabled={topup.isPending || !Number.isInteger(amount) || amount < 10000 || amount > 10000000}>{topup.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Lanjutkan ke Duitku</Button>
         </form>
         {topup.error && <p role="alert" className="mt-3 text-sm text-destructive">{apiFailure(topup.error).code === "DUITKU_NOT_CONFIGURED" ? "Duitku sandbox belum dikonfigurasi di server." : apiFailure(topup.error).message}</p>}
-        <p className="mt-2 text-xs text-muted-foreground">Isi saldo Rp10.000–Rp10.000.000 per transaksi. Pesan gagal pasti tidak dikenai biaya; jika hasil pengiriman tidak pasti, saldonya ditahan untuk pemeriksaan dan tidak dikirim ulang otomatis.</p>
+        <p className="mt-2 text-xs text-muted-foreground">Isi saldo Rp10.000–Rp10.000.000 per transaksi. Pesan gagal pasti otomatis mendapat pengembalian saldo. Jika hasil pengiriman tidak pasti, biaya tetap dihitung dan pesan tidak dikirim ulang otomatis.</p>
       </section>
       <section className="rounded-xl border bg-card p-5"><h2 className="font-semibold">Pemakaian per device</h2>
         {data.wallet.devices.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">Belum ada aktivitas pesan.</p> : <div className="mt-3 divide-y">{data.wallet.devices.map((device) => <div key={device.device_key} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"><span className="font-mono">{device.device_key}</span><span>{device.messages_sent} berhasil · {device.messages_failed} gagal · {rupiah(device.charged_idr)}</span></div>)}</div>}
