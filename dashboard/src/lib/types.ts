@@ -289,7 +289,7 @@ export interface AutoReplyRule {
   trigger_pattern: string;
   response_type: "text" | "template" | "ai" | "ai_general";
   response_content: string;
-  response_config?: { skill_ids: string[]; variables: Record<string, string> };
+  response_config?: { skill_ids: string[]; variables: Record<string, string>; reply_to_trigger?: boolean };
   delay_ms: number;
   is_active: boolean;
   created_at: string;
@@ -301,7 +301,7 @@ export interface AutoReplyRuleInput {
   trigger_pattern: string;
   response_type?: "text" | "template" | "ai" | "ai_general";
   response_content: string;
-  response_config?: { skill_ids: string[]; variables: Record<string, string> };
+  response_config?: { skill_ids: string[]; variables: Record<string, string>; reply_to_trigger?: boolean };
   delay_ms: number;
 }
 

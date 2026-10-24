@@ -15,10 +15,11 @@ const idSchema = z.object({ id: z.string().uuid() });
 const triggerPattern = z.string().max(128);
 const aiReplyConfigSchema = z.object({
   skill_ids: z.array(z.enum(['customer_service', 'shop_assistant', 'faq_helper', 'research_context'])).max(4).default([]),
+  reply_to_trigger: z.boolean().default(true),
   variables: z.record(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/), z.string().max(1000)).default({})
     .refine((variables) => Object.keys(variables).length <= 12, 'Maksimal 12 variabel usaha.')
     .refine((variables) => !Object.keys(variables).some((key) => ['nama', 'nomor', 'tanggal'].includes(key)), 'Nama variabel nama, nomor, dan tanggal sudah disediakan otomatis.'),
-}).strict().default(EMPTY_AI_REPLY_RULE_CONFIG);
+}).strict().default({ ...EMPTY_AI_REPLY_RULE_CONFIG, reply_to_trigger: true });
 const ruleBody = z.object({
   device_key: z.string().min(1).max(32),
   trigger_type: z.enum(['keyword', 'regex', 'all']),

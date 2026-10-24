@@ -137,11 +137,12 @@ app.get('/ready', async (_request, response) => {
 // Private bot-to-gateway proxy: provider credentials and prompts are never injected into bot containers.
 app.post('/internal/ai-reply', adminAuth, async (request, response, next) => {
   try {
-    const input = z.object({ rule_id: z.string().uuid(), device_key: z.string().regex(/^WAPI-[A-Z0-9-]+$/i).max(64), message: z.string().min(1).max(4000), recipient: z.string().max(128).optional(), contact_name: z.string().max(160).optional() }).strict().parse(request.body);
+    const input = z.object({ rule_id: z.string().uuid(), device_key: z.string().regex(/^WAPI-[A-Z0-9-]+$/i).max(64), message: z.string().min(1).max(4000), recipient: z.string().max(128).optional(), contact_name: z.string().max(160).optional(), inbound_message_id: z.string().uuid().optional() }).strict().parse(request.body);
     const message = await generateInternalAiReply(pool, {
       ruleId: input.rule_id,
       deviceKey: input.device_key,
       inboundText: input.message,
+      ...(input.inbound_message_id ? { inboundMessageId: input.inbound_message_id } : {}),
       ...(input.recipient !== undefined ? { recipient: input.recipient } : {}),
       ...(input.contact_name !== undefined ? { contactName: input.contact_name } : {}),
     });

@@ -1,5 +1,5 @@
 import type { PresenceRoutine } from './presence';
-import type { WASocket, WAMessageKey } from '@whiskeysockets/baileys';
+import type { WASocket, WAMessage, WAMessageKey } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import type Redis from 'ioredis';
 import { renderMessageTemplate } from '../shared/utils/message-template';
@@ -18,25 +18,27 @@ export interface AutoReplyRule {
   device_key: string;
   trigger: { type: 'keyword' | 'regex' | 'all'; pattern: string };
   response: { type: 'text' | 'template' | 'ai' | 'ai_general'; content: string; delay_ms: number };
+  response_config?: { reply_to_trigger?: boolean };
   is_active: boolean;
 }
 
 interface RuleRow {
   id: string; tenant_id: string; device_key: string; trigger_type: AutoReplyRule['trigger']['type'];
   trigger_pattern: string; response_type: AutoReplyRule['response']['type']; response_content: string;
-  delay_ms: number; is_active: boolean;
+  delay_ms: number; is_active: boolean; response_config?: unknown;
 }
 
 export interface IncomingForAutoReply {
   id: string; tenantId: string; deviceId: string; deviceKey: string; from: string; content: string;
-  consentCommand?: 'stop' | 'start';
+  type?: 'text' | 'image' | 'document' | 'video' | 'audio'; consentCommand?: 'stop' | 'start';
   replyJid?: string; isGroup?: boolean; key?: WAMessageKey;
+  mediaId?: string; quotedMessage?: WAMessage;
 }
 
 export async function loadAutoReplyRules(deviceKey: string, queryFn: QueryFn): Promise<AutoReplyRule[]> {
   const result = await queryFn(
     `SELECT id, tenant_id, device_key, trigger_type, trigger_pattern, response_type,
-            response_content, delay_ms, is_active
+            response_content, response_config, delay_ms, is_active
      FROM auto_reply_rules WHERE device_key=$1 AND is_active=true ORDER BY created_at`,
     [deviceKey],
   );
@@ -44,6 +46,9 @@ export async function loadAutoReplyRules(deviceKey: string, queryFn: QueryFn): P
     id: row.id, tenant_id: row.tenant_id, device_key: row.device_key,
     trigger: { type: row.trigger_type, pattern: row.trigger_pattern },
     response: { type: row.response_type, content: row.response_content, delay_ms: row.delay_ms },
+    response_config: typeof row.response_config === 'object' && row.response_config !== null && !Array.isArray(row.response_config)
+      ? row.response_config as { reply_to_trigger?: boolean }
+      : { reply_to_trigger: true },
     is_active: row.is_active,
   }));
 }
@@ -177,7 +182,8 @@ export async function processAutoReply(
   let content: string;
   try {
     content = rule.response.type === 'ai' || rule.response.type === 'ai_general'
-      ? await generateAiReply(rule.id, message.deviceKey, message.content, message.from, contactName)
+      ? await generateAiReply(rule.id, message.deviceKey, message.content, message.from, contactName,
+        message.type === 'image' ? message.id : undefined)
       : rule.response.type === 'template'
         ? renderMessageTemplate(rule.response.content, {
           nama: contactName ?? message.from, nomor: message.from,
@@ -282,7 +288,10 @@ export async function processAutoReply(
 
           let sent: Awaited<ReturnType<WASocket['sendMessage']>>;
           try {
-            sent = await sock.sendMessage(jid, { text: content });
+            sent = await sock.sendMessage(jid, { text: content },
+              rule.response_config?.reply_to_trigger !== false && message.quotedMessage
+                ? { quoted: message.quotedMessage }
+                : undefined);
           } catch (error) {
             await queryFn(
               `UPDATE messages SET status='failed', error_message='delivery_uncertain' WHERE id=$1 AND status='sending'`,
@@ -297,7 +306,10 @@ export async function processAutoReply(
           return { sent, outboundId: preparedOutboundId };
         }
 
-        const sent = await sock.sendMessage(jid, { text: content });
+        const sent = await sock.sendMessage(jid, { text: content },
+          rule.response_config?.reply_to_trigger !== false && message.quotedMessage
+            ? { quoted: message.quotedMessage }
+            : undefined);
         const inserted = await queryFn(
           `INSERT INTO messages (tenant_id, device_id, device_key, from_number, to_number, content,
            chat_jid, type, status, direction, whatsapp_message_id, sent_at)
@@ -332,15 +344,15 @@ export async function processAutoReply(
 }
 
 /** Bots proxy only the matched rule id and message; provider key/prompt remain inside the API gateway. */
-async function generateAiReply(ruleId: string, deviceKey: string, inboundText: string, recipient: string, contactName?: string): Promise<string> {
+async function generateAiReply(ruleId: string, deviceKey: string, inboundText: string, recipient: string, contactName?: string, inboundMessageId?: string): Promise<string> {
   const baseUrl = process.env['API_GATEWAY_URL'] ?? 'http://api-gateway:8000';
   const adminKey = process.env['ADMIN_API_KEY'];
   if (!adminKey) throw new Error('ai_reply_gateway_unavailable');
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/internal/ai-reply`, {
     method: 'POST',
     headers: { 'x-admin-key': adminKey, 'content-type': 'application/json' },
-    body: JSON.stringify({ rule_id: ruleId, device_key: deviceKey, message: inboundText.slice(0, 4000), recipient: recipient.slice(0, 128), contact_name: contactName?.slice(0, 160) }),
-    signal: AbortSignal.timeout(15_000),
+    body: JSON.stringify({ rule_id: ruleId, device_key: deviceKey, message: inboundText.slice(0, 4000), recipient: recipient.slice(0, 128), contact_name: contactName?.slice(0, 160), ...(inboundMessageId ? { inbound_message_id: inboundMessageId } : {}) }),
+    signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`ai_reply_gateway_http_${response.status}`);
   const payload = await response.json() as { data?: { message?: unknown } };

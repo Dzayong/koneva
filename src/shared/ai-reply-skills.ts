@@ -26,9 +26,10 @@ export type AiReplySkillId = keyof typeof AI_REPLY_SKILLS;
 export interface AiReplyRuleConfig {
   skill_ids: AiReplySkillId[];
   variables: Record<string, string>;
+  reply_to_trigger?: boolean;
 }
 
-export const EMPTY_AI_REPLY_RULE_CONFIG: AiReplyRuleConfig = { skill_ids: [], variables: {} };
+export const EMPTY_AI_REPLY_RULE_CONFIG: AiReplyRuleConfig = { skill_ids: [], variables: {}, reply_to_trigger: true };
 
 export function normalizeAiReplyRuleConfig(value: unknown): AiReplyRuleConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...EMPTY_AI_REPLY_RULE_CONFIG };
@@ -42,5 +43,9 @@ export function normalizeAiReplyRuleConfig(value: unknown): AiReplyRuleConfig {
       if (/^[a-z][a-z0-9_]{0,39}$/i.test(key) && typeof raw === 'string') variables[key] = raw.slice(0, 1000);
     }
   }
-  return { skill_ids: [...new Set(skillIds)], variables };
+  return {
+    skill_ids: [...new Set(skillIds)],
+    variables,
+    reply_to_trigger: typeof record.reply_to_trigger === 'boolean' ? record.reply_to_trigger : true,
+  };
 }

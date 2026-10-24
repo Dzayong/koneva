@@ -226,7 +226,8 @@ export async function handleIncomingMessage(
   const inboundRecord: IncomingMessageRecord = {
     id: row.id, whatsappMessageId: message.key.id, tenantId: device.tenant_id, deviceId: device.id,
     deviceKey, from: fromNumber, content: parsed.content, type: parsed.type,
-    replyJid: remoteJid, isGroup: remoteJid.endsWith('@g.us'), key: message.key,
+    ...(mediaId ? { mediaId } : {}),
+    replyJid: remoteJid, isGroup: remoteJid.endsWith('@g.us'), key: message.key, quotedMessage: message,
   };
   const consentCommand = await recordRecipientConsentCommand(inboundRecord, log);
   if (consentCommand) inboundRecord.consentCommand = consentCommand;
@@ -270,11 +271,15 @@ export async function handleIncomingMessage(
 export interface IncomingMessageRecord {
   id: string; whatsappMessageId: string; tenantId: string; deviceId: string; deviceKey: string; from: string; content: string;
   type: 'text' | 'image' | 'document' | 'video' | 'audio';
+  /** Private media UUID, available after successful download for inbox and AI vision. */
+  mediaId?: string;
   consentCommand?: 'stop' | 'start';
   /** Chat JID to answer on (may be @lid); never rebuild it from `from`. */
   replyJid: string;
   isGroup: boolean;
   key: WAMessageKey;
+  /** Original WhatsApp message for rendering an actual quoted reply. */
+  quotedMessage?: WAMessage;
 }
 
 /** Persist START/STOP before webhook handling or any auto-reply decision. */

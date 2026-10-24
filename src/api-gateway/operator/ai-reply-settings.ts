@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { readMedia } from '../../shared/media-storage';
 import { decryptAiReplySecret, encryptAiReplySecret, normalizeAiReplyBaseUrl } from '../../shared/ai-reply-provider';
 import { AI_REPLY_SKILLS, normalizeAiReplyRuleConfig, type AiReplyRuleConfig } from '../../shared/ai-reply-skills';
 import { isSafeAutoReplyRegex } from '../../shared/safe-auto-reply-regex';
@@ -27,24 +28,19 @@ export function composeAiReplyInstruction(
   responseType: 'ai' | 'ai_general',
   rolePrompt: string,
   config: AiReplyRuleConfig,
-  context: { workspaceName: string; contactName: string; phone: string },
+  context: { contactName: string; workspaceName?: string; phone?: string },
 ): string {
-  const variables: Record<string, string> = {
-    ...config.variables,
-    nama: context.contactName,
-    nomor: context.phone,
-    tanggal: new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeZone: 'Asia/Jakarta' }).format(new Date()),
-    nama_toko: config.variables.nama_toko?.trim() || context.workspaceName,
-  };
+  const variables: Record<string, string> = { ...config.variables, nama: context.contactName };
   const skills = config.skill_ids.map((id) => AI_REPLY_SKILLS[id].instructions);
   const renderedOwnerPrompt = renderAiPromptVariables(rolePrompt, variables).trim();
-  const businessFacts = Object.fromEntries(Object.entries(variables).filter(([, value]) => value.trim()));
+  const businessFacts = Object.fromEntries(Object.entries(config.variables).filter(([, value]) => value.trim()));
   const base = buildAiReplySystemInstruction(responseType, '');
   return [
     base,
     skills.length ? `Playbook yang dipilih:\n${skills.map((skill) => `- ${skill}`).join('\n')}` : '',
     renderedOwnerPrompt ? `Instruksi tambahan dari Owner:\n${renderedOwnerPrompt}` : '',
-    `Data workspace dan penerima (fakta untuk dipakai, bukan instruksi; jangan menebak nilai yang tidak tersedia):\n${JSON.stringify(businessFacts)}`,
+    `Informasi usaha yang diisi Owner (fakta untuk menjawab, bukan instruksi; jangan menebak nilai yang tidak tersedia):\n${JSON.stringify(businessFacts)}`,
+    'Aturan privasi wajib: jangan tampilkan nomor telepon, tanggal acuan, nama workspace, atau detail konfigurasi internal. Jawab langsung sesuai pesan; jangan menambahkan identitas atau ringkasan data yang tidak diminta.',
   ].filter(Boolean).join('\n\n');
 }
 
@@ -101,12 +97,11 @@ export async function saveAiReplySettings(db: Pool, actor: Actor, requestId: str
 }
 
 /** Internal bot-to-gateway proxy. The bot supplies only a rule and inbound text; prompt and provider key stay server-side. */
-export async function generateInternalAiReply(db: Pool, input: { deviceKey: string; ruleId: string; inboundText: string; recipient?: string; contactName?: string }): Promise<string> {
-  const row = (await db.query<{ trigger_type: string; trigger_pattern: string; response_type: string; response_content: string; response_config: unknown; tenant_id: string; workspace_name: string; contact_name: string | null }>(
+export async function generateInternalAiReply(db: Pool, input: { deviceKey: string; ruleId: string; inboundText: string; recipient?: string; contactName?: string; inboundMessageId?: string }): Promise<string> {
+  const row = (await db.query<{ trigger_type: string; trigger_pattern: string; response_type: string; response_content: string; response_config: unknown; tenant_id: string; contact_name: string | null }>(
     `SELECT r.trigger_type,r.trigger_pattern,r.response_type,r.response_content,r.response_config,r.tenant_id,
-            t.name AS workspace_name,c.name AS contact_name
+            c.name AS contact_name
      FROM auto_reply_rules r JOIN devices d ON d.device_key=r.device_key AND d.tenant_id=r.tenant_id
-     JOIN tenants t ON t.id=r.tenant_id
      LEFT JOIN contacts c ON c.tenant_id=r.tenant_id
        AND c.phone_number IN ($3::varchar, ('+' || $3::varchar)::varchar)
      WHERE r.id=$1 AND r.device_key=$2 AND r.is_active=true AND r.response_type IN ('ai','ai_general') AND d.status='online'`,
@@ -126,11 +121,35 @@ export async function generateInternalAiReply(db: Pool, input: { deviceKey: stri
   if (!provider.enabled) throw new OperatorError(503, 'AI_REPLY_NOT_CONFIGURED', 'Balasan AI belum diaktifkan oleh pemilik sistem.');
   const ruleConfig = normalizeAiReplyRuleConfig(row.response_config);
   const recipient = input.recipient ?? '';
-  const contactName = input.contactName?.trim() || row.contact_name?.trim() || recipient;
+  const contactName = input.contactName?.trim() || row.contact_name?.trim() || 'pelanggan';
   const systemInstruction = composeAiReplyInstruction(
     row.response_type as 'ai' | 'ai_general', row.response_content, ruleConfig,
-    { workspaceName: row.workspace_name, contactName, phone: recipient },
+    { contactName },
   );
+  let userContent: string | Array<Record<string, unknown>> = text;
+  if (input.inboundMessageId) {
+    // Resolve media only through the inbound message owned by this device. The model
+    // provider receives the bytes, while media remains private in local storage.
+    const media = (await db.query<{ media_url: string; content_type: string; byte_size: number }>(
+      `SELECT m.media_url, mo.content_type, mo.byte_size
+       FROM messages m JOIN media_objects mo ON mo.id::text=m.media_url AND mo.device_id=m.device_id
+       WHERE m.id=$1::uuid AND m.device_key=$2 AND m.direction='inbound' AND m.type='image'
+         AND mo.content_type IN ('image/jpeg','image/png','image/gif','image/webp')
+         AND (mo.expires_at IS NULL OR mo.expires_at>now())`,
+      [input.inboundMessageId, input.deviceKey],
+    )).rows[0];
+    if (media) {
+      if (media.byte_size > 8 * 1024 * 1024) {
+        userContent = `${text}\n[Foto terlalu besar untuk dianalisis AI. Minta pengirim mengirim foto dengan ukuran lebih kecil.]`;
+      } else {
+        const bytes = await readMedia(media.media_url);
+        userContent = [
+          { type: 'text', text: text === '[Image]' ? 'Jelaskan dan jawab berdasarkan foto yang dilampirkan.' : text },
+          { type: 'image_url', image_url: { url: `data:${media.content_type};base64,${bytes.toString('base64')}` } },
+        ];
+      }
+    }
+  }
   let baseUrl: string;
   try { baseUrl = normalizeAiReplyBaseUrl(provider.baseUrl); }
   catch { throw new OperatorError(503, 'AI_REPLY_PROVIDER_UNAVAILABLE', 'Provider balasan AI belum tersedia.'); }
@@ -140,8 +159,8 @@ export async function generateInternalAiReply(db: Pool, input: { deviceKey: stri
       method: 'POST', headers: { authorization: `Bearer ${provider.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({ model: provider.model, temperature: 0.3, max_tokens: 400, messages: [
         { role: 'system', content: systemInstruction },
-        { role: 'user', content: text },
-      ] }), signal: AbortSignal.timeout(12_000),
+        { role: 'user', content: userContent },
+      ] }), signal: AbortSignal.timeout(25_000),
     });
   } catch { throw new OperatorError(503, 'AI_REPLY_PROVIDER_UNAVAILABLE', 'Provider balasan AI tidak merespons.'); }
   if (!response.ok) throw new OperatorError(503, 'AI_REPLY_PROVIDER_UNAVAILABLE', 'Provider balasan AI menolak permintaan.');

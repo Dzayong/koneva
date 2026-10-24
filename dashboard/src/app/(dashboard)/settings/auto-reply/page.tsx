@@ -264,6 +264,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
   const [textContent, setTextContent] = useState(rule?.response_type === "ai" || rule?.response_type === "ai_general" ? "" : rule?.response_content ?? "");
   const [aiPrompt, setAiPrompt] = useState(rule?.response_type === "ai" ? rule.response_content : "");
   const [skillIds, setSkillIds] = useState<string[]>(rule?.response_config?.skill_ids ?? []);
+  const [replyToTrigger, setReplyToTrigger] = useState(rule?.response_config?.reply_to_trigger ?? true);
   const [variableRows, setVariableRows] = useState(() => {
     const saved = Object.entries(rule?.response_config?.variables ?? {}).map(([key, value]) => ({ key, value }));
     return saved.length ? saved : [{ key: "nama_toko", value: "" }, { key: "info_usaha", value: "" }];
@@ -301,6 +302,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           response_config: {
             skill_ids: responseType === "ai" ? skillIds : [],
             variables: responseType === "ai" ? aiVariables : {},
+            reply_to_trigger: replyToTrigger,
           },
           delay_ms: Math.round(delay * 1000),
         },
@@ -355,6 +357,14 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
         {responseType !== "text" && <p className="text-xs text-muted-foreground">API key dan model dikelola admin sistem. AI hanya dipanggil saat pemicu cocok.</p>}
       </div>
 
+      <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 hover:bg-muted/40">
+        <Switch checked={replyToTrigger} onCheckedChange={setReplyToTrigger} aria-label="Balas pesan pemicu" />
+        <span>
+          <span className="block text-sm font-medium">Balas pesan pemicu di WhatsApp</span>
+          <span className="block text-xs text-muted-foreground">Balasan terhubung ke pesan yang memicu aturan. Matikan jika ingin mengirim balasan biasa.</span>
+        </span>
+      </label>
+
       {type !== "all" && (
         <div className="space-y-2">
           <Label htmlFor="rule-pattern">{type === "keyword" ? "Kata kunci atau frasa" : "Pola"}</Label>
@@ -385,7 +395,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           placeholder={responseType === "ai" ? "Contoh: Gunakan bahasa santai. Arahkan pelanggan melihat katalog sebelum bertanya harga." : "Halo {nama}! Ada yang bisa kami bantu?"}
         />
         <p className="text-xs text-muted-foreground">
-          {responseType === "ai" ? <>Tulis aturan khusus untuk usahamu. Variabel: <code>{"{nama}"}</code>, <code>{"{nomor}"}</code>, <code>{"{nama_toko}"}</code>, <code>{"{tanggal}"}</code>, dan variabel usaha di bawah.</> : <>Variables: {"{nama}"}, {"{nomor}"}, {"{tanggal}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
+          {responseType === "ai" ? <>Tulis aturan khusus untuk usahamu. Variabel: <code>{"{nama}"}</code> dan variabel usaha di bawah.</> : <>Variables: {"{nama}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
         </p>
         </>}
       </div>
