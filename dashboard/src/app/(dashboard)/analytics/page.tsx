@@ -23,7 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAnalyticsDaily, useAnalyticsOverview } from "@/hooks/use-analytics";
 import { useMessages } from "@/hooks/use-messages";
 import { useDevices } from "@/hooks/use-devices";
-import { getHealthConfig, getMessageStatusConfig } from "@/lib/utils";
+import { getMessageStatusConfig } from "@/lib/utils";
 import type { MessageStatus } from "@/lib/types";
 
 const STATUS_COLORS: Record<MessageStatus, string> = {
@@ -50,7 +50,7 @@ export default function AnalyticsPage() {
   const { data: overview, isLoading: overviewLoading } = useAnalyticsOverview();
   const { data: daily, isLoading: dailyLoading } = useAnalyticsDaily(14);
   const { data: messages, isLoading } = useMessages({ limit: 100, offset: 0 });
-  const { data: devices, isLoading: devicesLoading } = useDevices();
+  const { data: devices } = useDevices();
 
   const statusBreakdown = useMemo(() => {
     const counts = new Map<MessageStatus, number>();
@@ -221,31 +221,6 @@ export default function AnalyticsPage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Skor kesiapan device</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {devicesLoading ? (
-            <Skeleton className="h-32 w-full" />
-          ) : !devices || devices.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">Belum ada device</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {devices.map((d) => {
-                const config = getHealthConfig(d.health_score);
-                return (
-                  <div key={d.id} className="rounded-2xl border p-3 text-center">
-                    <p className="truncate text-sm font-medium">{d.label || d.device_key}</p>
-                    <p className={`text-2xl font-semibold tabular-nums ${config.color}`}>{d.health_score}</p>
-                    <p className="text-xs text-muted-foreground">{config.label}</p>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }

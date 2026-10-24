@@ -11,8 +11,6 @@ import { DeviceApiKeyPanel } from "@/components/devices/device-api-key-panel";
 import { DeviceEvents } from "@/components/devices/device-events";
 import { DeviceProfileTab } from "@/components/devices/device-profile";
 import { DeviceStatusBadge } from "@/components/devices/device-status-badge";
-import { HealthBar } from "@/components/devices/health-bar";
-import { HealthDetail } from "@/components/devices/health-detail";
 import { QRCodeDialog } from "@/components/devices/qr-code-dialog";
 import { MessageDetail, MessageRow, messageNumber } from "@/components/messages/message-item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -157,10 +155,9 @@ export default function DeviceDetailPage(props: {
         </header>
       )}
 
-      {/* Inline stats: label over figure, no separate cards */}
+      {/* Keep operational delivery facts visible without showing an unverified safety score. */}
       <dl className="flex flex-wrap gap-x-10 gap-y-4">
         {[
-          ["Kesiapan", device ? <HealthBar key="h" score={device.health_score} /> : "—"],
           ["Terkirim", stats.sent],
           ["Sampai", stats.delivered],
           ["Dibaca", stats.read],
@@ -169,7 +166,7 @@ export default function DeviceDetailPage(props: {
           <div key={String(label)}>
             <dt className="text-label">{label}</dt>
             <dd className="mt-1 text-2xl font-medium tabular-nums">
-              {messagesLoading && label !== "Kesiapan" ? <Skeleton className="h-8 w-8" /> : value}
+              {messagesLoading ? <Skeleton className="h-8 w-8" /> : value}
             </dd>
           </div>
         ))}
@@ -185,7 +182,7 @@ export default function DeviceDetailPage(props: {
         </TabsList>
 
         <TabsContent value="ringkasan" className="mt-6">
-          <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+          <div className="grid gap-6">
             <section>
               <h3 className="text-heading mb-3 text-lg">Pesan terbaru</h3>
               <div className="overflow-hidden rounded-2xl border bg-card shadow-card">
@@ -217,9 +214,6 @@ export default function DeviceDetailPage(props: {
               )}
             </section>
 
-            <aside className="rounded-2xl border bg-card p-5 shadow-card lg:sticky lg:top-6 lg:self-start">
-              <HealthDetail deviceKey={deviceKey} />
-            </aside>
           </div>
         </TabsContent>
 

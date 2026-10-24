@@ -57,11 +57,11 @@ import type {
   DokuCheckoutResult,
   AutoReplyRule,
   AutoReplyRuleInput,
+  WorkspaceSendHours,
   CreateDeviceRequest,
   Device,
   InboxConversation,
   InboxDevice,
-  DeviceHealthData,
   DashboardStats,
   Message,
   MessageListParams,
@@ -496,6 +496,20 @@ class ApiClient {
     return response.data.data;
   }
 
+  async getWorkspaceSendHours(): Promise<WorkspaceSendHours> {
+    const response = await this.client.get<ApiSuccess<WorkspaceSendHours>>(
+      "/api/v1/workspace/send-hours", { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
+  async updateWorkspaceSendHours(input: WorkspaceSendHours): Promise<WorkspaceSendHours> {
+    const response = await this.client.put<ApiSuccess<WorkspaceSendHours>>(
+      "/api/v1/workspace/send-hours", input, { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
   async createAutoReplyRule(data: AutoReplyRuleInput): Promise<AutoReplyRule> {
     const response = await this.client.post<ApiSuccess<AutoReplyRule>>(
       "/api/v1/auto-reply-rules",
@@ -556,14 +570,6 @@ class ApiClient {
     return response.data.data;
   }
 
-
-  async getDeviceHealth(deviceKey: string): Promise<DeviceHealthData> {
-    const response = await this.client.get<ApiSuccess<DeviceHealthData>>(
-      `/api/v1/devices/${deviceKey}/health`,
-      { skipErrorToast: true },
-    );
-    return response.data.data;
-  }
 
   async getWorkspaceReadiness(): Promise<WorkspaceReadiness> {
     const response = await this.client.get<ApiSuccess<WorkspaceReadiness>>("/api/v1/readiness/levels", { skipErrorToast: true });

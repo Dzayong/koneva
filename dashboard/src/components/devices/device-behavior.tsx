@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState } from "react";
 import { motion } from "framer-motion";
-import { Check, ChevronDown, Moon, Sun, Timer } from "lucide-react";
+import { Check, ChevronDown, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,15 +17,9 @@ const DeviceKeyContext = createContext("");
 const useDeviceKey = () => useContext(DeviceKeyContext);
 
 const seconds = (ms: number) => (ms % 1000 === 0 ? `${ms / 1000}` : (ms / 1000).toFixed(1));
-const toTime = (hour: number) => `${String(Math.floor(hour)).padStart(2, "0")}:${String(Math.round((hour % 1) * 60)).padStart(2, "0")}`;
-const fromTime = (value: string) => {
-  const [h = "0", m = "0"] = value.split(":");
-  return Number(h) + Number(m) / 60;
-};
-
 function facts(p: Preset): string[] {
   const delay = p.delay_min_ms === p.delay_max_ms ? `${seconds(p.delay_min_ms)} dtk` : `${seconds(p.delay_min_ms)}–${seconds(p.delay_max_ms)} dtk`;
-  return [p.always_on ? "Aktif 24 jam" : `Jam ${toTime(p.wake_hour)}–${toTime(p.sleep_hour)}`, `Jeda ${delay}`, `Istirahat tiap ±${p.burst_size} pesan`];
+  return [`Jeda ${delay}`, `Istirahat tiap ±${p.burst_size} pesan`];
 }
 
 function PresetPicker({ presets, current, canEdit }: { presets: Preset[]; current: Persona["preset"]; canEdit: boolean }) {
@@ -72,13 +66,10 @@ function PresetPicker({ presets, current, canEdit }: { presets: Preset[]; curren
 function Advanced({ persona, canEdit, deviceKey }: { persona: Persona; canEdit: boolean; deviceKey: string }) {
   const update = useUpdatePersona(deviceKey);
   const [open, setOpen] = useState(false);
-  const [alwaysOn, setAlwaysOn] = useState(persona.always_on);
   const [mode, setMode] = useState<"flat" | "random">(persona.delay_mode);
   const [flat, setFlat] = useState(seconds(persona.delay_min_ms));
   const [min, setMin] = useState(seconds(persona.delay_min_ms));
   const [max, setMax] = useState(seconds(persona.delay_max_ms));
-  const [wake, setWake] = useState(toTime(persona.wake_hour));
-  const [sleep, setSleep] = useState(toTime(persona.sleep_hour));
   const [presence, setPresence] = useState(persona.presence_enabled);
   const [typingEnabled, setTypingEnabled] = useState(persona.typing_enabled);
   const [pMin, setPMin] = useState(seconds(persona.presence_min_ms));
@@ -87,17 +78,14 @@ function Advanced({ persona, canEdit, deviceKey }: { persona: Persona; canEdit: 
   const n = (v: string) => Math.round(Number(v) * 1000);
   const valid =
     (mode === "flat" ? n(flat) >= 1000 && n(flat) <= 600_000 : n(min) >= 1000 && n(max) >= n(min) && n(max) <= 600_000) &&
-    (alwaysOn || fromTime(wake) < fromTime(sleep)) &&
     (!presence || (n(pMin) >= 1000 && n(pMax) >= n(pMin) && n(pMax) <= 600_000));
 
   const save = () => {
     update.mutate({
-      always_on: alwaysOn,
       presence_enabled: presence,
       typing_enabled: typingEnabled,
       ...(presence ? { presence_min_ms: n(pMin), presence_max_ms: n(pMax) } : {}),
       ...(mode === "flat" ? { delay_ms: n(flat) } : { delay_min_ms: n(min), delay_max_ms: n(max) }),
-      ...(alwaysOn ? {} : { wake_hour: fromTime(wake), sleep_hour: fromTime(sleep) }),
     });
   };
 
@@ -110,21 +98,6 @@ function Advanced({ persona, canEdit, deviceKey }: { persona: Persona; canEdit: 
       </button>
       {open && (
         <div className="space-y-5 border-t p-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Label htmlFor="always-on">Aktif 24 jam</Label>
-              <p className="text-sm text-muted-foreground">Membalas dan mengirim kapan saja. Jika mati, nomor mengikuti jam aktifnya.</p>
-            </div>
-            <Switch id="always-on" checked={alwaysOn} onCheckedChange={setAlwaysOn} disabled={!canEdit} />
-          </div>
-
-          {!alwaysOn && (
-            <div className="flex flex-wrap items-end gap-4">
-              <div className="space-y-1.5"><Label htmlFor="wake">Mulai aktif</Label><Input id="wake" type="time" value={wake} onChange={(e) => setWake(e.target.value)} disabled={!canEdit} className="w-32" /></div>
-              <div className="space-y-1.5"><Label htmlFor="sleep">Berhenti</Label><Input id="sleep" type="time" value={sleep} onChange={(e) => setSleep(e.target.value)} disabled={!canEdit} className="w-32" /></div>
-            </div>
-          )}
-
           <fieldset className="space-y-3">
             <legend className="text-sm font-medium">Jeda sebelum mengirim</legend>
             <div role="radiogroup" aria-label="Jenis jeda" className="inline-flex rounded-lg border p-0.5">
@@ -144,7 +117,7 @@ function Advanced({ persona, canEdit, deviceKey }: { persona: Persona; canEdit: 
                 <p className="pb-2 text-sm text-muted-foreground">Dipilih acak di antara keduanya setiap pesan.</p>
               </div>
             )}
-            {!valid && <p role="alert" className="text-sm text-destructive">Periksa angka: jeda 1 detik sampai 10 menit, angka terbesar tidak boleh lebih kecil dari yang terkecil, dan jam berhenti harus setelah jam mulai.</p>}
+            {!valid && <p role="alert" className="text-sm text-destructive">Periksa jeda 1 detik sampai 10 menit dan pastikan angka terbesar tidak lebih kecil dari yang terkecil.</p>}
           </fieldset>
 
           <fieldset className="space-y-3 border-t pt-5">
@@ -187,22 +160,11 @@ function Advanced({ persona, canEdit, deviceKey }: { persona: Persona; canEdit: 
 }
 
 function Status({ activity }: { activity: DeviceActivity }) {
-  const { today_window: w, fatigue: f, persona } = activity;
-  const opens = w.opens_in_minutes;
+  const { fatigue: f } = activity;
   const restEnds = f.rest_ends_at ? new Date(f.rest_ends_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : null;
   const max = Math.max(1, ...activity.daily.map((d) => d.sent + d.received));
   return (
-    <div className="grid gap-6 md:grid-cols-3">
-      <div>
-        <p className="text-label">Sekarang</p>
-        <p className="mt-2 flex items-center gap-2 text-lg font-medium">
-          {persona.always_on || w.open ? <Sun className="h-5 w-5 text-amber-500" /> : <Moon className="h-5 w-5 text-muted-foreground" />}
-          {persona.always_on ? "Aktif 24 jam" : w.open ? `Aktif sampai ${w.end}` : "Istirahat malam"}
-        </p>
-        {!persona.always_on && !w.open && (
-          <p className="mt-1 text-sm text-muted-foreground">Bangun pukul {w.start}, sekitar {opens >= 60 ? `${Math.floor(opens / 60)} jam ${opens % 60} menit` : `${opens} menit`} lagi.</p>
-        )}
-      </div>
+    <div className="grid gap-6 md:grid-cols-2">
       <div>
         <p className="text-label">Kelelahan</p>
         <p className="mt-2 flex items-center gap-2 text-lg font-medium"><Timer className="h-5 w-5 text-muted-foreground" />{f.resting ? `Istirahat${restEnds ? ` sampai ${restEnds}` : ""}` : "Segar"}</p>

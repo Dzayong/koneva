@@ -1,6 +1,6 @@
 # Rencana Migrasi Top-up PAYG dari DOKU ke Duitku
 
-**Status:** integrasi POP sandbox dan migration 066 sudah ada di aplikasi; tes sintetis 8/8 pernah lulus dan fitur sudah dideploy ke stack lokal. Pembayaran sandbox sungguhan belum diuji karena credential Duitku di `.env.personal` masih kosong. Jangan memakai credential yang pernah dikirim melalui chat; rotasi lalu isi langsung di file lokal.
+**Status:** integrasi POP sandbox dan migration 066 sudah ada di aplikasi; tes sintetis 8/8 pernah lulus dan fitur sudah dideploy ke stack lokal. Pemilik melaporkan credential sandbox sudah diisi ke `.env.personal`; checkout dan callback sandbox sungguhan belum diuji setelah perubahan itu. Nilai credential tidak dibaca atau dicatat. Credential yang pernah dikirim lewat chat perlu dirotasi.
 **Tanggal audit:** 24 Oktober 2026.
 
 ## Rekomendasi
@@ -52,7 +52,7 @@ Top-up baru memakai Duitku POP sandbox. Pemilik menyetujui menutup top-up DOKU y
 - Checkout PAYG memakai endpoint KONEVA yang sama; callback diverifikasi dan dikreditkan atomik/idempoten.
 - Migrasi `066_duitku_payg_topups.sql` menutup DOKU pending dan menambahkan provider/reference serta log callback.
 - Tes sintetis lewat `scripts/test-duitku-sandbox.sh` lulus 8/8 untuk alur checkout/callback dan kasus signature, nominal, replay, order tidak dikenal/void, serta transisi top-up pending DOKU.
-- Integrasi dan migration 066 tersedia pada stack lokal. `.env.personal` saat audit belum berisi `DUITKU_MERCHANT_CODE` atau `DUITKU_API_KEY`; karena itu checkout provider dan callback pembayaran nyata belum teruji. `APP_PUBLIC_URL` memakai tunnel sementara untuk sandbox; siapkan domain publik milik usaha sebelum verifikasi merchant produksi.
+- Integrasi dan migration 066 tersedia pada stack lokal. Pemilik melaporkan `DUITKU_MERCHANT_CODE` dan `DUITKU_API_KEY` sudah diisi ke `.env.personal`; checkout provider dan callback pembayaran sandbox belum diverifikasi sesudahnya. `APP_PUBLIC_URL` memakai tunnel sementara untuk sandbox; siapkan domain publik milik usaha sebelum verifikasi merchant produksi.
 - Jangan mencatat atau mengirim credential Duitku lewat chat, PDF, dokumentasi, git, atau log. Isi hanya di `.env.personal` mode privat dan recreate `api-gateway` untuk memuatnya.
 
 ## Bukan bagian dari migrasi gateway ini

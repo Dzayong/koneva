@@ -50,6 +50,8 @@ const RULES: readonly Rule[] = [
   [['POST'], /^\/contacts\/broadcast-consent$/, 'messages:send'],
   [['POST'], /^\/broadcast$/, 'messages:send'],
   [['GET'], /^\/messages(\/[^/]+)?$/, 'messages:read'],
+  [['GET'], /^\/workspace\/send-hours$/, 'messages:read'],
+  [['PUT'], /^\/workspace\/send-hours$/, 'content:write'],
   [['POST'], /^\/messages\/[^/]+\/retry$/, 'messages:send'],
   // The QR code links the number to whoever scans it, so viewing it is a write-level power.
   [['GET'], /^\/devices\/[^/]+\/qr$/, 'devices:write'],

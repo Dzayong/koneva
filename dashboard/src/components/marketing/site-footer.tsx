@@ -7,7 +7,7 @@ import { PhotoBackdrop } from "./photo-backdrop";
 
 const COLUMNS = [
   { title: "Produk", links: [{ label: "Tampilan asli", href: "/#tur" }, { label: "Keamanan nomor", href: "/#features" }, { label: "Saldo dan tarif", href: "/#harga" }, { label: "Pertanyaan umum", href: "/#faq" }] },
-  { title: "Mulai", links: [{ label: "Coba gratis 14 hari", href: "/signup" }, { label: "Masuk", href: "/login" }, { label: "Dokumentasi API", href: "/docs" }] },
+  { title: "Mulai", links: [{ label: "Buat akun", href: "/signup" }, { label: "Panduan pendaftaran", href: "/panduan/daftar-dan-klaim-voucher" }, { label: "Masuk", href: "/login" }, { label: "Dokumentasi API", href: "/docs" }] },
   { title: "Legal", links: [{ label: "Syarat dan Ketentuan", href: "/syarat" }, { label: "Kebijakan Privasi", href: "/privasi" }] },
 ];
 
@@ -21,7 +21,7 @@ export function SiteFooter() {
       <div className="relative mx-auto grid max-w-7xl gap-10 px-6 py-14 md:grid-cols-[1.4fr_1fr_1fr_1fr_1.2fr]">
         <div>
           <KonevaLogo />
-          <p className="mt-4 max-w-xs text-sm text-muted-foreground">API WhatsApp dengan nomor Anda sendiri, dilengkapi perlindungan nomor, pelacakan pengiriman, dan dashboard tim.</p>
+          <p className="mt-4 max-w-xs text-sm text-muted-foreground">API WhatsApp dengan nomor Anda sendiri, inbox bersama untuk tim CS, status pengiriman, dan saldo prabayar.</p>
         </div>
         {COLUMNS.map((c) => (
           <nav key={c.title} aria-label={c.title}>

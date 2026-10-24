@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 import {
   canSendMessage,
   countMessagesSince,
-  getDailyCapByHealthScore,
-  isWithinSendingWindow,
   type QueryFn,
 } from './anti-ban';
 
@@ -17,7 +15,7 @@ test('send budget counts persisted in-flight sends as reservations', async () =>
   assert.match(statement, /COALESCE\(sent_at, send_started_at, created_at\)/);
 });
 
-test('new devices can send proactive messages and media immediately; ordinary caps and pause checks remain', async () => {
+test('new devices can send proactive messages and media without daily caps; manual pause remains', async () => {
   const now = new Date('2026-09-24T05:00:00Z');
   const newDevice: FakeDeviceRow = {
     id: 'device-immediate-send', tenant_id: 'tenant-1', device_key: 'WAPI-IMMEDIATE-SEND', status: 'online', health_score: 50,
@@ -28,36 +26,13 @@ test('new devices can send proactive messages and media immediately; ordinary ca
   const approved = await canSendMessage(newDevice.device_key, { ...input, hasMedia: true });
   assert.equal(approved.allowed, true, `denied: ${approved.reason}`);
 
-  const capped = await canSendMessage(newDevice.device_key, { ...input, hasMedia: true, queryFn: makeFakeQueryFn(newDevice, approved.dailyCap) });
-  assert.equal(capped.reason, 'daily_cap_reached');
+  const secondSend = await canSendMessage(newDevice.device_key, { ...input, hasMedia: true, queryFn: makeFakeQueryFn(newDevice, 0) });
+  assert.equal(secondSend.allowed, true);
 
   const paused = { ...newDevice, status: 'paused' };
   const blocked = await canSendMessage(paused.device_key, { ...input, hasMedia: true, queryFn: makeFakeQueryFn(paused, 0) });
   assert.equal(blocked.reason, 'device_paused');
 });
-
-test('daily cap follows health score tiers', () => {
-  assert.equal(getDailyCapByHealthScore(95), 100);
-  assert.equal(getDailyCapByHealthScore(90), 100);
-  assert.equal(getDailyCapByHealthScore(80), 50);
-  assert.equal(getDailyCapByHealthScore(60), 20);
-  assert.equal(getDailyCapByHealthScore(35), 5);
-  assert.equal(getDailyCapByHealthScore(10), null);
-});
-
-test('sending window rejects outside 8am-10pm WIB', () => {
-  const noonUtc = new Date('2026-09-24T05:00:00Z'); // 12:00 WIB
-  const midnightUtc = new Date('2026-09-24T18:00:00Z'); // 01:00 WIB next day
-  assert.equal(isWithinSendingWindow(noonUtc), true);
-  assert.equal(isWithinSendingWindow(midnightUtc), false);
-});
-
-test('friday lunch block is opt-in', () => {
-  const fridayLunchUtc = new Date('2026-09-25T05:30:00Z'); // Friday 12:30 WIB
-  assert.equal(isWithinSendingWindow(fridayLunchUtc), true);
-  assert.equal(isWithinSendingWindow(fridayLunchUtc, { blockFridayLunch: true }), false);
-});
-
 
 interface FakeDeviceRow {
   id: string;
@@ -145,7 +120,7 @@ test('canSendMessage denies a banned device', async () => {
   assert.equal(decision.reason, 'device_banned');
 });
 
-test('canSendMessage allows proactive media from a brand-new device', async () => {
+test('canSendMessage allows proactive media from a brand-new device at any hour without schedule context', async () => {
   const device: FakeDeviceRow = {
     id: 'device-2',
     tenant_id: 'tenant-1',
@@ -161,10 +136,10 @@ test('canSendMessage allows proactive media from a brand-new device', async () =
     hasMedia: true,
   });
   assert.equal(decision.allowed, true);
-  assert.ok(decision.dailyCap > 0, `cap ${decision.dailyCap}`);
+  assert.equal(decision.dailyCap, 0);
 });
 
-test('canSendMessage still denies once the health-based daily cap is reached', async () => {
+test('canSendMessage does not use sent-today volume or health score to block sends', async () => {
   const device: FakeDeviceRow = {
     id: 'device-3',
     tenant_id: 'tenant-1',
@@ -177,8 +152,7 @@ test('canSendMessage still denies once the health-based daily cap is reached', a
     queryFn: makeFakeQueryFn(device, 100),
     now: new Date('2026-09-24T05:00:00Z'),
   });
-  assert.equal(decision.allowed, false);
-  assert.equal(decision.reason, 'daily_cap_reached');
+  assert.equal(decision.allowed, true);
 });
 
 test('canSendMessage rejects spammy content even when quota allows it', async () => {
@@ -245,17 +219,23 @@ test('proactive sends rest after a burst and are re-queued at the end of the res
   assert.notEqual(reply.reason, 'resting');
 });
 
-test('outside the number\'s active hours the send is deferred until it wakes up', async () => {
+test('workspace hours defer broadcasts while normal API sends are not scheduled', async () => {
   const device: FakeDeviceRow = {
     id: 'device-night', tenant_id: 'tenant-1', device_key: 'WAPI-NIGHT', status: 'online', health_score: 50,
     paused_until: null,
   };
-  const decision = await canSendMessage('WAPI-NIGHT', {
-    queryFn: makeFakeQueryFn(device, 0), isProactive: false, content: 'Halo',
+  const queryFn = makeFakeQueryFn(device, 0);
+  const normalSend = await canSendMessage('WAPI-NIGHT', {
+    queryFn, isProactive: false, content: 'Halo',
     now: new Date('2026-09-23T20:00:00Z'), // 03:00 WIB
   });
-  assert.equal(decision.reason, 'outside_sending_window');
-  assert.ok((decision.retryAfterMs ?? 0) >= 3 * 3_600_000, `retry ${decision.retryAfterMs}`);
+  assert.equal(normalSend.allowed, true);
+  const broadcast = await canSendMessage('WAPI-NIGHT', {
+    queryFn, isProactive: false, content: 'Halo', scheduleContext: 'broadcast',
+    now: new Date('2026-09-23T20:00:00Z'), // 03:00 WIB
+  });
+  assert.equal(broadcast.reason, 'outside_working_hours');
+  assert.ok((broadcast.retryAfterMs ?? 0) >= 3 * 3_600_000, `retry ${broadcast.retryAfterMs}`);
 });
 
 function urgentFixture(id: string): FakeDeviceRow {
@@ -285,7 +265,7 @@ test('urgent (OTP) sends skip active hours, rests, opt-out, content rules and ar
   assert.equal(urgent.typing.shouldSimulate, false);
 });
 
-test('urgent sends still respect paused/banned devices and the daily cap', async () => {
+test('urgent sends still respect paused/banned devices and do not use a daily cap', async () => {
   const banned = { ...urgentFixture('device-otp-banned'), status: 'banned' };
   const b = await canSendMessage('DEVICE-OTP-BANNED', { queryFn: makeFakeQueryFn(banned, 0), priority: 'urgent', isProactive: true });
   assert.equal(b.reason, 'device_banned');
@@ -294,8 +274,7 @@ test('urgent sends still respect paused/banned devices and the daily cap', async
   const c = await canSendMessage('DEVICE-OTP-CAP', {
     queryFn: makeFakeQueryFn(capped, 999), priority: 'urgent', isProactive: true, now: new Date('2026-09-24T05:00:00Z'),
   });
-  assert.equal(c.allowed, false);
-  assert.equal(c.reason, 'daily_cap_reached');
+  assert.equal(c.allowed, true);
 });
 
 test('a 24-hour number keeps sending at night, and a flat delay is exactly that delay', async () => {

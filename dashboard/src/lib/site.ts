@@ -2,8 +2,8 @@
 export const SITE = {
   name: "KONEVA",
   url: (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:13000").replace(/\/$/, ""),
-  title: "KONEVA: API WhatsApp dengan nomor sendiri",
+  title: "KONEVA — WhatsApp API dan inbox CS untuk tim",
   description:
-    "Kirim OTP, notifikasi, dan pesan WhatsApp lewat API dengan nomor Anda sendiri. Kelola percakapan, izin penerima, status pesan, dan webhook dari satu dashboard. Risiko pembatasan WhatsApp tetap berlaku.",
+    "Hubungkan aplikasi ke WhatsApp lewat REST API dan kelola percakapan pelanggan bersama tim CS dalam satu inbox. Gunakan nomor sendiri dan saldo prabayar; risiko pembatasan WhatsApp tetap berlaku.",
   locale: "id_ID",
 } as const;

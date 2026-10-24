@@ -36,7 +36,13 @@ const MAX_ATTEMPTS = 3;
 const BACKOFF_BASE_MS = 5_000;
 const RETRY_LATER_DELAY_MS = 5 * 60_000;
 const MAX_NORMAL_QUEUE_AGE_MS = 15 * 60_000;
+const MAX_BROADCAST_QUEUE_AGE_MS = 48 * 60 * 60_000;
 const MAX_URGENT_QUEUE_AGE_MS = 2 * 60_000;
+
+function maxQueueAgeMs(message: MessageRecord): number {
+  if (message.priority === 'urgent') return MAX_URGENT_QUEUE_AGE_MS;
+  return message.sendContext === 'broadcast' ? MAX_BROADCAST_QUEUE_AGE_MS : MAX_NORMAL_QUEUE_AGE_MS;
+}
 
 class RecipientConsentDenied extends Error {
   constructor(readonly code: 'RECIPIENT_CONSENT_REQUIRED' | 'RECIPIENT_OPTED_OUT') { super(code); }
@@ -44,11 +50,9 @@ class RecipientConsentDenied extends Error {
 
 const TRANSIENT_DENIAL_REASONS = new Set<AntiBanDenialReason>([
   'device_paused',
-  'health_score_too_low',
-  'daily_cap_reached',
   'rate_limit_per_minute',
   'resting',
-  'outside_sending_window',
+  'outside_working_hours',
 ]);
 
 function isTransientDenial(reason: AntiBanDenialReason | undefined): boolean {
@@ -129,6 +133,7 @@ interface MessageRow {
   system_otp: boolean;
   system_notification: boolean;
   reply_to_message_id: string | null;
+  send_context?: 'api' | 'broadcast';
   created_at: Date;
   queue_started_at: Date;
   send_started_at: Date | null;
@@ -154,6 +159,7 @@ function mapMessageRow(row: MessageRow): MessageRecord {
     ...(row.system_otp ? { systemOtp: true } : {}),
     ...(row.system_notification ? { systemNotification: true } : {}),
     ...(row.reply_to_message_id ? { replyToMessageId: row.reply_to_message_id } : {}),
+    ...(row.send_context ? { sendContext: row.send_context } : {}),
     createdAt: row.created_at,
     queueStartedAt: row.queue_started_at,
   };
@@ -164,7 +170,7 @@ async function getMessageById(id: string, queryFn: QueryFn): Promise<MessageReco
     `SELECT id, tenant_id, device_id, device_key, to_number, content, media_url, type, status,
             whatsapp_message_id, error_message, priority, COALESCE(quota_exempt, false) AS quota_exempt,
             COALESCE(system_otp, false) AS system_otp, COALESCE(system_notification, false) AS system_notification,
-            reply_to_message_id, created_at, queue_started_at, send_started_at
+            reply_to_message_id, send_context, created_at, queue_started_at, send_started_at
      FROM messages WHERE id = $1`,
     [id],
   );
@@ -398,7 +404,8 @@ async function applyTransmitBlock(
   if (reason === 'device_paused' && message.priority !== 'urgent') {
     const now = Date.now();
     const age = now - message.queueStartedAt.getTime();
-    if (age >= MAX_NORMAL_QUEUE_AGE_MS || RETRY_LATER_DELAY_MS >= MAX_NORMAL_QUEUE_AGE_MS - age) {
+    const maxAge = maxQueueAgeMs(message);
+    if (age >= maxAge || RETRY_LATER_DELAY_MS >= maxAge - age) {
       await expireQueuedMessage(message, deviceKey, queryFn, log, now);
     }
     log.warn('Device paused, deferring message', { messageId: message.id });
@@ -496,8 +503,8 @@ async function processJobBody(
   }
   const now = deps.now?.() ?? new Date();
   const queueAgeMs = now.getTime() - message.queueStartedAt.getTime();
-  const maxQueueAgeMs = message.priority === 'urgent' ? MAX_URGENT_QUEUE_AGE_MS : MAX_NORMAL_QUEUE_AGE_MS;
-  if (queueAgeMs >= maxQueueAgeMs) {
+  const maxAge = maxQueueAgeMs(message);
+  if (queueAgeMs >= maxAge) {
     await expireQueuedMessage(message, deviceKey, queryFn, log, now.getTime());
   }
   if (message.systemOtp && Date.now() - message.createdAt.getTime() >= 10 * 60_000) {
@@ -552,6 +559,7 @@ async function processJobBody(
     hasMedia: message.type !== 'text',
     isProactive,
     priority: message.priority,
+    ...(message.sendContext === 'broadcast' ? { scheduleContext: 'broadcast' as const } : {}),
     ...(deps.now ? { now: deps.now() } : {}),
   });
 
@@ -561,7 +569,7 @@ async function processJobBody(
 
     if (isTransientDenial(decision.reason) && message.priority !== 'urgent') {
       const retryDelay = decision.retryAfterMs ?? RETRY_LATER_DELAY_MS;
-      if (retryDelay >= MAX_NORMAL_QUEUE_AGE_MS - queueAgeMs) {
+      if (retryDelay >= maxAge - queueAgeMs) {
         await expireQueuedMessage(message, deviceKey, queryFn, log, now.getTime());
       }
       log.warn('Anti-ban deferred message, re-queueing later', {
@@ -652,7 +660,7 @@ async function processJobBody(
       return withDeviceSendLock(message.deviceKey, async () => {
       const currentReply = await getReplyContext(message, queryFn, deps.now?.() ?? new Date());
       const sendNow = deps.now?.() ?? new Date();
-      if (sendNow.getTime() - message.queueStartedAt.getTime() >= maxQueueAgeMs) {
+      if (sendNow.getTime() - message.queueStartedAt.getTime() >= maxQueueAgeMs(message)) {
         await expireQueuedMessage(message, deviceKey, queryFn, log, sendNow.getTime());
       }
       const currentConsent = await getStoredRecipientConsent(queryFn, message.tenantId,
@@ -764,7 +772,7 @@ async function processJobBody(
     if (isTransientDenial(sendResult.decision.reason) && message.priority !== 'urgent') {
       const retryDelay = sendResult.decision.retryAfterMs ?? RETRY_LATER_DELAY_MS;
       const deniedAt = deps.now?.() ?? new Date();
-      if (retryDelay >= MAX_NORMAL_QUEUE_AGE_MS - (deniedAt.getTime() - message.queueStartedAt.getTime())) {
+      if (retryDelay >= maxAge - (deniedAt.getTime() - message.queueStartedAt.getTime())) {
         await expireQueuedMessage(message, deviceKey, queryFn, log, deniedAt.getTime());
       }
       await updateMessageStatus(message.id, { status: 'queued', errorMessage: reason }, queryFn);

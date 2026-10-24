@@ -123,7 +123,11 @@ services:
       start_period: 20s
   dashboard:
     image: ${PERSONAL_PROJECT:-wa-personal}-dashboard:local
-    build: { context: .., dockerfile: docker/dashboard.Dockerfile }
+    build:
+      context: ..
+      dockerfile: docker/dashboard.Dockerfile
+      args:
+        NEXT_PUBLIC_SITE_URL: ${APP_PUBLIC_URL:-http://localhost:13000}
     ports: ["${APP_BIND_ADDRESS:-127.0.0.1}:${DASHBOARD_PORT:-13000}:3000"]
     depends_on: { api-gateway: { condition: service_healthy } }
     restart: unless-stopped

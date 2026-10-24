@@ -2,14 +2,17 @@
 
 import { useRef } from "react";
 import { useInView, useReducedMotion } from "framer-motion";
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Reveal } from "./reveal";
-import { cn } from "@/lib/utils";
 
-const SHOTS = [
-  { src: "/media/ringkasan.png", title: "Panduan langkah demi langkah", text: "Dashboard menunjukkan satu langkah berikutnya, tidak membiarkan Anda bingung mulai dari mana.", className: "md:col-span-2" },
-  { src: "/media/sambungkan-qr.png", title: "Sambungkan dengan pindai QR", text: "Seperti WhatsApp Web. Tanpa instalasi.", className: "" },
-  { src: "/media/webhook-kode.png", title: "Webhook dengan kode siap salin", text: "Contoh Node.js, Python, dan PHP. Ada tombol kirim tes.", className: "" },
-] as const;
+const SIGNUP_TUTORIAL = {
+  title: "Buat akun KONEVA",
+  src: "/media/tutorial-daftar-biasa.webm",
+  poster: "/media/tutorial-daftar-biasa-poster.jpg",
+  description: "Alur pendaftaran reguler: isi data akun, verifikasi nomor WhatsApp, lalu masuk ke dashboard.",
+} as const;
 
 function Frame({ children }: { children: React.ReactNode }) {
   return (
@@ -31,25 +34,23 @@ export function ProductTour() {
     <div className="space-y-6">
       <Reveal from="pop">
       <Frame>
-        {/* Muted, looping and inline so it plays without sound or a fullscreen takeover on phones. */}
+        <div className="space-y-3 p-4 sm:p-5">
+          <p className="font-medium">{SIGNUP_TUTORIAL.title}</p>
+          <p className="text-sm text-muted-foreground">{SIGNUP_TUTORIAL.description}</p>
+          <p className="text-xs text-muted-foreground">Rekaman memakai data contoh dan simulasi lokal. Tidak ada akun atau OTP sungguhan yang dibuat.</p>
+        </div>
+        {/* The actual signup screen recordings stay muted and inline on mobile. */}
         {/* suppressHydrationWarning: `near` (IntersectionObserver) and `reduce` (prefers-reduced-motion) are both
             unknowable during SSR (server always renders as if neither), so a client where the box is already in
             view or reduced-motion is on legitimately gets a different `src`/`autoPlay`/`controls` on first paint. */}
-        <div ref={videoBox}><video suppressHydrationWarning className="aspect-video w-full bg-muted" {...(near ? { src: "/media/alur-dashboard.webm" } : {})} poster="/media/ringkasan.png"
+        <div ref={videoBox}><video suppressHydrationWarning className="aspect-video w-full bg-muted" {...(near ? { src: SIGNUP_TUTORIAL.src } : {})} poster={SIGNUP_TUTORIAL.poster}
           autoPlay={!reduce} muted loop playsInline preload="none" controls={Boolean(reduce)}
-          aria-label="Rekaman layar: mendaftar, menambah nomor, memasang webhook" /></div>
+          aria-label={`Rekaman layar: ${SIGNUP_TUTORIAL.title}`} /></div>
       </Frame>
       </Reveal>
-      <div className="grid gap-6 md:grid-cols-3">
-        {SHOTS.map((s, i) => (
-          <Reveal key={s.src} as="figure" from={i % 2 === 0 ? "left" : "right"} delay={(i % 2) * 0.08} className={cn("space-y-3", s.className)}>
-            <Frame>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={s.src} alt={s.title} loading="lazy" className="w-full" />
-            </Frame>
-            <figcaption><p className="font-medium">{s.title}</p><p className="text-sm text-muted-foreground">{s.text}</p></figcaption>
-          </Reveal>
-        ))}
+      <div className="flex flex-col items-start justify-between gap-3 rounded-xl border bg-card/80 p-4 sm:flex-row sm:items-center">
+        <p className="text-sm text-muted-foreground">Panduan pendaftaran lengkap tersedia di artikel bantuan.</p>
+        <Button asChild variant="outline" size="sm"><Link href="/panduan/daftar-dan-klaim-voucher">Buka artikel panduan <ArrowRight className="ml-1 h-4 w-4" /></Link></Button>
       </div>
     </div>
   );

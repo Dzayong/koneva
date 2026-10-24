@@ -15,13 +15,13 @@ import {
 import { useDevices } from "@/hooks/use-devices";
 import { getDeviceStatusConfig } from "@/lib/utils";
 
-function isAtRisk(status: string, healthScore: number): boolean {
-  return status === "banned" || status === "error" || healthScore < 40;
+function isAtRisk(status: string): boolean {
+  return status === "banned" || status === "error";
 }
 
 export function NotificationCenter() {
   const { data: devices } = useDevices();
-  const alerts = (devices ?? []).filter((d) => isAtRisk(d.status, d.health_score));
+  const alerts = (devices ?? []).filter((d) => isAtRisk(d.status));
 
   return (
     <DropdownMenu>
@@ -52,8 +52,7 @@ export function NotificationCenter() {
                       {device.label || device.device_key}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      <span className={config.color}>{config.label}</span> · Kesiapan{" "}
-                      {device.health_score}
+                      <span className={config.color}>{config.label}</span>
                     </span>
                   </span>
                 </Link>

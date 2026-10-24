@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, Clock, MessageSquare, Pencil, Plus, Reply, Trash2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,8 @@ import {
   useDeleteAutoReplyRule,
   useSaveAutoReplyRule,
   useToggleAutoReplyRule,
+  useUpdateWorkspaceSendHours,
+  useWorkspaceSendHours,
 } from "@/hooks/use-auto-reply";
 import { apiErrorMessage } from "@/hooks/use-contacts";
 import { useDevices } from "@/hooks/use-devices";
@@ -43,11 +46,30 @@ const TRIGGER_STYLES: Record<AutoReplyTriggerType, string> = {
   all: "bg-muted text-muted-foreground",
 };
 
+const AI_SKILLS = [
+  { id: "customer_service", name: "CS ramah", description: "Menjawab pelanggan dengan ramah, jelas, dan empatik." },
+  { id: "shop_assistant", name: "Asisten toko", description: "Membantu menjelaskan produk dan langkah pemesanan tanpa mengarang harga atau stok." },
+  { id: "faq_helper", name: "Penjawab FAQ", description: "Menjawab dari informasi usaha yang kamu isi; mengakui jika jawabannya belum tersedia." },
+  { id: "research_context", name: "Analisis informasi", description: "Menganalisis konteks yang tersedia. Skill ini tidak mencari informasi di internet." },
+] as const;
+
 export default function AutoReplyPage() {
   const { data: rules, isLoading, isError } = useAutoReplyRules();
   const toggle = useToggleAutoReplyRule();
   const remove = useDeleteAutoReplyRule();
   const [dialog, setDialog] = useState<{ rule: AutoReplyRule | null } | null>(null);
+  const workHours = useWorkspaceSendHours();
+  const saveHours = useUpdateWorkspaceSendHours();
+  const [hoursEnabled, setHoursEnabled] = useState(true);
+  const [startTime, setStartTime] = useState("08:00");
+  const [endTime, setEndTime] = useState("22:00");
+
+  useEffect(() => {
+    if (!workHours.data) return;
+    setHoursEnabled(workHours.data.enabled);
+    setStartTime(workHours.data.start_time);
+    setEndTime(workHours.data.end_time);
+  }, [workHours.data]);
 
   return (
     <div className="space-y-6">
@@ -63,9 +85,36 @@ export default function AutoReplyPage() {
       </div>
 
       <p className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground">
-        Perubahan aturan berlaku beberapa detik setelah disimpan. Balasan tetap mengikuti jeda, jam aktif,
-        dan batas kirim nomor, dan tidak dikirim ke grup.
+        Perubahan aturan berlaku beberapa detik setelah disimpan. Balasan hanya diproses untuk pesan grup/komunitas yang device ikuti.
       </p>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Jam kerja workspace</CardTitle>
+          <p className="text-sm text-muted-foreground">Jadwal ini berlaku untuk balas otomatis dan broadcast. Pengiriman melalui API tidak mengikuti jadwal ini. Zona waktu WIB.</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {workHours.isError ? <p className="text-sm text-destructive">Jam kerja tidak bisa dimuat. Muat ulang halaman.</p> : (
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <Label htmlFor="workspace-hours-enabled">Batasi balas otomatis dan broadcast dengan jam kerja</Label>
+                  <p className="text-sm text-muted-foreground">Pesan broadcast di luar jam ini menunggu sampai jadwal dibuka.</p>
+                </div>
+                <Switch id="workspace-hours-enabled" checked={hoursEnabled} onCheckedChange={setHoursEnabled} disabled={!workHours.data || saveHours.isPending} />
+              </div>
+              <div className="flex flex-wrap items-end gap-4">
+                <div className="space-y-1.5"><Label htmlFor="workspace-hours-start">Mulai</Label><Input id="workspace-hours-start" type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} disabled={!hoursEnabled || !workHours.data || saveHours.isPending} className="w-36" /></div>
+                <div className="space-y-1.5"><Label htmlFor="workspace-hours-end">Selesai</Label><Input id="workspace-hours-end" type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} disabled={!hoursEnabled || !workHours.data || saveHours.isPending} className="w-36" /></div>
+                <Button disabled={!workHours.data || saveHours.isPending || (hoursEnabled && startTime >= endTime)} onClick={() => saveHours.mutate({ enabled: hoursEnabled, start_time: startTime, end_time: endTime })}>
+                  {saveHours.isPending ? "Menyimpan…" : "Simpan jam kerja"}
+                </Button>
+              </div>
+              {hoursEnabled && startTime >= endTime && <p role="alert" className="text-sm text-destructive">Jam selesai harus setelah jam mulai.</p>}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {isLoading ? (
         <div className="space-y-4">
@@ -124,7 +173,10 @@ export default function AutoReplyPage() {
                           <Reply className="h-3.5 w-3.5" />
                           Reply
                         </div>
-                        <p className="mt-1.5 line-clamp-2 text-sm">{rule.response_type === "ai_general" ? "AI umum · jawaban ringkas dan relevan" : rule.response_content}</p>
+                        <p className="mt-1.5 line-clamp-2 text-sm">{rule.response_type === "ai_general" ? "AI umum · jawaban ringkas dan relevan" : rule.response_type === "ai" ? [
+                          ...(rule.response_config?.skill_ids ?? []).map((id) => AI_SKILLS.find((skill) => skill.id === id)?.name).filter(Boolean),
+                          rule.response_content ? "Instruksi manual" : "",
+                        ].filter(Boolean).join(" + ") || "Instruksi manual" : rule.response_content}</p>
                       </div>
                     </div>
                     <div className="mt-4 flex items-center gap-3 text-sm text-muted-foreground">
@@ -168,7 +220,7 @@ export default function AutoReplyPage() {
       )}
 
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && setDialog(null)}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{dialog?.rule ? "Ubah aturan" : "Buat aturan balas otomatis"}</DialogTitle>
             <DialogDescription>Pencocokan tidak membedakan huruf besar dan kecil.</DialogDescription>
@@ -184,12 +236,13 @@ export default function AutoReplyPage() {
 }
 
 /** Sample render for the preview: first spintax option, example variable values. */
-function renderPreview(text: string): string {
+function renderPreview(text: string, customVariables: Record<string, string> = {}): string {
   return text
     .replace(/\{([^{}|]+(?:\|[^{}]*)+)\}/g, (_, options: string) => options.split("|")[0] ?? "")
     .replace(/\{nama\}/gi, "Budi")
     .replace(/\{nomor\}/gi, "+62 812-3456-7890")
-    .replace(/\{tanggal\}/gi, new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }));
+    .replace(/\{tanggal\}/gi, new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }))
+    .replace(/\{([a-z][a-z0-9_]*)\}/gi, (original, key: string) => customVariables[key.toLocaleLowerCase()] || original);
 }
 
 function isValidRegex(pattern: string): boolean {
@@ -210,6 +263,11 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
   const [responseType, setResponseType] = useState<"text" | "ai_general" | "ai">(rule?.response_type === "ai" || rule?.response_type === "ai_general" ? rule.response_type : "text");
   const [textContent, setTextContent] = useState(rule?.response_type === "ai" || rule?.response_type === "ai_general" ? "" : rule?.response_content ?? "");
   const [aiPrompt, setAiPrompt] = useState(rule?.response_type === "ai" ? rule.response_content : "");
+  const [skillIds, setSkillIds] = useState<string[]>(rule?.response_config?.skill_ids ?? []);
+  const [variableRows, setVariableRows] = useState(() => {
+    const saved = Object.entries(rule?.response_config?.variables ?? {}).map(([key, value]) => ({ key, value }));
+    return saved.length ? saved : [{ key: "nama_toko", value: "" }, { key: "info_usaha", value: "" }];
+  });
   const content = responseType === "ai" ? aiPrompt : responseType === "ai_general" ? "" : textContent;
   const [delaySeconds, setDelaySeconds] = useState(String((rule?.delay_ms ?? 3000) / 1000));
 
@@ -224,7 +282,9 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
     !Number.isFinite(delay) || delay < 0 || delay > MAX_DELAY_SECONDS
       ? `Jeda harus 0–${MAX_DELAY_SECONDS} detik.`
       : null;
-  const canSubmit = deviceKey && (responseType === "ai_general" || content.trim()) && !patternError && !delayError;
+  const aiConfigured = responseType === "ai_general" || (responseType === "ai" && (aiPrompt.trim().length > 0 || skillIds.length > 0));
+  const canSubmit = deviceKey && (responseType === "text" ? content.trim().length > 0 : aiConfigured) && !patternError && !delayError;
+  const aiVariables = Object.fromEntries(variableRows.filter((item) => item.key.trim()).map((item) => [item.key.trim(), item.value]));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,6 +298,10 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           trigger_pattern: type === "all" ? "" : pattern.trim(),
           response_type: responseType,
           response_content: content,
+          response_config: {
+            skill_ids: responseType === "ai" ? skillIds : [],
+            variables: responseType === "ai" ? aiVariables : {},
+          },
           delay_ms: Math.round(delay * 1000),
         },
       },
@@ -285,7 +349,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           <SelectContent>
             <SelectItem value="text">Balasan tetap</SelectItem>
             <SelectItem value="ai_general">AI umum</SelectItem>
-            <SelectItem value="ai">AI memakai instruksi peran</SelectItem>
+            <SelectItem value="ai">AI dengan instruksi dan skill</SelectItem>
           </SelectContent>
         </Select>
         {responseType !== "text" && <p className="text-xs text-muted-foreground">API key dan model dikelola admin sistem. AI hanya dipanggil saat pemicu cocok.</p>}
@@ -312,19 +376,62 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
 
       <div className="space-y-2">
         {responseType !== "ai_general" && <>
-        <Label htmlFor="rule-content">{responseType === "ai" ? "Deskripsi peran dan aturan AI" : "Isi balasan"}</Label>
+        <Label htmlFor="rule-content">{responseType === "ai" ? "Instruksi tambahan (opsional jika memilih skill)" : "Isi balasan"}</Label>
         <Textarea
           id="rule-content"
           value={content}
           onChange={(e) => responseType === "ai" ? setAiPrompt(e.target.value) : setTextContent(e.target.value)}
           rows={4}
-          placeholder={responseType === "ai" ? "Kamu adalah admin toko. Jawab pertanyaan tentang harga dengan ramah dan singkat." : "Halo {nama}! Ada yang bisa kami bantu?"}
+          placeholder={responseType === "ai" ? "Contoh: Gunakan bahasa santai. Arahkan pelanggan melihat katalog sebelum bertanya harga." : "Halo {nama}! Ada yang bisa kami bantu?"}
         />
         <p className="text-xs text-muted-foreground">
-          {responseType === "ai" ? "Tulis dalam satu deskripsi: peran AI, tugasnya, batas jawaban, dan hal yang boleh dilakukan." : <>Variables: {"{nama}"}, {"{nomor}"}, {"{tanggal}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
+          {responseType === "ai" ? <>Tulis aturan khusus untuk usahamu. Variabel: <code>{"{nama}"}</code>, <code>{"{nomor}"}</code>, <code>{"{nama_toko}"}</code>, <code>{"{tanggal}"}</code>, dan variabel usaha di bawah.</> : <>Variables: {"{nama}"}, {"{nomor}"}, {"{tanggal}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
         </p>
         </>}
       </div>
+
+      {responseType === "ai" && (
+        <div className="space-y-3 rounded-xl border p-3">
+          <div>
+            <Label>Skill balasan</Label>
+            <p className="mt-1 text-xs text-muted-foreground">Pilih satu atau beberapa playbook. Skill bisa dipakai sendiri atau digabung dengan instruksi manual.</p>
+          </div>
+          <div className="space-y-2">
+            {AI_SKILLS.map((skill) => {
+              const checked = skillIds.includes(skill.id);
+              return (
+                <label key={skill.id} className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 hover:bg-muted/40">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => setSkillIds((current) => event.target.checked ? [...current, skill.id] : current.filter((id) => id !== skill.id))}
+                    className="mt-1 h-4 w-4 accent-[var(--primary)]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">{skill.name}</span>
+                    <span className="block text-xs text-muted-foreground">{skill.description}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="space-y-2 border-t pt-3">
+            <div>
+              <Label>Data usaha dan variabel</Label>
+              <p className="mt-1 text-xs text-muted-foreground">AI hanya memakai nilai yang kamu isi. Nama toko otomatis mengikuti nama workspace jika dikosongkan. Tulis variabel di instruksi dengan format <code>{"{nama_toko}"}</code>.</p>
+            </div>
+            {variableRows.map((item, index) => (
+              <div key={index} className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto] items-start gap-2">
+                <Input aria-label="Nama variabel" value={item.key} maxLength={40} placeholder="nama_toko" onChange={(event) => setVariableRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, key: event.target.value.toLocaleLowerCase().replace(/[^a-z0-9_]/g, "") } : row))} />
+                <Textarea aria-label="Nilai variabel" value={item.value} maxLength={1000} rows={2} placeholder={item.key === "nama_toko" ? "Nama toko" : "Info yang boleh dipakai AI"} onChange={(event) => setVariableRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, value: event.target.value } : row))} />
+                <Button type="button" variant="ghost" size="icon" aria-label="Hapus variabel" onClick={() => setVariableRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}>×</Button>
+              </div>
+            ))}
+            <Button type="button" variant="outline" size="sm" disabled={variableRows.length >= 12} onClick={() => setVariableRows((rows) => [...rows, { key: "", value: "" }])}>Tambah variabel</Button>
+            {skillIds.length === 0 && !aiPrompt.trim() && <p className="text-xs text-destructive">Pilih minimal satu skill atau isi instruksi manual.</p>}
+          </div>
+        </div>
+      )}
 
       {responseType === "text" && content.trim() && (
         <div className="space-y-2">

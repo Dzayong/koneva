@@ -6,5 +6,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: `${SITE.url}/`, lastModified: now, changeFrequency: "weekly", priority: 1 },
     { url: `${SITE.url}/docs`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
+    { url: `${SITE.url}/panduan/daftar-dan-klaim-voucher`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
   ];
 }

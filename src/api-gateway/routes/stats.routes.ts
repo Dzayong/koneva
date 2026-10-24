@@ -4,7 +4,6 @@ import pool from '../../shared/database/connection';
 import type { TenantContext } from '../../shared/types/api';
 import { validate } from '../middleware/validate';
 import { ServiceError } from '../services/service-error';
-import { computeReadiness, getReadinessInputs } from '../../shared/readiness';
 import { bypassWorkspaceReadiness, confirmWorkspaceMission, getWorkspaceReadiness, READINESS_COPY_VERSION, runWorkspaceTestMission } from '../services/workspace-readiness.service';
 
 const router = Router();
@@ -61,7 +60,7 @@ export async function dashboardStats(request: Request, response: Response): Prom
 export async function deviceStats(request: Request, response: Response): Promise<void> {
   const { key } = request.validated!.params as { key: string };
   const device = await pool.query(
-    `SELECT id, device_key, status, health_score FROM devices WHERE tenant_id=$1 AND device_key=$2`,
+    `SELECT id, device_key, status FROM devices WHERE tenant_id=$1 AND device_key=$2`,
     [request.tenant!.id, key],
   );
   if (!device.rows[0]) throw new ServiceError(404, 'DEVICE_NOT_FOUND', 'Device not found');
@@ -82,55 +81,8 @@ export async function deviceStats(request: Request, response: Response): Promise
   response.json({ success: true, data: { ...device.rows[0], ...metrics } });
 }
 
-export async function deviceHealthBreakdown(request: Request, response: Response): Promise<void> {
-  const { key } = request.validated!.params as { key: string };
-  const deviceResult = await pool.query(
-    `SELECT id, status
-     FROM devices WHERE tenant_id=$1 AND device_key=$2`,
-    [request.tenant!.id, key],
-  );
-  const device = deviceResult.rows[0] as {
-    id: string; status: string;
-  } | undefined;
-  if (!device) throw new ServiceError(404, 'DEVICE_NOT_FOUND', 'Device not found');
-
-  const inputs = await getReadinessInputs({
-    id: device.id, status: device.status,
-  }, (text, params) => pool.query(text, params));
-  const report = computeReadiness(inputs);
-  const rate = (part: number, whole: number): number => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : 0);
-  response.json({
-    success: true,
-    data: {
-      health_score: report.score,
-      tier: report.tier,
-      confidence: report.confidence,
-      recommendations: report.recommendations,
-      // `blocked` = sends still undelivered after 24h (possible block or invalid number);
-      // `reported` = recipients who asked us to stop. WhatsApp never reveals real blocks/reports.
-      metrics: {
-        total_sent: inputs.maturedSent,
-        delivered: inputs.maturedDelivered,
-        replied: inputs.engagedRecipients,
-        blocked: inputs.maturedSent - inputs.maturedDelivered,
-        reported: inputs.optOuts,
-      },
-      rates: {
-        delivery: rate(inputs.maturedDelivered, inputs.maturedSent),
-        reply: rate(inputs.engagedRecipients, inputs.uniqueRecipients),
-        block: rate(inputs.maturedSent - inputs.maturedDelivered, inputs.maturedSent),
-        report: rate(inputs.optOuts, inputs.uniqueRecipients),
-      },
-      breakdown: report.factors.map(({ id, label, score, max, status, description }) => ({
-        id, label, score, max, status, description,
-      })),
-    },
-  });
-}
-
 router.get('/dashboard/stats', dashboardStats);
 router.get('/devices/:key/stats', validate({ params: deviceParams }), deviceStats);
-router.get('/devices/:key/health', validate({ params: deviceParams }), deviceHealthBreakdown);
 router.get('/readiness/levels', async (request: Request, response: Response) => {
   signedInUser(request);
   response.json({ success: true, data: await getWorkspaceReadiness(request.tenant!.id) });

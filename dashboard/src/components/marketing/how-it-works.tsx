@@ -1,17 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, Smartphone, Zap } from "lucide-react";
+import { Code2, MessagesSquare, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Reveal } from "./reveal";
 
 const STEPS = [
-  { icon: KeyRound, title: "Buat akun", text: "Daftar dengan email dan langsung mendapat workspace uji coba 14 hari. Dashboard menunjukkan langkah berikutnya.", img: "/media/ringkasan.png" },
-  { icon: Smartphone, title: "Sambungkan nomor", text: "Tambahkan nomor lalu pindai kode QR dari WhatsApp, seperti membuka WhatsApp Web.", img: "/media/sambungkan-qr.png" },
-  { icon: Zap, title: "Kirim pesan", text: "Salin kode contoh, tempel kunci API, kirim. Status antre, terkirim, dan dibaca muncul langsung.", img: "/media/mulai-cepat.png" },
+  { icon: MessagesSquare, title: "Layani pelanggan bersama", text: "Pemilik menghubungkan nomor. CS memilih device, membaca konteks chat, lalu membalas dari inbox bersama.", img: "/media/marketing-inbox.jpg" },
+  { icon: Wallet, title: "Isi saldo saat dibutuhkan", text: "Lihat saldo tersedia, biaya tertahan, tarif per pesan berhasil, dan riwayat top up dari satu halaman.", img: "/media/marketing-saldo.jpg" },
+  { icon: Code2, title: "Hubungkan aplikasi lewat API", text: "Developer mulai dari dokumentasi, membuat kunci API, lalu memantau status pesan dan webhook.", img: "/media/marketing-docs.jpg" },
 ] as const;
 
-/** Sticky screenshot on the left that follows whichever step is centred on the right. */
+/** Current product screenshots follow the story, so customers can see actual workflows instead of old mockups. */
 export function HowItWorks() {
   const [active, setActive] = useState(0);
   const refs = useRef<Array<HTMLDivElement | null>>([]);

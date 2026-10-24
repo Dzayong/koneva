@@ -1,10 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { AutoReplyRuleInput } from "@/lib/types";
+import type { AutoReplyRuleInput, WorkspaceSendHours } from "@/lib/types";
 import { apiErrorMessage } from "@/hooks/use-contacts";
 
 const KEY = ["auto-reply-rules"];
+const HOURS_KEY = ["workspace-send-hours"];
+
+export function useWorkspaceSendHours() {
+  return useQuery({ queryKey: HOURS_KEY, queryFn: () => api.getWorkspaceSendHours(), retry: false });
+}
+
+export function useUpdateWorkspaceSendHours() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: WorkspaceSendHours) => api.updateWorkspaceSendHours(input),
+    onSuccess: (data) => {
+      queryClient.setQueryData(HOURS_KEY, data);
+      toast.success("Jam kerja workspace disimpan");
+    },
+    onError: (error) => toast.error("Gagal menyimpan jam kerja", { description: apiErrorMessage(error, "Coba lagi.") }),
+  });
+}
 
 export function useAutoReplyRules() {
   return useQuery({ queryKey: KEY, queryFn: () => api.getAutoReplyRules(), retry: false });

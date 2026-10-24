@@ -10,7 +10,7 @@ type QueryFn = (text: string, params?: unknown[]) => Promise<{ rows: Record<stri
  *   device_banned       the number is banned: never sends again.
  *   workspace_suspended the workspace is not `active` (suspended/deleted), or its plan cannot send (expired, suspended, cancelled;
  *                       trial, active and past_due-in-grace still can, see shared/billing.ts).
- *   device_paused       administrative pause (status 'paused') or the health-score auto-pause (paused_until in the future).
+ *   device_paused       administrative pause (status 'paused').
  *
  * A number with no workspace (standalone bot) has no workspace rules. This is a read followed immediately by the send: a change
  * made in those few milliseconds, or while the transport call is already running, cannot be stopped (see docs/OUTBOUND_CONTROLS.md).
@@ -20,7 +20,7 @@ export interface TransmitDecision { allowed: boolean; reason?: TransmitBlock; de
 
 export async function checkTransmission(deviceKey: string, queryFn: QueryFn, now: Date = new Date()): Promise<TransmitDecision> {
   const row = (await queryFn(
-    `SELECT d.status AS device_status, d.paused_until, d.tenant_id, t.status AS tenant_status, s.status AS plan_status, s.period_end
+    `SELECT d.status AS device_status, d.tenant_id, t.status AS tenant_status, s.status AS plan_status, s.period_end
      FROM devices d
      LEFT JOIN tenants t ON t.id = d.tenant_id
      LEFT JOIN subscriptions s ON s.tenant_id = d.tenant_id
@@ -34,8 +34,7 @@ export async function checkTransmission(deviceKey: string, queryFn: QueryFn, now
       if (!planCanSend(status)) return { allowed: false, reason: 'workspace_suspended', detail: `plan_${status}` };
     }
   }
-  const pausedUntil = row['paused_until'] ? new Date(row['paused_until'] as Date | string).getTime() : 0;
-  if (row['device_status'] === 'paused' || pausedUntil > now.getTime()) return { allowed: false, reason: 'device_paused' };
+  if (row['device_status'] === 'paused') return { allowed: false, reason: 'device_paused' };
   return { allowed: true };
 }
 

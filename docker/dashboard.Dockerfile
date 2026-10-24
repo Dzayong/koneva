@@ -5,6 +5,8 @@ COPY dashboard/package.json dashboard/package-lock.json ./
 RUN npm ci
 COPY dashboard/ ./
 ENV NEXT_PUBLIC_API_URL=""
+ARG NEXT_PUBLIC_SITE_URL=http://localhost:13000
+ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
 ENV INTERNAL_API_URL=http://api-gateway:8000
 RUN npm run build
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { BookOpen, Loader2 } from "lucide-react";
 import { AuthShell, TermsLabel } from "@/components/auth/auth-shell";
 import { PasswordInput } from "@/components/auth/password-input";
 import { Button } from "@/components/ui/button";
@@ -104,6 +104,11 @@ export default function SignupPage() {
             ? `Masukkan kode 6 digit yang dikirim ke WhatsApp ${phone}. Akun aktif setelah nomor terverifikasi.`
             : "Verifikasi pendaftaran dikirim melalui WhatsApp. Gmail digunakan untuk pemulihan kata sandi."}</CardDescription>
         </CardHeader>
+        {!pendingEmail && <div className="px-6 pb-2 text-sm">
+          <Link href="/panduan/daftar-dan-klaim-voucher" className="inline-flex items-center gap-2 text-primary underline-offset-4 hover:underline">
+            <BookOpen className="h-4 w-4" aria-hidden="true" />Lihat panduan daftar dan klaim voucher
+          </Link>
+        </div>}
         {pendingEmail ? <form onSubmit={confirm}>
           <CardContent className="space-y-4 pb-4">
             <div className="space-y-2">

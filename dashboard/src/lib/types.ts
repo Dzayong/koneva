@@ -42,7 +42,6 @@ export interface Device {
   label: string | null;
   status: DeviceStatus;
   qr_code: string | null;
-  health_score: number;
   last_connected: string | null;
   history_sync_status?: "not_started" | "syncing" | "paused" | "completed";
   history_sync_progress?: number | null;
@@ -287,6 +286,7 @@ export interface AutoReplyRule {
   trigger_pattern: string;
   response_type: "text" | "template" | "ai" | "ai_general";
   response_content: string;
+  response_config?: { skill_ids: string[]; variables: Record<string, string> };
   delay_ms: number;
   is_active: boolean;
   created_at: string;
@@ -298,38 +298,14 @@ export interface AutoReplyRuleInput {
   trigger_pattern: string;
   response_type?: "text" | "template" | "ai" | "ai_general";
   response_content: string;
+  response_config?: { skill_ids: string[]; variables: Record<string, string> };
   delay_ms: number;
 }
 
-// ---- Health score breakdown (/api/v1/devices/:key/health) -------------------
-
-export type HealthBreakdownStatus = "complete" | "partial" | "locked" | "danger";
-
-export interface HealthBreakdownItem {
-  id: string;
-  label: string;
-  score: number;
-  max: number;
-  status: HealthBreakdownStatus;
-  description: string;
-}
-
-export interface DeviceHealthData {
-  health_score: number;
-  metrics: {
-    total_sent: number;
-    delivered: number;
-    replied: number;
-    blocked: number;
-    reported: number;
-  };
-  rates: {
-    delivery: number;
-    reply: number;
-    block: number;
-    report: number;
-  };
-  breakdown: HealthBreakdownItem[];
+export interface WorkspaceSendHours {
+  enabled: boolean;
+  start_time: string;
+  end_time: string;
 }
 
 export type WorkspaceMissionStatus = "completed" | "needs_action" | "not_applicable";
@@ -473,7 +449,6 @@ export interface Persona {
 
 export interface DeviceActivity {
   persona: Persona;
-  today_window: { start: string; end: string; open: boolean; opens_in_minutes: number };
   fatigue: { burst_count: number; burst_limit: number; resting: boolean; rest_ends_at: string | null };
   streak_days: number;
   daily: Array<{ date: string; sent: number; received: number; active_hours: number; first_at: string | null; last_at: string | null }>;

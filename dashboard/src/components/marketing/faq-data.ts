@@ -2,7 +2,7 @@
 export const FAQ: Array<{ q: string; a: string }> = [
   {
     q: "Apa itu KONEVA?",
-    a: "KONEVA adalah layanan API untuk mengirim dan menerima pesan WhatsApp memakai nomor Anda sendiri. Anda memindai kode QR seperti membuka WhatsApp Web, mengambil kunci API, lalu mengirim pesan dari aplikasi Anda. Ada juga dashboard untuk memantau status, tim, dan webhook.",
+    a: "KONEVA menghubungkan WhatsApp dengan aplikasi lewat REST API dan menyediakan inbox bersama agar tim CS dapat membaca serta membalas percakapan dari device yang pemilik workspace hubungkan. Pemakaian pesan menggunakan saldo prabayar.",
   },
   {
     q: "Apakah ini WhatsApp API resmi dan apakah nomor bisa diblokir?",
@@ -22,7 +22,7 @@ export const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "Bagaimana saya tahu pesan terkirim, dibaca, atau nomor bermasalah?",
-    a: "Setiap pesan punya status dari antre, terkirim, sampai dibaca. Anda juga bisa memasang webhook bertanda tangan HMAC untuk menerima kabar saat pesan terkirim, dibalas, gagal, atau saat status nomor berubah, misalnya terputus atau ditolak WhatsApp. Skor kesiapan nomor menunjukkan kondisinya sebelum WhatsApp yang memberi tahu.",
+    a: "Setiap pesan punya status dari antre, terkirim, sampai dibaca. Anda juga bisa memasang webhook bertanda tangan HMAC untuk menerima kabar saat pesan terkirim, dibalas, gagal, atau saat status nomor berubah, misalnya terputus atau ditolak WhatsApp.",
   },
   {
     q: "Apakah bisa mengirim ke grup atau saluran?",
@@ -30,7 +30,11 @@ export const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "Bagaimana biaya KONEVA dihitung?",
-    a: "KONEVA menggunakan saldo prabayar PAYG tanpa paket bulanan. Tarif per pesan ditampilkan di halaman Tagihan; biaya final dikenakan untuk pesan yang terkonfirmasi berhasil, sedangkan status yang belum pasti ditahan sementara untuk diperiksa. Akun baru mendapat masa percobaan 14 hari.",
+    a: "KONEVA menggunakan saldo prabayar tanpa paket bulanan. Tarif per pesan ditampilkan di halaman Tagihan; biaya final dikenakan untuk pesan yang terkonfirmasi berhasil, sedangkan status yang belum pasti ditahan sementara untuk diperiksa. Isi saldo ketika workspace siap digunakan.",
+  },
+  {
+    q: "Bagaimana tim CS menggunakan KONEVA?",
+    a: "Pemilik workspace menghubungkan dan mengelola nomor WhatsApp. Setelah diberi akses sebagai CS, anggota tim dapat membuka inbox, memilih percakapan dari device yang terhubung, membaca konteks chat, dan membalas lewat nomor sumbernya.",
   },
   {
     q: "Data apa yang disimpan?",

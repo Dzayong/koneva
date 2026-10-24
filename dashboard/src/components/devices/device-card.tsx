@@ -19,39 +19,8 @@ import { usePermissions } from "@/hooks/use-me";
 import { useDeleteDevice, usePauseDevice, useReconnectDevice, useResumeDevice } from "@/hooks/use-devices";
 import { useCreateApiKey, useRotateApiKey } from "@/hooks/use-developer";
 import { SecretReveal } from "@/components/developers/secret-reveal";
-import { cn, formatDate, formatPhoneNumber, getHealthConfig } from "@/lib/utils";
+import { cn, formatDate, formatPhoneNumber } from "@/lib/utils";
 import type { ApiKeyRecord, CreatedApiKey, Device } from "@/lib/types";
-
-const RING_RADIUS = 28;
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
-
-function HealthRing({ score }: { score: number }) {
-  const reduceMotion = useReducedMotion();
-  const value = Math.min(100, Math.max(0, score));
-  return (
-    <div className="relative h-16 w-16 shrink-0">
-      <svg className="h-16 w-16 -rotate-90" viewBox="0 0 64 64" aria-hidden>
-        <circle cx="32" cy="32" r={RING_RADIUS} strokeWidth="4" fill="none" className="stroke-muted" />
-        <motion.circle
-          cx="32"
-          cy="32"
-          r={RING_RADIUS}
-          strokeWidth="4"
-          fill="none"
-          strokeLinecap="round"
-          strokeDasharray={RING_CIRCUMFERENCE}
-          initial={reduceMotion ? false : { strokeDashoffset: RING_CIRCUMFERENCE }}
-          animate={{ strokeDashoffset: RING_CIRCUMFERENCE * (1 - value / 100) }}
-          transition={{ duration: reduceMotion ? 0 : 0.4, ease: "easeOut" }}
-          className={cn("stroke-current", getHealthConfig(value).color)}
-        />
-      </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-sm font-semibold tabular-nums">
-        {value}
-      </span>
-    </div>
-  );
-}
 
 function DeviceCardApiKeyAction({
   deviceKey,
@@ -182,7 +151,7 @@ export function DeviceCard({
       transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
       className="group relative overflow-hidden rounded-2xl border bg-card p-5 shadow-card transition-[box-shadow,border-color] duration-150 hover:shadow-elevated hover:border-primary/20"
     >
-      <div className="relative flex items-start justify-between gap-3">
+      <div className="relative flex items-start gap-3">
         <div className="flex min-w-0 items-center gap-4">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-secondary text-sm font-semibold">
             {(device.label || "WA").slice(0, 2).toUpperCase()}
@@ -195,7 +164,6 @@ export function DeviceCard({
             </p>
           </div>
         </div>
-        <HealthRing score={device.health_score} />
       </div>
 
       <div className="relative mt-4 flex items-center justify-between text-xs text-muted-foreground">

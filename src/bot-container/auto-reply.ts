@@ -175,7 +175,7 @@ export async function processAutoReply(
   let content: string;
   try {
     content = rule.response.type === 'ai' || rule.response.type === 'ai_general'
-      ? await generateAiReply(rule.id, message.deviceKey, message.content)
+      ? await generateAiReply(rule.id, message.deviceKey, message.content, message.from, contactName)
       : rule.response.type === 'template'
         ? renderMessageTemplate(rule.response.content, {
           nama: contactName ?? message.from, nomor: message.from,
@@ -195,7 +195,7 @@ export async function processAutoReply(
   const decision = dependencies.canSend
     ? await dependencies.canSend(message.deviceKey)
     : await canSendMessage(message.deviceKey, {
-      queryFn, isProactive: false, content, recipient: message.from,
+      queryFn, isProactive: false, scheduleContext: 'auto_reply', content, recipient: message.from,
       recipientName: contactName, requirePersonalization: false,
     });
   if (!decision.allowed) {
@@ -248,7 +248,7 @@ export async function processAutoReply(
         const latestDecision = dependencies.canSend
           ? await dependencies.canSend(message.deviceKey)
           : await canSendMessage(message.deviceKey, {
-            queryFn, isProactive: false, content, recipient: message.from,
+            queryFn, isProactive: false, scheduleContext: 'auto_reply', content, recipient: message.from,
             recipientName: contactName, requirePersonalization: false,
           });
         if (!latestDecision.allowed) return { blocked: latestDecision.reason ?? 'anti_ban_policy' };
@@ -288,14 +288,14 @@ export async function processAutoReply(
 }
 
 /** Bots proxy only the matched rule id and message; provider key/prompt remain inside the API gateway. */
-async function generateAiReply(ruleId: string, deviceKey: string, inboundText: string): Promise<string> {
+async function generateAiReply(ruleId: string, deviceKey: string, inboundText: string, recipient: string, contactName?: string): Promise<string> {
   const baseUrl = process.env['API_GATEWAY_URL'] ?? 'http://api-gateway:8000';
   const adminKey = process.env['ADMIN_API_KEY'];
   if (!adminKey) throw new Error('ai_reply_gateway_unavailable');
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/internal/ai-reply`, {
     method: 'POST',
     headers: { 'x-admin-key': adminKey, 'content-type': 'application/json' },
-    body: JSON.stringify({ rule_id: ruleId, device_key: deviceKey, message: inboundText.slice(0, 4000) }),
+    body: JSON.stringify({ rule_id: ruleId, device_key: deviceKey, message: inboundText.slice(0, 4000), recipient: recipient.slice(0, 128), contact_name: contactName?.slice(0, 160) }),
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`ai_reply_gateway_http_${response.status}`);

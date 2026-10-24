@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getDeviceStatusConfig, getHealthConfig } from "@/lib/utils";
+import { getDeviceStatusConfig } from "@/lib/utils";
 import type { Device } from "@/lib/types";
 
 function isAtRisk(device: Device): boolean {
-  return device.status === "banned" || device.status === "error" || device.health_score < 40;
+  return device.status === "banned" || device.status === "error";
 }
 
 export function RecentAlerts({ devices }: { devices: Device[] }) {
@@ -26,7 +26,6 @@ export function RecentAlerts({ devices }: { devices: Device[] }) {
           <ul className="space-y-3">
             {atRisk.map((device) => {
               const statusConfig = getDeviceStatusConfig(device.status);
-              const healthConfig = getHealthConfig(device.health_score);
               return (
                 <li key={device.id}>
                   <Link
@@ -40,10 +39,6 @@ export function RecentAlerts({ devices }: { devices: Device[] }) {
                       </p>
                       <p className="text-xs text-muted-foreground">
                         <span className={statusConfig.color}>{statusConfig.label}</span>
-                        {" · "}
-                        <span className={healthConfig.color}>
-                          Kesiapan {device.health_score}
-                        </span>
                       </p>
                     </div>
                   </Link>

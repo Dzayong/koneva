@@ -1,7 +1,6 @@
 import { jidNormalizedUser, type WASocket } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import type { CommandType, ProfilePicturePayload, ProfileUpdate, StatusPayload, WhatsAppChannelPostPayload } from '../shared/commands';
-import { getOrCreatePersona, isWithinPersonaWindow, msUntilWindowOpens } from '../shared/persona';
 import type { PresenceRoutine } from './presence';
 import { getStoredRecipientConsent, normalizeRecipientNumber, withRecipientConsentLocks } from '../shared/recipient-consent';
 
@@ -110,12 +109,6 @@ export async function statusAudience(ctx: CommandContext, p: StatusPayload): Pro
 }
 
 async function postStatus(ctx: CommandContext, p: StatusPayload) {
-  const persona = await getOrCreatePersona(ctx.deviceId, ctx.queryFn);
-  const now = (ctx.now ?? (() => new Date()))();
-  if (!isWithinPersonaWindow(persona, now)) {
-    // Wait for the number's day to start, plus a random 0-20 minutes so it does not post at the exact opening minute.
-    throw new Reschedule(msUntilWindowOpens(persona, now) + Math.round((ctx.random ?? Math.random)() * 20 * 60_000), 'outside_active_hours');
-  }
   const requestedRecipients = await statusAudience(ctx, p);
   const tenantRow = (await ctx.queryFn('SELECT tenant_id FROM devices WHERE id = $1', [ctx.deviceId])).rows[0];
   const tenantId = String(tenantRow?.['tenant_id'] ?? '');

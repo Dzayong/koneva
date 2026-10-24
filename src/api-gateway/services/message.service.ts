@@ -68,8 +68,9 @@ interface MessageRow extends QueryResultRow {
 export async function queueMessage(
   tenantId: string,
   input: SendMessageRequest,
+  sendContext: 'api' | 'broadcast' = 'api',
 ): Promise<MessageRow> {
-  return queueMessageInternal(tenantId, input, null);
+  return queueMessageInternal(tenantId, input, null, 0, sendContext);
 }
 
 /** Platform-only OTP path. Its marker is set in SQL, never accepted from an API request. */
@@ -82,7 +83,7 @@ export async function queueSystemNotification(tenantId: string, eventId: string,
   return queueMessageInternal(tenantId, { ...input, external_id: `snotif_${eventId}` }, 'notification', delayMs);
 }
 
-async function queueMessageInternal(tenantId: string, input: SendMessageRequest, systemKind: 'otp' | 'notification' | null, notificationDelayMs = 0): Promise<MessageRow> {
+async function queueMessageInternal(tenantId: string, input: SendMessageRequest, systemKind: 'otp' | 'notification' | null, notificationDelayMs = 0, sendContext: 'api' | 'broadcast' = 'api'): Promise<MessageRow> {
   const groupLockRecipient = input.to.endsWith('@g.us') && input.reply_to_message_id
     ? ((await pool.query<{ from_number: string | null }>(
       `SELECT m.from_number FROM messages m JOIN devices d ON d.id=m.device_id
@@ -229,12 +230,12 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
 
     const result = await client.query<MessageRow>(
       `INSERT INTO messages
-         (tenant_id, device_id, device_key, to_number, chat_jid, content, external_id, status, priority, type, media_url, quota_exempt, system_otp, system_notification, reply_to_message_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
+         (tenant_id, device_id, device_key, to_number, chat_jid, content, external_id, status, priority, type, media_url, quota_exempt, system_otp, system_notification, reply_to_message_id, send_context)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
       [tenantId, device.id, input.device_key, input.to,
         input.to.endsWith('@g.us') ? input.to : `${input.to.replace(/\D/g, '')}@s.whatsapp.net`,
         input.message, input.external_id ?? null, status, priority,
-        input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt, systemOtp, systemNotification, input.reply_to_message_id ?? null],
+        input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt, systemOtp, systemNotification, input.reply_to_message_id ?? null, systemManaged ? 'api' : sendContext],
     );
     if (status === 'queued' && !exempt && payg.enabled) {
       await reserveMessageCharge(client, tenantId, result.rows[0]!.id, 0);

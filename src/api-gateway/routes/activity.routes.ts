@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import pool from '../../shared/database/connection';
 import {
-  activeWindow, delayMode, evaluateFatigue, getBurstState, getOrCreatePersona, isWithinPersonaWindow, msUntilWindowOpens,
+  delayMode, evaluateFatigue, getBurstState, getOrCreatePersona,
   type Persona,
 } from '../../shared/persona';
 import { PRESETS, PRESET_IDS, presetValuesFor } from '../../shared/presets';
@@ -36,11 +36,6 @@ const personaPatch = z.object({
   presence_min_ms: z.number().int().min(1_000).max(600_000).optional(),
   presence_max_ms: z.number().int().min(1_000).max(600_000).optional(),
 }).strict();
-
-const hhmm = (hour: number): string => {
-  const minutes = Math.round(hour * 60);
-  return `${String(Math.floor(minutes / 60) % 24).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
-};
 
 function publicPersona(p: Persona) {
   return {
@@ -109,16 +104,10 @@ export async function deviceActivity(request: Request, response: Response): Prom
   }
 
   const fatigue = evaluateFatigue(persona, burst, now);
-  const window = activeWindow(persona, now);
   response.json({
     success: true,
     data: {
       persona: publicPersona(persona),
-      today_window: {
-        start: hhmm(window.start), end: hhmm(window.end),
-        open: isWithinPersonaWindow(persona, now),
-        opens_in_minutes: Math.ceil(msUntilWindowOpens(persona, now) / 60_000),
-      },
       fatigue: {
         burst_count: burst.burstCount, burst_limit: fatigue.burstLimit,
         resting: fatigue.resting, rest_ends_at: fatigue.restEndsAt?.toISOString() ?? null,

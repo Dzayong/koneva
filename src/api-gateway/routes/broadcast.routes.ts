@@ -55,7 +55,7 @@ export async function createBroadcast(request: Request, response: Response): Pro
         message: input.message,
         ...(input.media_url ? { media_url: input.media_url, media_type: input.media_type } : {}),
         external_id: `broadcast:${broadcastId}:${index}`,
-      });
+      }, 'broadcast');
       results.push({ phone_number: recipient, message_id: message.id, status: 'queued' });
     } catch (error) {
       results.push({

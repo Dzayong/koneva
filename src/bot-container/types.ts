@@ -83,4 +83,6 @@ export interface MessageRecord {
   createdAt: Date;
   /** When this queued attempt became eligible to send; separate from creation/schedule time. */
   queueStartedAt: Date;
+  /** Server-set category used to apply workspace business hours to broadcast only. */
+  sendContext?: 'api' | 'broadcast';
 }

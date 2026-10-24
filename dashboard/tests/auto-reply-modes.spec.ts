@@ -33,8 +33,9 @@ test("auto-reply form offers fixed, general AI, and instructed AI modes", async 
   await expect(page.getByLabel("Deskripsi peran dan aturan AI")).toHaveCount(0);
 
   await page.getByRole("combobox").nth(2).click();
-  await page.getByRole("option", { name: "AI memakai instruksi peran" }).click();
-  await expect(page.getByLabel("Deskripsi peran dan aturan AI")).toBeVisible();
+  await page.getByRole("option", { name: "AI dengan instruksi dan skill" }).click();
+  await expect(page.getByLabel("Instruksi tambahan (opsional jika memilih skill)")).toBeVisible();
+  await expect(page.getByText("Skill balasan")).toBeVisible();
 
   await page.getByRole("combobox").nth(2).click();
   await page.getByRole("option", { name: "Balasan tetap" }).click();
