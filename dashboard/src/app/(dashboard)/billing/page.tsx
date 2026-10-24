@@ -207,7 +207,7 @@ export default function BillingPage() {
           <input id="payg-topup-amount" type="number" min={10000} max={10000000} step={1000} required value={topupAmount} onChange={(event) => setTopupAmount(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2" />
           <Button type="submit" disabled={topup.isPending || !Number.isInteger(amount) || amount < 10000 || amount > 10000000}>{topup.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Lanjutkan ke Duitku</Button>
         </form>
-        {topup.error && <p role="alert" className="mt-3 text-sm text-destructive">{apiFailure(topup.error).code === "DUITKU_NOT_CONFIGURED" ? "Duitku sandbox belum dikonfigurasi di server." : topup.error.message}</p>}
+        {topup.error && <p role="alert" className="mt-3 text-sm text-destructive">{apiFailure(topup.error).code === "DUITKU_NOT_CONFIGURED" ? "Duitku sandbox belum dikonfigurasi di server." : apiFailure(topup.error).message}</p>}
         <p className="mt-2 text-xs text-muted-foreground">Isi saldo Rp10.000–Rp10.000.000 per transaksi. Pesan gagal pasti tidak dikenai biaya; jika hasil pengiriman tidak pasti, saldonya ditahan untuk pemeriksaan dan tidak dikirim ulang otomatis.</p>
       </section>
       <section className="rounded-xl border bg-card p-5"><h2 className="font-semibold">Pemakaian per device</h2>
