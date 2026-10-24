@@ -257,9 +257,10 @@ export async function processAutoReply(
         const sent = await sock.sendMessage(jid, { text: content });
         const inserted = await queryFn(
           `INSERT INTO messages (tenant_id, device_id, device_key, from_number, to_number, content,
-           type, status, direction, whatsapp_message_id, sent_at)
-           VALUES ($1,$2,$3,$4,$5,$6,'text','sent','outbound',$7,NOW()) RETURNING id`,
-          [message.tenantId, message.deviceId, message.deviceKey, message.deviceKey, message.from, content, sent?.key.id ?? null],
+           chat_jid, type, status, direction, whatsapp_message_id, sent_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'text','sent','outbound',$8,NOW()) RETURNING id`,
+          [message.tenantId, message.deviceId, message.deviceKey, message.deviceKey,
+            message.isGroup ? jid : message.from, content, jid, sent?.key.id ?? null],
         );
         return { sent, outboundId: (inserted.rows[0] as { id?: string } | undefined)?.id ?? null };
       });
