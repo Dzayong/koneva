@@ -42,6 +42,8 @@ import { readOperatorConfig } from './operator/config';
 import { cleanupOperatorData, idempotencyRetentionDays } from './operator/maintenance';
 import { startOtpMaintenance } from './services/otp-maintenance';
 import { drainSystemNotificationOutbox } from './services/system-notifications';
+import { mediaTypeForMime, saveMedia, MEDIA_LIMITS, validMediaBytes, removeMedia } from '../shared/media-storage';
+import { purgeExpiredMedia } from './services/media.service';
 
 assertMailerConfig(); // invalid mail settings stop startup; unset = OTP features fail safe
 const operatorConfig = readOperatorConfig();
@@ -60,6 +62,42 @@ app.use(cors(config.env === 'production' ? {
   origin: process.env.CORS_ORIGIN?.split(',').map(s => s.trim()) ?? false,
   credentials: true,
 } : {}));
+// Private bot-to-gateway media transport. Bots never mount the shared media volume.
+app.post('/internal/media/upload', adminAuth, express.raw({ type: 'application/octet-stream', limit: '64mb' }), async (request, response, next) => {
+  try {
+    const deviceKey = request.header('x-device-key') ?? '';
+    const mime = (request.header('x-media-type') ?? '').toLowerCase();
+    const bytes = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+    const mediaType = mediaTypeForMime(mime);
+    const device = (await pool.query<{ id: string; tenant_id: string }>('SELECT id, tenant_id FROM devices WHERE device_key=$1 LIMIT 1', [deviceKey])).rows[0];
+    if (!device || !mediaType || bytes.length === 0 || bytes.length > (mediaType === 'image' ? MEDIA_LIMITS.image : MEDIA_LIMITS.video) || !validMediaBytes(bytes, mime)) {
+      response.status(400).json({ success: false, error: { code: 'INVALID_MEDIA', message: 'Unsupported media or device' } }); return;
+    }
+    const id = await saveMedia(bytes, mime);
+    try {
+      await pool.query(`INSERT INTO media_objects (id,tenant_id,device_id,content_type,byte_size,original_name,expires_at)
+        SELECT $1,$2,$3,$4,$5,$6, CASE WHEN d.media_retention_days IS NULL THEN NULL
+          ELSE now() + make_interval(days => d.media_retention_days) END FROM devices d WHERE d.id=$3`,
+        [id, device.tenant_id, device.id, mime, bytes.length, request.header('x-file-name')?.slice(0, 180) ?? null]);
+    } catch (error) {
+      await removeMedia(id);
+      throw error;
+    }
+    response.status(201).json({ success: true, data: { id, type: mediaType, content_type: mime, byte_size: bytes.length } });
+  } catch (error) { next(error); }
+});
+app.get('/internal/media/:id', adminAuth, async (request, response, next) => {
+  try {
+    const deviceKey = request.header('x-device-key') ?? '';
+    const row = (await pool.query<{ content_type: string }>(
+      `SELECT m.content_type FROM media_objects m JOIN devices d ON d.id=m.device_id
+       WHERE m.id=$1 AND d.device_key=$2 AND (m.expires_at IS NULL OR m.expires_at>now())`, [String(request.params.id), deviceKey],
+    )).rows[0];
+    if (!row) { response.status(404).end(); return; }
+    const { readMedia } = await import('../shared/media-storage');
+    response.type(row.content_type).send(await readMedia(String(request.params.id)));
+  } catch (error) { next(error); }
+});
 // `verify` only stashes the raw bytes (req.rawBody); it does not change parsing. Needed to check an
 // inbound webhook signature (DOKU), which is computed over the exact bytes sent, not a re-serialised body.
 app.use(express.json({ limit: '1mb', verify: (request, _response, buf) => { (request as express.Request).rawBody = buf; } }));
@@ -184,6 +222,11 @@ setTimeout(runStudentVerificationMaintenance, 35_000).unref();
 setInterval(runStudentVerificationMaintenance, 60_000).unref();
 setTimeout(runQuotaRelease, 40_000).unref();
 setInterval(runQuotaRelease, 2 * 60_000).unref();
+const runMediaCleanup = (): void => {
+  purgeExpiredMedia().catch((error: unknown) => logger.error('Expired media cleanup failed', { error: error instanceof Error ? error.message : String(error) }));
+};
+setTimeout(runMediaCleanup, 45_000).unref();
+setInterval(runMediaCleanup, 30 * 60_000).unref();
 const runScheduledCampaigns = (): void => {
   processDueCampaigns()
     .then((count) => { if (count > 0) logger.info('Scheduled campaigns processed', { count }); })

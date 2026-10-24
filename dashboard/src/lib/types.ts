@@ -48,6 +48,7 @@ export interface Device {
   history_sync_completion_explicit?: boolean;
   history_latest_message_at?: string | null;
   history_synced_at?: string | null;
+  media_retention_days?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -67,6 +68,7 @@ export interface Message {
   to_number: string;
   chat_jid?: string | null;
   content: string;
+  media_url?: string | null;
   type: "text" | "image" | "document" | "video" | "audio";
   status: MessageStatus;
   external_id: string | null;

@@ -65,6 +65,9 @@ services:
     environment:
       <<: *app-environment
       AI_REPLY_ENCRYPTION_KEY: ${AI_REPLY_ENCRYPTION_KEY:-}
+      MEDIA_STORAGE_PATH: /app/media
+    volumes:
+      - media_data:/app/media
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -129,3 +132,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  media_data:

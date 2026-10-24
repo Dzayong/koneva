@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Loader2, MessageSquare, Search, Send, Smartphone, Users } from "lucide-react";
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, ImagePlus, Loader2, MessageSquare, Search, Send, Smartphone, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,11 +25,36 @@ const peerLabel = (item: InboxConversation, groupName?: string) => item.chat_key
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("id-ID") || "?";
 const messagePreview = (item: InboxConversation) => item.type === "text" ? item.content : item.content || `[${item.type}]`;
 
+function InboxMedia({ message }: { message: import("@/lib/types").Message }) {
+  const [source, setSource] = useState<string | null>(null);
+  useEffect(() => {
+    const media = message.media_url;
+    if (!media) return;
+    if (!/^[0-9a-f-]{36}$/i.test(media)) { setSource(media); return; }
+    let objectUrl: string | null = null;
+    let active = true;
+    void api.getInboxMedia(media).then((blob) => {
+      if (!active) return;
+      objectUrl = URL.createObjectURL(blob);
+      setSource(objectUrl);
+    }).catch(() => { if (active) setSource(null); });
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [message.media_url]);
+  if (!source) return null;
+  return message.type === "video"
+    ? <video className="mb-2 max-h-80 max-w-full rounded-lg" src={source} controls playsInline preload="metadata" />
+    : message.type === "image"
+      ? <a href={source} target="_blank" rel="noreferrer"><img className="mb-2 max-h-80 max-w-full rounded-lg object-contain" src={source} alt="Foto yang dikirim" loading="lazy" /></a>
+      : null;
+}
+
 export default function MessagesPage() {
   const [deviceKey, setDeviceKey] = useState(ALL);
   const [search, setSearch] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const autoScrolledConversationRef = useRef<string | null>(null);
@@ -93,9 +118,17 @@ export default function MessagesPage() {
   const participantNames = useMemo(() => new Map((groupDetails.data?.participants ?? []).map((person) => [person.id.replace(/@.*$/, "").replace(/\D/g, ""), person.name])), [groupDetails.data]);
 
   const reply = useMutation({
-    mutationFn: () => api.replyInboxMessage(latestInbound!.id, draft.trim()),
+    mutationFn: async () => {
+      if (attachment) {
+        const uploaded = await api.uploadInboxMedia(attachment, selected!.device_key);
+        return api.replyInboxMessage(latestInbound!.id, draft.trim(), { media_id: uploaded.id, media_type: uploaded.type });
+      }
+      return api.replyInboxMessage(latestInbound!.id, draft.trim());
+    },
     onSuccess: () => {
       setDraft("");
+      setAttachment(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       toast.success("Balasan masuk antrean");
       void queryClient.invalidateQueries({ queryKey: ["inbox"] });
       void queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -175,19 +208,26 @@ export default function MessagesPage() {
                   return <div key={message.id} className={`flex ${inbound ? "justify-start" : "justify-end"}`}>
                     <div className={`max-w-[88%] rounded-xl px-3.5 py-2.5 shadow-sm sm:max-w-[75%] ${inbound ? "rounded-tl-sm border bg-card" : "rounded-tr-sm bg-primary text-primary-foreground"}`}>
                       {inbound && isGroup && <p className="mb-1 text-xs font-semibold text-primary">{participantNames.get((message.from_number ?? "").replace(/\D/g, "")) || formatPhoneNumber(message.from_number ?? "") || "Anggota grup"}</p>}
-                      <p className="whitespace-pre-wrap break-words text-sm">{message.content || `[${message.type}]`}</p>
+                      <InboxMedia message={message} />
+                      {message.content && message.content !== "[Image]" && message.content !== "[Video]" && <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>}
+                      {!message.content && !message.media_url && <p className="whitespace-pre-wrap break-words text-sm">[{message.type}]</p>}
                       <div className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${inbound ? "text-muted-foreground" : "text-primary-foreground/75"}`}><time title={formatDate(message.created_at)}>{new Date(message.created_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</time>{!inbound && <MessageStatusBadge status={message.status} errorMessage={message.error_message} />}</div>
                     </div>
                   </div>;
                 })}
               {!messages.isLoading && orderedMessages.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">Belum ada pesan pada percakapan ini.</p>}
             </div>
-            <form className="space-y-2 border-t bg-card p-3 sm:p-4" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) reply.mutate(); }}>
+            <form className="space-y-2 border-t bg-card p-3 sm:p-4" onSubmit={(event) => { event.preventDefault(); if (draft.trim() || attachment) reply.mutate(); }}>
               {!replyWindowOpen ? <p className="text-xs text-muted-foreground">Balasan tersedia sampai 24 jam setelah pesan pelanggan. Minta pelanggan mengirim pesan baru untuk membuka kembali percakapan.</p>
                 : sourceDevice?.status !== "online" ? <p className="text-xs text-amber-700">Device pengirim sedang {sourceDevice?.status ?? "tidak tersedia"}. Sambungkan kembali device tersebut untuk membalas.</p>
                   : <p className="text-xs text-muted-foreground">Balasan dikirim melalui {selected.device_label || selected.device_key}{isGroup ? " ke grup ini" : ""} dan tetap mengikuti aturan saldo serta izin penerima.</p>}
-              <div className="flex items-end gap-2"><Textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4096} rows={2} disabled={!replyWindowOpen || sourceDevice?.status !== "online" || reply.isPending} placeholder="Tulis balasan…" aria-label="Tulis balasan" />
-                <Button type="submit" size="icon" aria-label="Kirim balasan" disabled={!draft.trim() || !replyWindowOpen || sourceDevice?.status !== "online" || reply.isPending}>{reply.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</Button></div>
+              {attachment && <div className="flex items-center gap-2 text-xs text-muted-foreground"><span className="truncate">{attachment.name}</span><Button type="button" variant="ghost" size="icon" className="h-7 w-7" aria-label="Hapus lampiran" onClick={() => { setAttachment(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}><X className="h-3.5 w-3.5" /></Button></div>}
+              <div className="flex items-end gap-2">
+                <input ref={fileInputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp" onChange={(event) => setAttachment(event.target.files?.[0] ?? null)} aria-label="Pilih foto atau video" />
+                <Button type="button" variant="outline" size="icon" aria-label="Lampirkan foto atau video" disabled={!replyWindowOpen || sourceDevice?.status !== "online" || reply.isPending} onClick={() => fileInputRef.current?.click()}><ImagePlus className="h-4 w-4" /></Button>
+                <Textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4096} rows={2} disabled={!replyWindowOpen || sourceDevice?.status !== "online" || reply.isPending} placeholder="Tulis balasan atau keterangan media…" aria-label="Tulis balasan" />
+                <Button type="submit" size="icon" aria-label="Kirim balasan" disabled={(!draft.trim() && !attachment) || !replyWindowOpen || sourceDevice?.status !== "online" || reply.isPending}>{reply.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</Button>
+              </div>
             </form>
           </> : <div className="hidden flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground lg:flex"><MessageSquare className="h-10 w-10" /><p>Pilih percakapan untuk melihat pesan dan membalas.</p></div>}
           {conversations.isError && selected && <p className="border-t px-4 py-2 text-xs text-destructive">Daftar percakapan tidak dapat diperbarui.</p>}

@@ -20,6 +20,7 @@ const environmentSchema = z.object({
   DEVICE_MANAGER_PORT: z.coerce.number().int().positive().max(65535).default(8001),
   BOT_DOCKER_NETWORK: z.string().min(1).default('docker_default'),
   SESSION_HOST_PATH: z.string().min(1).default('./sessions'),
+  MEDIA_STORAGE_PATH: z.string().min(1).default('/app/media'),
   ORCHESTRATOR: z.enum(['auto', 'docker', 'kubernetes']).default('auto'),
   KUBERNETES_NAMESPACE: z.string().min(1).default('wa-gateway'),
   KUBERNETES_IN_CLUSTER: z.string().optional(),
@@ -89,6 +90,7 @@ const config = {
   appPublicUrl: environment.APP_PUBLIC_URL ?? null,
   sessionPath: environment.SESSION_PATH,
   sessionHostPath: environment.SESSION_HOST_PATH,
+  mediaStoragePath: environment.MEDIA_STORAGE_PATH,
   limits: {
     messagesPerMinute: environment.MAX_MSG_PER_MINUTE,
     messagesPerHour: environment.MAX_MSG_PER_HOUR,

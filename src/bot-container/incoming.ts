@@ -4,6 +4,7 @@ import {
   type WASocket,
   type WAMessage,
   type WAMessageKey,
+  downloadMediaMessage,
 } from '@whiskeysockets/baileys';
 import type { Logger } from 'winston';
 import { query } from '../shared/database/connection';
@@ -11,6 +12,7 @@ import type { QueryFn } from './health-score';
 import { dispatchWebhook, type WebhookPayload } from './webhook';
 import pool, { transaction } from '../shared/database/connection';
 import { normalizeRecipientNumber, parseConsentKeyword, withRecipientConsentLock } from '../shared/recipient-consent';
+import { uploadPrivateMedia } from './private-media';
 
 const defaultQueryFn: QueryFn = (text, params) => query(text, params);
 
@@ -109,6 +111,7 @@ export async function handleIncomingMessage(
   log: Logger,
   webhookDispatcher: typeof dispatchWebhook = dispatchWebhook,
   beforeWebhook?: (message: IncomingMessageRecord) => Promise<void>,
+  sock?: WASocket,
 ): Promise<IncomingMessageRecord | undefined> {
   if (message.key.fromMe && message.key.remoteJid?.endsWith('@g.us')) {
     await persistGroupMessage(message, deviceKey, queryFn);
@@ -146,6 +149,7 @@ export async function handleIncomingMessage(
   }
 
   const parsed = incomingContent(message);
+  let mediaId: string | null = null;
   const timestampSeconds = Number(message.messageTimestamp);
   const inserted = await queryFn(
     `WITH claimed AS (
@@ -156,11 +160,11 @@ export async function handleIncomingMessage(
      )
      INSERT INTO messages (
        tenant_id, device_id, device_key, from_number, to_number, chat_jid, content, type,
-       status, direction, whatsapp_message_id, created_at
+       status, direction, whatsapp_message_id, created_at, media_url
      )
      SELECT $1::uuid, $2::uuid, $3::varchar, $4::varchar, $5::varchar, $6::varchar, $7::text, $8::varchar,
             'received', 'inbound', $9::varchar,
-            CASE WHEN $10::double precision > 0 THEN to_timestamp($10::double precision) ELSE now() END
+            CASE WHEN $10::double precision > 0 THEN to_timestamp($10::double precision) ELSE now() END, NULL
      WHERE EXISTS (SELECT 1 FROM claimed)
      RETURNING id, created_at`,
     [
@@ -183,6 +187,26 @@ export async function handleIncomingMessage(
       whatsappMessageId: message.key.id,
     });
     return;
+  }
+
+  // Download only after the event was deduplicated, so WhatsApp's at-least-once delivery
+  // cannot create duplicate private files for one message.
+  if (sock && (parsed.type === 'image' || parsed.type === 'video')) {
+    const normalized = normalizeMessageContent(message.message);
+    const mediaMessage = parsed.type === 'image' ? normalized?.imageMessage : normalized?.videoMessage;
+    const mime = mediaMessage?.mimetype || (parsed.type === 'image' ? 'image/jpeg' : 'video/mp4');
+    try {
+      const bytes = await downloadMediaMessage(message, 'buffer', {});
+      const candidateFileName = mediaMessage && 'fileName' in mediaMessage ? mediaMessage.fileName : undefined;
+      const fileName = typeof candidateFileName === 'string' ? candidateFileName : undefined;
+      mediaId = await uploadPrivateMedia(deviceKey, bytes, mime, fileName);
+      await queryFn('UPDATE messages SET media_url=$2 WHERE id=$1', [row.id, mediaId]);
+    } catch (error) {
+      log.warn('Incoming WhatsApp media could not be stored for inbox viewing', {
+        deviceKey, messageId: message.key.id, type: parsed.type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   // An inbound message from someone we recently wrote to is a reply; the
@@ -226,6 +250,8 @@ export async function handleIncomingMessage(
     chat_jid: remoteJid,
     is_group: remoteJid.endsWith('@g.us'),
     content: parsed.content,
+    type: parsed.type,
+    ...(mediaId ? { media_id: mediaId } : {}),
     direction: 'inbound',
     status: 'received',
     timestamp: row.created_at.toISOString(),
@@ -363,7 +389,7 @@ export function registerIncomingMessageListener(
         if (!onIncoming) return;
         stopHandled = true;
         await onIncoming(saved);
-      }).then(async (saved) => {
+      }, sock).then(async (saved) => {
         if (saved && onIncoming && !(stopHandled && saved.consentCommand === 'stop')) await onIncoming(saved);
       }).catch((error: unknown) => {
         log.error('Failed to save incoming WhatsApp message', {

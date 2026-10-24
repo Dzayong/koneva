@@ -46,6 +46,10 @@ const ANY_WRITE = ['POST', 'PATCH', 'PUT', 'DELETE'] as const;
 const RULES: readonly Rule[] = [
   [['GET'], /^\/inbox\/(devices|conversations|messages)$/, 'inbox:read'],
   [['POST'], /^\/inbox\/messages\/[^/]+\/reply$/, 'messages:reply'],
+  [['POST'], /^\/inbox\/media$/, 'messages:reply'],
+  [['GET'], /^\/inbox\/media\/[^/]+$/, 'inbox:read'],
+  [['POST'], /^\/media\/upload$/, 'content:write'],
+  [['GET'], /^\/media\/[^/]+$/, 'messages:read'],
   [['POST'], /^\/message\/send$/, 'messages:send'],
   [['POST'], /^\/contacts\/broadcast-consent$/, 'messages:send'],
   [['POST'], /^\/broadcast$/, 'messages:send'],
@@ -57,6 +61,8 @@ const RULES: readonly Rule[] = [
   [['GET'], /^\/devices\/[^/]+\/qr$/, 'devices:write'],
   [['GET'], /^\/devices(\/[^/]+(\/[^/]+)?)?$/, 'devices:read'],
   [['GET'], /^\/devices\/[^/]+\/commands\/[^/]+(\/viewers)?$/, 'devices:read'],
+  [['GET'], /^\/devices\/[^/]+\/media-retention$/, 'devices:read'],
+  [['PATCH'], /^\/devices\/[^/]+\/media-retention$/, 'content:write'],
   [['GET'], /^\/devices\/[^/]+\/whatsapp-groups\/[^/]+\/(details|invite|join-requests)$/, 'devices:read'],
   // Status posts and profile edits are content the device publishes: developers may, viewers may not.
   [['POST'], /^\/devices\/[^/]+\/status$/, 'content:write'],

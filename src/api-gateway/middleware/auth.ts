@@ -108,12 +108,20 @@ export async function enforceDeviceKeyScope(request: Request, response: Response
       : typeof request.params['key'] === 'string' ? request.params['key'] : (path.split('/')[2] ?? '');
   } else if ((request.method === 'POST' && ['/message/send', '/broadcast'].includes(path))) {
     target = typeof request.body?.device_key === 'string' ? request.body.device_key : undefined;
+  } else if (request.method === 'POST' && ['/inbox/media', '/media/upload'].includes(path)) {
+    target = typeof request.query['device_key'] === 'string' ? request.query['device_key'] : undefined;
   } else if (request.method === 'GET' && ['/messages', '/auto-reply-rules'].includes(path)) {
     target = typeof request.query['device_key'] === 'string' ? request.query['device_key'] : undefined;
   } else if (/^\/messages\/[^/]+(?:\/retry)?$/.test(path)) {
     const messageId = path.split('/')[2];
     const result = await pool.query<{ device_key: string }>(
       'SELECT device_key FROM messages WHERE id=$1 AND tenant_id=$2', [messageId, request.tenant!.id],
+    );
+    target = result.rows[0]?.device_key;
+  } else if (request.method === 'GET' && /^\/(?:inbox\/)?media\/[^/]+$/.test(path)) {
+    const mediaId = path.split('/').at(-1);
+    const result = await pool.query<{ device_key: string }>(
+      'SELECT d.device_key FROM media_objects m JOIN devices d ON d.id=m.device_id WHERE m.id=$1 AND m.tenant_id=$2', [mediaId, request.tenant!.id],
     );
     target = result.rows[0]?.device_key;
   } else if (/^\/auto-reply-rules\/[^/]+$/.test(path)) {

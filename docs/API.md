@@ -432,8 +432,22 @@ Operator (admin key): `GET/PATCH /plans`, `GET /subscriptions`, `GET /invoices`,
 
 `POST /api/v1/message/send` and `POST /api/v1/broadcast` accept `media_url` (public `https` address; private
 addresses are rejected) and `media_type` (`image` default, `video`, `document`). `message` then becomes the
-caption and may be empty. Links written in `message` are clickable for the recipient; no link preview card is
-generated. A device may send media as soon as it is connected and online; general sending controls still apply.
+caption and may be empty. For private uploads, send the raw file bytes as `image/jpeg`, `image/png`,
+`image/webp`, `image/gif`, or `video/mp4` to `POST /api/v1/media/upload?device_key=<device_key>` with that
+device's API key and `content:write` permission. The response contains a `media_id`; pass it with `media_type`
+and `message` to `/message/send`. Images are limited to 16 MiB and videos to 64 MiB. Inbox replies use
+`POST /api/v1/inbox/messages/:id/reply` with `{message, media_id, media_type}`. Incoming image/video webhook
+events include `type` and, when the media was downloaded successfully, `media_id`; fetch bytes from
+`GET /api/v1/media/:id` using the same tenant API key. The inbox displays received and sent image/video.
+
+Each device has a media retention policy available at `GET/PATCH /api/v1/devices/:device_key/media-retention`
+(`devices:read` / `content:write`). `media_retention_days` may be `1`, `7`, `30`, `90`, or `null` for no
+automatic expiry. New uploads use the selected policy, and changing it recalculates expiry for existing media.
+Files live in private filesystem storage; the database holds metadata only. Expired files are removed by the
+API's periodic cleanup job. Keep the configured media volume persistent and backed up according to your policy.
+
+Links written in `message` are clickable for the recipient; no link preview card is generated. A device may
+send media as soon as it is connected and online; general sending controls still apply.
 
 `POST /api/v1/broadcast` requires an `Idempotency-Key` header (8–128 letters, digits, `.`, `:`, `_`, or `-`).
 Retry a request with the same key and identical body after a timeout; KONEVA reuses the same broadcast and

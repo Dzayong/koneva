@@ -41,6 +41,8 @@ export interface SendMessageRequest {
   /** Text, or the caption when `media_url` is set (may be empty for media). */
   message: string;
   media_url?: string | undefined;
+  /** Opaque ID for an uploaded private image/video object. */
+  media_id?: string | undefined;
   media_type?: 'image' | 'video' | 'document' | undefined;
   external_id?: string | undefined;
   /** Inbound message being answered; limits this no-START path to a recent customer-initiated chat. */

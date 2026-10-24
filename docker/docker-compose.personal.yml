@@ -63,6 +63,7 @@ services:
     environment:
       <<: *env
       PORT: 8000
+      MEDIA_STORAGE_PATH: /app/media
       EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-none}
       GMAIL_SENDER_EMAIL: ${GMAIL_SENDER_EMAIL:-}
       GMAIL_OAUTH_CLIENT_ID: ${GMAIL_OAUTH_CLIENT_ID:-}
@@ -87,6 +88,8 @@ services:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     restart: unless-stopped
+    volumes:
+      - media_data:/app/media
     init: true
     logging: *logging
     healthcheck:
@@ -175,6 +178,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  media_data:
 networks:
   default:
     name: ${BOT_DOCKER_NETWORK:-wa-gateway-personal}

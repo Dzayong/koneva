@@ -230,11 +230,27 @@ class ApiClient {
     return response.data;
   }
 
-  async replyInboxMessage(id: string, message: string): Promise<{ message_id: string; status: string }> {
+  async replyInboxMessage(id: string, message: string, media?: { media_id: string; media_type: 'image' | 'video' }): Promise<{ message_id: string; status: string }> {
     const response = await this.client.post<ApiSuccess<{ message_id: string; status: string }>>(
-      `/api/v1/inbox/messages/${id}/reply`, { message }, { skipErrorToast: true },
+      `/api/v1/inbox/messages/${id}/reply`, { message, ...media }, { skipErrorToast: true },
     );
     return response.data.data;
+  }
+
+  async uploadInboxMedia(file: File, deviceKey: string): Promise<{ id: string; type: 'image' | 'video' }> {
+    const response = await this.client.post<ApiSuccess<{ id: string; type: 'image' | 'video' }>>(
+      '/api/v1/inbox/media', file, {
+        params: { device_key: deviceKey },
+        headers: { 'Content-Type': file.type },
+        skipErrorToast: true,
+      },
+    );
+    return response.data.data;
+  }
+
+  async getInboxMedia(id: string): Promise<Blob> {
+    const response = await this.client.get<Blob>(`/api/v1/inbox/media/${id}`, { responseType: 'blob' });
+    return response.data;
   }
 
   async getDashboardStats(): Promise<DashboardStats> {
@@ -259,6 +275,18 @@ class ApiClient {
 
   async getDevice(deviceKey: string): Promise<Device> {
     const response = await this.client.get<ApiSuccess<Device>>(`/api/v1/devices/${deviceKey}`);
+    return response.data.data;
+  }
+
+  async getDeviceMediaRetention(deviceKey: string): Promise<{ media_retention_days: number | null }> {
+    const response = await this.client.get<ApiSuccess<{ media_retention_days: number | null }>>(`/api/v1/devices/${encodeURIComponent(deviceKey)}/media-retention`);
+    return response.data.data;
+  }
+
+  async updateDeviceMediaRetention(deviceKey: string, days: number | null): Promise<{ media_retention_days: number | null }> {
+    const response = await this.client.patch<ApiSuccess<{ media_retention_days: number | null }>>(
+      `/api/v1/devices/${encodeURIComponent(deviceKey)}/media-retention`, { media_retention_days: days }, { skipErrorToast: true },
+    );
     return response.data.data;
   }
 

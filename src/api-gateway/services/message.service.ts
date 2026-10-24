@@ -84,6 +84,21 @@ export async function queueSystemNotification(tenantId: string, eventId: string,
 }
 
 async function queueMessageInternal(tenantId: string, input: SendMessageRequest, systemKind: 'otp' | 'notification' | null, notificationDelayMs = 0, sendContext: 'api' | 'broadcast' = 'api'): Promise<MessageRow> {
+  if (input.media_id && input.media_url) throw new ServiceError(400, 'MEDIA_SOURCE_CONFLICT', 'Gunakan satu sumber media saja.');
+  let mediaUrl = input.media_url ?? null;
+  let mediaType: 'image' | 'video' | 'document' | 'text' = mediaUrl ? (input.media_type ?? 'image') : 'text';
+  if (input.media_id) {
+    const stored = (await pool.query<{ content_type: string }>(
+      `SELECT m.content_type FROM media_objects m JOIN devices d ON d.id=m.device_id
+       WHERE m.id=$1 AND m.tenant_id=$2 AND d.device_key=$3 AND (m.expires_at IS NULL OR m.expires_at>now())`,
+      [input.media_id, tenantId, input.device_key],
+    )).rows[0];
+    if (!stored || !['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/3gpp'].includes(stored.content_type)) {
+      throw new ServiceError(404, 'MEDIA_NOT_FOUND', 'Media tidak ditemukan untuk device ini.');
+    }
+    mediaUrl = input.media_id;
+    mediaType = stored.content_type.startsWith('image/') ? 'image' : 'video';
+  }
   const groupLockRecipient = input.to.endsWith('@g.us') && input.reply_to_message_id
     ? ((await pool.query<{ from_number: string | null }>(
       `SELECT m.from_number FROM messages m JOIN devices d ON d.id=m.device_id
@@ -104,9 +119,9 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
     );
     const prior = existing.rows[0];
     if (prior) {
-      const expectedType = input.media_url ? (input.media_type ?? 'image') : 'text';
+      const expectedType = mediaType;
       if (prior.device_key !== input.device_key || prior.to_number !== input.to || prior.content !== input.message
-        || prior.type !== expectedType || (prior as MessageRow & { media_url?: string | null }).media_url !== (input.media_url ?? null)) {
+        || prior.type !== expectedType || (prior as MessageRow & { media_url?: string | null }).media_url !== mediaUrl) {
         throw new ServiceError(409, 'CAMPAIGN_MESSAGE_ID_CONFLICT', 'Campaign message id was already used for different content');
       }
       if (prior.status === 'queued') {
@@ -165,9 +180,9 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
         [tenantId, input.external_id],
       )).rows[0];
       if (prior) {
-        const expectedType = input.media_url ? (input.media_type ?? 'image') : 'text';
+        const expectedType = mediaType;
         if (prior.device_key !== input.device_key || prior.to_number !== input.to || prior.content !== input.message
-          || prior.type !== expectedType || (prior.media_url ?? null) !== (input.media_url ?? null)
+          || prior.type !== expectedType || (prior.media_url ?? null) !== mediaUrl
           || (prior.reply_to_message_id ?? null) !== (input.reply_to_message_id ?? null)) {
           throw new ServiceError(409, 'IDEMPOTENCY_KEY_CONFLICT', 'external_id sudah digunakan untuk isi pesan yang berbeda');
         }
@@ -235,7 +250,7 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
       [tenantId, device.id, input.device_key, input.to,
         input.to.endsWith('@g.us') ? input.to : `${input.to.replace(/\D/g, '')}@s.whatsapp.net`,
         input.message, input.external_id ?? null, status, priority,
-        input.media_url ? (input.media_type ?? 'image') : 'text', input.media_url ?? null, exempt, systemOtp, systemNotification, input.reply_to_message_id ?? null, systemManaged ? 'api' : sendContext],
+        mediaType, mediaUrl, exempt, systemOtp, systemNotification, input.reply_to_message_id ?? null, systemManaged ? 'api' : sendContext],
     );
     if (status === 'queued' && !exempt && payg.enabled) {
       await reserveMessageCharge(client, tenantId, result.rows[0]!.id, 0);
@@ -488,7 +503,7 @@ export async function listInboxMessages(
   return { success: true, data: rows.rows, pagination: { limit: filter.limit, offset: filter.offset, total, has_more: filter.offset + rows.rows.length < total } };
 }
 
-export async function queueInboxReply(tenantId: string, messageId: string, content: string): Promise<MessageRow> {
+export async function queueInboxReply(tenantId: string, messageId: string, content: string, mediaId?: string, mediaType?: 'image' | 'video'): Promise<MessageRow> {
   const original = (await pool.query<{ device_key: string; from_number: string | null; chat_jid: string | null }>(
     `SELECT device_key, from_number, chat_jid FROM messages
      WHERE tenant_id = $1 AND id = $2 AND direction = 'inbound'
@@ -505,6 +520,7 @@ export async function queueInboxReply(tenantId: string, messageId: string, conte
     device_key: original.device_key,
     to: recipient,
     message: content,
+    ...(mediaId ? { media_id: mediaId, media_type: mediaType } : {}),
     reply_to_message_id: messageId,
   });
 }

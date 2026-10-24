@@ -74,6 +74,36 @@ router.get('/devices/:deviceKey', validate({ params: deviceParams }), async (req
   response.json({ success: true, data: await getDeviceStatus(request.tenant!.id, deviceKey) });
 });
 
+router.get('/devices/:deviceKey/media-retention', validate({ params: deviceParams }), async (request, response) => {
+  const { deviceKey } = request.validated!.params as { deviceKey: string };
+  const row = (await pool.query<{ media_retention_days: number | null }>(
+    'SELECT media_retention_days FROM devices WHERE tenant_id=$1 AND device_key=$2', [request.tenant!.id, deviceKey],
+  )).rows[0];
+  if (!row) { response.status(404).json({ success: false, error: { code: 'DEVICE_NOT_FOUND', message: 'Device tidak ditemukan.' } }); return; }
+  response.json({ success: true, data: row });
+});
+
+router.patch('/devices/:deviceKey/media-retention', validate({
+  params: deviceParams,
+  body: z.object({ media_retention_days: z.union([z.literal(1), z.literal(7), z.literal(30), z.literal(90), z.null()]) }).strict(),
+}), async (request, response) => {
+  const { deviceKey } = request.validated!.params as { deviceKey: string };
+  const { media_retention_days } = request.validated!.body as { media_retention_days: number | null };
+  const result = await pool.query<{ media_retention_days: number | null }>(
+    `UPDATE devices SET media_retention_days=$3 WHERE tenant_id=$1 AND device_key=$2
+     RETURNING media_retention_days`, [request.tenant!.id, deviceKey, media_retention_days],
+  );
+  if (!result.rows[0]) { response.status(404).json({ success: false, error: { code: 'DEVICE_NOT_FOUND', message: 'Device tidak ditemukan.' } }); return; }
+  // Recalculate expiry for existing media from its original upload time.
+  await pool.query(
+    `UPDATE media_objects m SET expires_at=CASE WHEN $3::integer IS NULL THEN NULL
+      ELSE m.created_at + make_interval(days => $3) END
+     FROM devices d WHERE m.device_id=d.id AND d.tenant_id=$1 AND d.device_key=$2`,
+    [request.tenant!.id, deviceKey, media_retention_days],
+  );
+  response.json({ success: true, data: result.rows[0] });
+});
+
 export async function getDeviceQr(request: Request, response: Response): Promise<void> {
   const { deviceKey } = request.validated!.params as { deviceKey: string };
   const device = await getDeviceStatus(request.tenant!.id, deviceKey);

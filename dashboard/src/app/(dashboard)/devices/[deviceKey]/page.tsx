@@ -10,6 +10,7 @@ import { DeviceBehavior } from "@/components/devices/device-behavior";
 import { DeviceApiKeyPanel } from "@/components/devices/device-api-key-panel";
 import { DeviceEvents } from "@/components/devices/device-events";
 import { DeviceProfileTab } from "@/components/devices/device-profile";
+import { DeviceMediaRetention } from "@/components/devices/device-media-retention";
 import { DeviceStatusBadge } from "@/components/devices/device-status-badge";
 import { QRCodeDialog } from "@/components/devices/qr-code-dialog";
 import { MessageDetail, MessageRow, messageNumber } from "@/components/messages/message-item";
@@ -177,6 +178,7 @@ export default function DeviceDetailPage(props: {
           <TabsTrigger value="ringkasan">Ringkasan</TabsTrigger>
           <TabsTrigger value="perilaku">Perilaku pengiriman</TabsTrigger>
           <TabsTrigger value="profil">Profil</TabsTrigger>
+          <TabsTrigger value="media">Media</TabsTrigger>
           <TabsTrigger value="api-key">API key</TabsTrigger>
           <TabsTrigger value="riwayat">Riwayat status</TabsTrigger>
         </TabsList>
@@ -223,6 +225,10 @@ export default function DeviceDetailPage(props: {
 
         <TabsContent value="profil" className="mt-6">
           <DeviceProfileTab deviceKey={deviceKey} online={device?.status === "online"} canEdit={can("content:write")} />
+        </TabsContent>
+
+        <TabsContent value="media" className="mt-6">
+          <DeviceMediaRetention deviceKey={deviceKey} canEdit={can("content:write")} />
         </TabsContent>
 
         <TabsContent value="api-key" className="mt-6">

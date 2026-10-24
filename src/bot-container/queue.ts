@@ -28,6 +28,7 @@ import type { EnqueueMessageInput, QueueJobData, MessageRecord, MessageStatus } 
 import { getStoredRecipientConsent, withRecipientConsentLock } from '../shared/recipient-consent';
 import { ApiError } from './errors';
 import { withDeviceSendLock } from '../shared/device-send-lock';
+import { fetchPrivateMedia, isPrivateMediaId } from './private-media';
 
 const defaultQueryFn: QueryFn = (text, params) => query(text, params);
 
@@ -703,7 +704,17 @@ async function processJobBody(
       const result = await withSpan(
         'message.send',
         { device_key: deviceKey, message_id: message.id, 'message.type': message.type },
-        () => sock.sendMessage(jid, toMessageContent(message), { messageId: whatsappMessageId, ...(quoted ? { quoted } : {}) }),
+        async () => {
+          let content = toMessageContent(message);
+          if (message.mediaUrl && isPrivateMediaId(message.mediaUrl)) {
+            const bytes = await fetchPrivateMedia(deviceKey, message.mediaUrl);
+            const caption = message.content.trim() ? { caption: message.content } : {};
+            content = message.type === 'image' ? { image: bytes, ...caption }
+              : message.type === 'video' ? { video: bytes, ...caption }
+                : content;
+          }
+          return sock.sendMessage(jid, content, { messageId: whatsappMessageId, ...(quoted ? { quoted } : {}) });
+        },
       );
       // sendMessage only confirms that the stanza was written to the socket;
       // mark it sent only after WhatsApp's SERVER_ACK event arrives.
