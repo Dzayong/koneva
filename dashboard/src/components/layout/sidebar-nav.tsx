@@ -20,7 +20,6 @@ import {
   Reply,
   Rocket,
   Settings,
-  ShieldCheck,
   Smartphone,
   Users,
 } from "lucide-react";
@@ -46,7 +45,6 @@ const groups: Array<{ label: string; items: NavItem[] }> = [
       { name: "Kontak", href: "/contacts", icon: Users, permission: "messages:read" },
       { name: "Grup & saluran", href: "/groups", icon: Users, permission: "devices:read" },
       { name: "Analitik", href: "/analytics", icon: BarChart3, permission: "messages:read" },
-      { name: "Level & Misi", href: "/readiness", icon: ShieldCheck, permission: "devices:read" },
       { name: "Balas otomatis", href: "/settings/auto-reply", icon: Reply, permission: "messages:read" },
     ],
   },
