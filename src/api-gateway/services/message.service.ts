@@ -400,11 +400,24 @@ export async function listInboxDevices(tenantId: string) {
   return { success: true, data: result.rows };
 }
 
-const inboxChatKey = (alias: string) => `COALESCE(NULLIF(${alias}chat_jid, ''),
-  CASE WHEN ${alias}direction = 'inbound'
-    THEN regexp_replace(COALESCE(${alias}from_number, ''), '[^0-9]', '', 'g') || '@s.whatsapp.net'
-    ELSE regexp_replace(COALESCE(${alias}to_number, ''), '[^0-9]', '', 'g') || '@s.whatsapp.net'
-  END)`;
+const inboxChatKey = (alias: string) => {
+  const jid = `${alias}chat_jid`;
+  const peerNumber = `regexp_replace(COALESCE(CASE WHEN ${alias}direction = 'inbound'
+    THEN ${alias}from_number ELSE ${alias}to_number END, ''), '[^0-9]', '', 'g')`;
+  const jidNumber = `regexp_replace(COALESCE(${jid}, ''), '[^0-9]', '', 'g')`;
+  return `CASE
+    WHEN COALESCE(NULLIF(${jid}, ''), NULLIF(${alias}to_number, '')) LIKE '%@g.us'
+      THEN COALESCE(NULLIF(${jid}, ''), ${alias}to_number)
+    -- Merge a LID thread with its phone-number alias only when the stored peer
+    -- differs from the LID itself. If WhatsApp gave us no phone alias, keep the
+    -- LID separate instead of guessing from its numeric identifier.
+    WHEN ${jid} LIKE '%@lid' AND NULLIF(${peerNumber}, '') IS NOT NULL AND ${peerNumber} <> ${jidNumber}
+      THEN ${peerNumber} || '@s.whatsapp.net'
+    WHEN ${jid} LIKE '%@lid' THEN ${jid}
+    WHEN NULLIF(${peerNumber}, '') IS NOT NULL THEN ${peerNumber} || '@s.whatsapp.net'
+    ELSE COALESCE(NULLIF(${jid}, ''), ${peerNumber} || '@s.whatsapp.net')
+  END`;
+};
 
 export async function listInboxConversations(
   tenantId: string,
