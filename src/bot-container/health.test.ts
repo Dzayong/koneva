@@ -17,14 +17,14 @@ function state(status: ConnectionState['status']): ConnectionState {
 }
 
 test('healthy when db, redis, and whatsapp are all fine', async () => {
-  const report = await getHealthReport(fakeRedis(true), state('online'));
+  const report = await getHealthReport(fakeRedis(true), state('online'), async () => ({ rows: [{ '?column?': 1 }] }));
   assert.equal(report.status, 'healthy');
   assert.deepEqual(report.dependencies, { db: true, redis: true, whatsapp: true });
   assert.equal(report.detail, undefined);
 });
 
 test('degraded (not unhealthy) when only whatsapp is not connected yet', async () => {
-  const report = await getHealthReport(fakeRedis(true), state('qr_pending'));
+  const report = await getHealthReport(fakeRedis(true), state('qr_pending'), async () => ({ rows: [{ '?column?': 1 }] }));
   assert.equal(report.status, 'degraded');
   assert.equal(report.dependencies.whatsapp, false);
   assert.equal(report.dependencies.db, true);

@@ -75,7 +75,7 @@ export function createApiRouter(deps: ApiDependencies): Router {
   router.get('/health', async (_req, res, next) => {
     try {
       const state = deps.getState();
-      const report = await getHealthReport(deps.redis, state);
+      const report = await getHealthReport(deps.redis, state, () => deps.queryFn('SELECT 1'));
       const httpStatus = report.status === 'unhealthy' ? 503 : 200;
       res.status(httpStatus).json({
         status: report.status,

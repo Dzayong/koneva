@@ -32,9 +32,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-async function checkDb(): Promise<{ ok: boolean; detail?: string }> {
+async function checkDb(query: () => Promise<unknown>): Promise<{ ok: boolean; detail?: string }> {
   try {
-    await withTimeout(pool.query('SELECT 1'), CHECK_TIMEOUT_MS);
+    await withTimeout(query(), CHECK_TIMEOUT_MS);
     return { ok: true };
   } catch (err) {
     return { ok: false, detail: err instanceof Error ? err.message : String(err) };
@@ -65,8 +65,12 @@ function checkWhatsApp(state: ConnectionState): { ok: boolean; detail?: string }
   return { ok: false, detail: `connection status is '${state.status}'` };
 }
 
-export async function getHealthReport(redis: Redis, state: ConnectionState): Promise<HealthReport> {
-  const [db, redisResult] = await Promise.all([checkDb(), checkRedis(redis)]);
+export async function getHealthReport(
+  redis: Redis,
+  state: ConnectionState,
+  query: () => Promise<unknown> = () => pool.query('SELECT 1'),
+): Promise<HealthReport> {
+  const [db, redisResult] = await Promise.all([checkDb(query), checkRedis(redis)]);
   const whatsapp = checkWhatsApp(state);
 
   const dependencies: DependencyStatus = { db: db.ok, redis: redisResult.ok, whatsapp: whatsapp.ok };

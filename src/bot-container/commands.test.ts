@@ -272,11 +272,11 @@ test('status.post goes online, posts to status@broadcast including the owner, th
   assert.deepEqual((send.args[2] as { statusJidList: string[] }).statusJidList.sort(), ['628111@s.whatsapp.net', '6281234567890@s.whatsapp.net']);
 });
 
-test('status.post outside the number\'s active hours is postponed, not posted', async () => {
+test('status.post is not blocked by the removed per-device active hours', async () => {
   const persona = { seed: 's', timezone: 'UTC', wake_hour: 8, sleep_hour: 20, delay_min_ms: 1000, delay_max_ms: 2000, burst_size: 8, rest_min_ms: 240000, rest_max_ms: 600000, typing_ms_per_char: 50, always_on: false };
   const { context, calls } = ctx({ rows: [{ n: '6281234567890' }], persona, now: new Date('2026-09-26T02:00:00Z') });
-  await assert.rejects(() => executeCommand('status.post', { kind: 'text', text: 'x', audience: 'chatted' }, context), (e: unknown) => e instanceof Reschedule && e.delayMs > 5 * 3_600_000);
-  assert.equal(calls.some((c) => c.fn === 'sendMessage'), false);
+  await executeCommand('status.post', { kind: 'text', text: 'x', audience: 'chatted' }, context);
+  assert.equal(calls.some((c) => c.fn === 'sendMessage'), true);
 });
 
 test('status.post refuses the full publish when an explicit audience member lacks consent', async () => {
