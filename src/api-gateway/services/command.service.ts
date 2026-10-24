@@ -94,8 +94,12 @@ export async function runCommand(
 export function commandFailure(error: string | null): ServiceError {
   const match = /^([A-Z_]+): (.*)$/s.exec(error ?? '');
   const code = match?.[1] ?? 'COMMAND_FAILED';
+  const message = match?.[2] ?? error ?? 'Command failed';
+  if (/not-authorized|not authorized/i.test(message)) {
+    return new ServiceError(403, 'GROUP_ADMIN_REQUIRED', 'WhatsApp menolak permintaan ini. Pastikan nomor yang terhubung adalah admin grup.');
+  }
   const status = code === 'NOT_BUSINESS' ? 409 : code === 'NOT_CONNECTED' ? 503 : (code === 'NO_AUDIENCE' || code === 'AUDIENCE_TOO_LARGE') ? 400 : code === 'WA_TIMEOUT' ? 504 : 502;
-  return new ServiceError(status, code, match?.[2] ?? error ?? 'Command failed');
+  return new ServiceError(status, code, message);
 }
 
 export async function listCommands(tenantId: string, deviceKey: string, type: CommandType, limit = 30): Promise<CommandRow[]> {

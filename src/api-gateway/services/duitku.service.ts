@@ -14,6 +14,14 @@ interface CreateInvoiceResponse {
   reference?: string;
   paymentUrl?: string;
   statusCode?: string;
+  statusMessage?: string;
+}
+
+function checkoutFailure(responseStatus: number, result: CreateInvoiceResponse | null): ServiceError {
+  const providerCode = result?.statusCode?.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
+  const providerMessage = result?.statusMessage?.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+  const reason = providerMessage || `HTTP ${responseStatus}`;
+  return new ServiceError(502, 'DUITKU_CHECKOUT_FAILED', `Duitku menolak checkout (${providerCode || `HTTP ${responseStatus}`}): ${reason}`);
 }
 
 export async function createDuitkuCheckout(
@@ -55,15 +63,18 @@ export async function createDuitkuCheckout(
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     });
-  } catch {
-    throw new ServiceError(502, 'DUITKU_CHECKOUT_FAILED', 'Tidak dapat menghubungi Duitku sandbox. Coba lagi beberapa saat.');
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === 'TimeoutError';
+    throw new ServiceError(502, 'DUITKU_CHECKOUT_FAILED', timedOut
+      ? 'Duitku sandbox tidak merespons dalam 15 detik. Coba lagi beberapa saat.'
+      : 'KONEVA tidak dapat terhubung ke Duitku sandbox. Periksa koneksi server lalu coba lagi.');
   }
 
   const json = await response.json().catch(() => null) as CreateInvoiceResponse | null;
   let paymentUrl: URL | null = null;
   try { paymentUrl = json?.paymentUrl ? new URL(json.paymentUrl) : null; } catch { /* invalid provider response */ }
   if (!response.ok || json?.statusCode !== '00' || !json.reference || !paymentUrl || paymentUrl.protocol !== 'https:' || paymentUrl.hostname !== 'app-sandbox.duitku.com') {
-    throw new ServiceError(502, 'DUITKU_CHECKOUT_FAILED', 'Duitku sandbox menolak permintaan checkout.');
+    throw checkoutFailure(response.status, json);
   }
   return { payment_url: paymentUrl.toString(), reference: json.reference };
 }
