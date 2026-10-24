@@ -435,6 +435,11 @@ export async function listInboxConversations(
        SELECT m.id, m.device_key, d.label AS device_label,
               ${inboxChatKey('m.')} AS chat_key, m.chat_jid,
               CASE WHEN m.direction = 'inbound' THEN m.from_number ELSE m.to_number END AS peer_number,
+              (SELECT c.name FROM contacts c
+               WHERE c.tenant_id = m.tenant_id
+                 AND regexp_replace(COALESCE(c.phone_number, ''), '[^0-9]', '', 'g') =
+                     regexp_replace(COALESCE(CASE WHEN m.direction = 'inbound' THEN m.from_number ELSE m.to_number END, ''), '[^0-9]', '', 'g')
+               LIMIT 1) AS contact_name,
               m.direction, m.content, m.type, m.status, m.created_at,
               COUNT(*) OVER (PARTITION BY m.device_key, ${inboxChatKey('m.')})::int AS message_count,
               ROW_NUMBER() OVER (PARTITION BY m.device_key, ${inboxChatKey('m.')} ORDER BY m.created_at DESC, m.id DESC) AS position
@@ -442,7 +447,7 @@ export async function listInboxConversations(
        WHERE ${where}
      )
      SELECT id AS latest_message_id, device_key, device_label, chat_key, chat_jid,
-            peer_number, direction, content, type, status, created_at, message_count
+            peer_number, contact_name, direction, content, type, status, created_at, message_count
      FROM grouped WHERE position = 1 ORDER BY created_at DESC, latest_message_id DESC
      LIMIT $${values.length - 1} OFFSET $${values.length}`,
     values,

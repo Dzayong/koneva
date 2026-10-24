@@ -93,6 +93,7 @@ export interface InboxConversation {
   chat_key: string;
   chat_jid: string | null;
   peer_number: string | null;
+  contact_name?: string | null;
   direction: "inbound" | "outbound";
   content: string;
   type: Message["type"];
@@ -578,6 +579,7 @@ export interface ProfileUpdate { name?: string; about?: string; business?: Busin
 export interface WhatsAppGroupSummary {
   id: string;
   name: string;
+  image_url?: string | null;
   member_count: number;
   description: string | null;
   is_community: boolean;

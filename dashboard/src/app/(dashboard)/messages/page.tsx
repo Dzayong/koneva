@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Loader2, MessageSquare, Search, Send, Smartphone } from "lucide-react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Loader2, MessageSquare, Search, Send, Smartphone, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,12 +15,14 @@ import { apiFailure } from "@/lib/errors";
 import { formatDate, formatPhoneNumber, formatShortRelative } from "@/lib/utils";
 import { useInboxConversations, useInboxDevices, useInboxMessages } from "@/hooks/use-messages";
 import type { InboxConversation } from "@/lib/types";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const ALL = "all";
 const conversationId = (item: InboxConversation) => `${item.device_key}::${item.chat_key}`;
-const peerLabel = (item: InboxConversation) => item.chat_key.endsWith("@g.us")
-  ? `Grup WhatsApp · ${item.peer_number || item.chat_key}`
-  : formatPhoneNumber(item.peer_number || item.chat_key.replace(/@.*$/, "")) || "Nomor tidak dikenal";
+const peerLabel = (item: InboxConversation, groupName?: string) => item.chat_key.endsWith("@g.us")
+  ? groupName || `Grup WhatsApp · ${item.chat_key.replace(/@.*$/, "")}`
+  : item.contact_name || formatPhoneNumber(item.peer_number || item.chat_key.replace(/@.*$/, "")) || "Nomor tidak dikenal";
+const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("id-ID") || "?";
 const messagePreview = (item: InboxConversation) => item.type === "text" ? item.content : item.content || `[${item.type}]`;
 
 export default function MessagesPage() {
@@ -31,6 +33,20 @@ export default function MessagesPage() {
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const queryClient = useQueryClient();
   const devices = useInboxDevices();
+  const onlineDevices = (devices.data ?? []).filter((device) => device.status === "online");
+  const groupQueries = useQueries({ queries: onlineDevices.map((device) => ({
+    queryKey: ["whatsapp-groups", device.device_key],
+    queryFn: () => api.getWhatsAppGroups(device.device_key),
+    staleTime: 30_000,
+    retry: false,
+  })) });
+  const groupsByChat = useMemo(() => {
+    const map = new Map<string, { name: string; imageUrl: string | null }>();
+    groupQueries.forEach((query, index) => {
+      for (const group of query.data ?? []) map.set(`${onlineDevices[index]?.device_key}::${group.id}`, { name: group.name, imageUrl: group.image_url ?? null });
+    });
+    return map;
+  }, [groupQueries, onlineDevices]);
   const conversations = useInboxConversations({
     ...(deviceKey !== ALL ? { device_key: deviceKey } : {}),
     ...(search.trim() ? { search: search.trim() } : {}),
@@ -56,6 +72,15 @@ export default function MessagesPage() {
   }, []);
   const replyWindowOpen = !!latestInbound && now - new Date(latestInbound.created_at).getTime() <= 24 * 60 * 60 * 1000;
   const isGroup = !!selected?.chat_key.endsWith("@g.us");
+  const groupMeta = selected ? groupsByChat.get(`${selected.device_key}::${selected.chat_key}`) : undefined;
+  const groupDetails = useQuery({
+    queryKey: ["whatsapp-group-details", selected?.device_key, selected?.chat_key],
+    queryFn: () => api.getWhatsAppGroupDetails(selected!.device_key, selected!.chat_key),
+    enabled: Boolean(selected && isGroup && devices.data?.some((device) => device.device_key === selected.device_key && device.status === "online")),
+    retry: false,
+    staleTime: 30_000,
+  });
+  const participantNames = useMemo(() => new Map((groupDetails.data?.participants ?? []).map((person) => [person.id.replace(/@.*$/, "").replace(/\D/g, ""), person.name])), [groupDetails.data]);
 
   const reply = useMutation({
     mutationFn: () => api.replyInboxMessage(latestInbound!.id, draft.trim()),
@@ -94,22 +119,25 @@ export default function MessagesPage() {
         </Select>
       </div>
 
-      <section className="grid min-h-[68vh] overflow-hidden rounded-xl border bg-card shadow-card lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.8fr)]" aria-label="Kotak masuk percakapan">
-        <div className={`${mobileChatOpen ? "hidden lg:block" : "block"} min-h-0 border-r`}>
+      <section className="grid h-[68dvh] min-h-[420px] max-h-[760px] grid-rows-[minmax(0,1fr)] overflow-hidden rounded-xl border bg-card shadow-card lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.8fr)]" aria-label="Kotak masuk percakapan">
+        <div className={`${mobileChatOpen ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r`}>
           <div className="flex h-12 items-center justify-between border-b px-4 text-sm">
             <span className="font-semibold">Percakapan</span>
             <span className="text-muted-foreground">{conversations.data?.length ?? 0}</span>
           </div>
-          <div className="max-h-[68vh] overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {conversations.isLoading ? Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} className="h-[76px] w-full rounded-none" />)
               : (conversations.data?.length ?? 0) > 0 ? conversations.data!.map((item) => {
                 const active = selected && conversationId(selected) === conversationId(item);
                 const Arrow = item.direction === "inbound" ? ArrowDownLeft : ArrowUpRight;
+                const group = item.chat_key.endsWith("@g.us");
+                const meta = groupsByChat.get(`${item.device_key}::${item.chat_key}`);
+                const label = peerLabel(item, meta?.name);
                 return (
                   <button key={conversationId(item)} type="button" onClick={() => chooseConversation(item)} aria-current={active ? "true" : undefined}
                     className={`flex w-full flex-col gap-1.5 border-b px-4 py-3 text-left transition-colors hover:bg-accent/50 ${active ? "bg-accent" : ""}`}>
                     <div className="flex min-w-0 items-center justify-between gap-3">
-                      <span className="flex min-w-0 items-center gap-2 text-sm font-medium"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/10 text-primary"><MessageSquare className="h-4 w-4" /></span><span className="truncate">{peerLabel(item)}</span></span>
+                      <span className="flex min-w-0 items-center gap-2 text-sm font-medium"><Avatar className="h-9 w-9 shrink-0"><AvatarImage src={group ? meta?.imageUrl ?? undefined : undefined} alt="" /><AvatarFallback className="bg-primary/10 text-primary">{group ? <Users className="h-4 w-4" /> : initials(item.contact_name || label)}</AvatarFallback></Avatar><span className="truncate">{label}</span></span>
                       <time className="shrink-0 text-xs text-muted-foreground" title={formatDate(item.created_at)}>{formatShortRelative(item.created_at)}</time>
                     </div>
                     <div className="flex items-center justify-between gap-2 pl-10">
@@ -122,20 +150,21 @@ export default function MessagesPage() {
           </div>
         </div>
 
-        <div className={`${mobileChatOpen ? "flex" : "hidden lg:flex"} min-h-[68vh] flex-col`}>
+        <div className={`${mobileChatOpen ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col`}>
           {selected ? <>
             <div className="flex items-center gap-3 border-b px-4 py-3 sm:px-6">
               <Button variant="ghost" size="icon" className="h-9 w-9 lg:hidden" aria-label="Kembali ke percakapan" onClick={() => setMobileChatOpen(false)}><ArrowLeft className="h-4 w-4" /></Button>
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary"><MessageSquare className="h-5 w-5" /></div>
-              <div className="min-w-0 flex-1"><p className="truncate font-semibold">{peerLabel(selected)}</p><p className="truncate text-xs text-muted-foreground">{selected.device_label || selected.device_key} · {sourceDevice?.status === "online" ? "Online" : sourceDevice?.status || "Device"}</p></div>
+              <Avatar className="h-10 w-10 shrink-0"><AvatarImage src={groupMeta?.imageUrl ?? undefined} alt="" /><AvatarFallback className="bg-primary/10 text-primary">{isGroup ? <Users className="h-5 w-5" /> : initials(selected.contact_name || peerLabel(selected))}</AvatarFallback></Avatar>
+              <div className="min-w-0 flex-1"><p className="truncate font-semibold">{peerLabel(selected, groupMeta?.name)}</p><p className="truncate text-xs text-muted-foreground">{selected.device_label || selected.device_key} · {sourceDevice?.status === "online" ? "Online" : sourceDevice?.status || "Device"}</p></div>
             </div>
-            <div className="flex-1 space-y-3 overflow-y-auto bg-muted/20 px-4 py-5 sm:px-6">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-muted/20 px-4 py-5 sm:px-6">
               {messages.hasNextPage && <div className="flex justify-center"><Button type="button" variant="outline" size="sm" disabled={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}>{messages.isFetchingNextPage ? <><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />Memuat…</> : "Muat pesan sebelumnya"}</Button></div>}
               {messages.isLoading ? <div className="space-y-3"><Skeleton className="h-16 w-2/3" /><Skeleton className="ml-auto h-16 w-2/3" /></div>
                 : orderedMessages.map((message) => {
                   const inbound = message.direction === "inbound";
                   return <div key={message.id} className={`flex ${inbound ? "justify-start" : "justify-end"}`}>
                     <div className={`max-w-[88%] rounded-xl px-3.5 py-2.5 shadow-sm sm:max-w-[75%] ${inbound ? "rounded-tl-sm border bg-card" : "rounded-tr-sm bg-primary text-primary-foreground"}`}>
+                      {inbound && isGroup && <p className="mb-1 text-xs font-semibold text-primary">{participantNames.get((message.from_number ?? "").replace(/\D/g, "")) || formatPhoneNumber(message.from_number ?? "") || "Anggota grup"}</p>}
                       <p className="whitespace-pre-wrap break-words text-sm">{message.content || `[${message.type}]`}</p>
                       <div className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${inbound ? "text-muted-foreground" : "text-primary-foreground/75"}`}><time title={formatDate(message.created_at)}>{new Date(message.created_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</time>{!inbound && <MessageStatusBadge status={message.status} errorMessage={message.error_message} />}</div>
                     </div>

@@ -232,17 +232,25 @@ export async function executeCommand(type: CommandType, payload: unknown, ctx: C
       // Baileys exposes communities through a separate query from regular groups.
       // Merge by JID because some server versions include community roots in both responses.
       const all = new Map([...Object.values(groups), ...Object.values(communities)].map((group) => [group.id, group]));
-      return [...all.values()].map((group) => ({
-        id: group.id,
-        name: group.subject || 'Grup tanpa nama',
-        member_count: group.size ?? group.participants?.length ?? 0,
-        description: group.desc ?? null,
-        is_community: Boolean(group.isCommunity),
-        is_community_announcement: Boolean(group.isCommunityAnnounce),
-        parent_community_jid: group.linkedParent ?? null,
-        announcement_only: Boolean(group.announce),
-        created_at: group.creation ? new Date(group.creation * 1000).toISOString() : null,
-      })).sort((a, b) => a.name.localeCompare(b.name, 'id'));
+      const summaries = await Promise.all([...all.values()].map(async (group) => {
+        const imageUrl = await withDeadline(
+          Promise.resolve().then(() => ctx.sock.profilePictureUrl(group.id, 'image')),
+          deadline,
+        ).catch(() => undefined);
+        return {
+          id: group.id,
+          name: group.subject || 'Grup tanpa nama',
+          member_count: group.size ?? group.participants?.length ?? 0,
+          description: group.desc ?? null,
+          image_url: imageUrl ?? null,
+          is_community: Boolean(group.isCommunity),
+          is_community_announcement: Boolean(group.isCommunityAnnounce),
+          parent_community_jid: group.linkedParent ?? null,
+          announcement_only: Boolean(group.announce),
+          created_at: group.creation ? new Date(group.creation * 1000).toISOString() : null,
+        };
+      }));
+      return summaries.sort((a, b) => a.name.localeCompare(b.name, 'id'));
     }
     case 'whatsapp.channel.lookup': {
       const { lookup } = payload as { lookup: string };
