@@ -6,7 +6,9 @@ import { sha256 } from './account.service';
 import { ServiceError } from './service-error';
 
 // A key can never manage keys, the team or billing; those stay with signed-in people.
-export const KEY_SCOPES = PERMISSIONS.filter((p) => !['keys:manage', 'team:manage', 'billing:manage'].includes(p));
+export const KEY_SCOPES = PERMISSIONS.filter((p) => ![
+  'keys:manage', 'team:manage', 'billing:manage', 'inbox:read', 'messages:reply',
+].includes(p));
 export const MAX_ACTIVE_KEYS = 20;
 const TOUCH_AFTER_MS = 5 * 60_000;
 

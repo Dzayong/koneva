@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useDevice, useDeviceQR } from "@/hooks/use-device";
 import { cn } from "@/lib/utils";
 
-const STEPS = ["Pindai QR", "Tersambung", "Masa pemanasan"] as const;
+const STEPS = ["Pindai QR", "Tersambung", "Siap digunakan"] as const;
 
 export function QRCodeDialog({
   deviceKey,
@@ -60,10 +60,8 @@ export function QRCodeDialog({
               <motion.div key="connected" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 text-sm">
                 <div className="flex items-center gap-2 text-base font-semibold text-green-700"><CheckCircle2 className="h-6 w-6" />Berhasil tersambung</div>
                 <p className="text-muted-foreground">
-                  Nomor baru dibatasi <strong className="text-foreground">5 pesan per hari</strong> pada 2 hari pertama, lalu naik bertahap sampai hari ke-8.
-                  Ini normal dan melindungi nomor Anda dari pembatasan WhatsApp.
+                  Device ini siap digunakan. Tetap kirim pesan dengan izin penerima; aktivitas berlebihan dapat membuat WhatsApp membatasi nomor.
                 </p>
-                <p className="text-muted-foreground">Selama masa ini, gunakan nomor secara wajar: balas orang yang menghubungi, dan kirim ke kontak yang mengenal Anda.</p>
               </motion.div>
             ) : data?.qr_code ? (
               <motion.div key="qr" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="rounded-lg border bg-white p-4">

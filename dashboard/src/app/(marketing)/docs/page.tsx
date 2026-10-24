@@ -8,7 +8,7 @@ import { SITE } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Dokumentasi API WhatsApp: kirim pesan, status, dan webhook",
-  description: "Panduan API KONEVA: autentikasi, mengirim pesan dan OTP, membaca status, aturan pemanasan nomor, serta webhook bertanda tangan dengan contoh Node.js, Python, dan PHP.",
+  description: "Panduan API KONEVA: autentikasi, mengirim pesan, membaca status, kontrol pengiriman, dan webhook bertanda tangan.",
   alternates: { canonical: "/docs" },
   openGraph: { url: "/docs", title: "Dokumentasi API KONEVA", description: "Kirim pesan, baca status, dan pasang webhook." },
 };
@@ -51,7 +51,7 @@ const SIGNUP_CONSENT: CodeTab[] = [
 });` },
 ];
 
-const TOC = [["mulai", "Mulai"], ["autentikasi", "Autentikasi"], ["kirim", "Kirim pesan"], ["status", "Status pesan"], ["pemanasan", "Pemanasan dan batas"], ["webhook", "Webhook"], ["kesalahan", "Kode kesalahan"]];
+const TOC = [["mulai", "Mulai"], ["autentikasi", "Autentikasi"], ["kirim", "Kirim pesan"], ["status", "Status pesan"], ["kontrol", "Kontrol pengiriman"], ["webhook", "Webhook"], ["kesalahan", "Kode kesalahan"]];
 
 function H2({ id, children }: { id: string; children: React.ReactNode }) {
   return <h2 id={id} className="font-display mt-14 scroll-mt-8 text-3xl">{children}</h2>;
@@ -90,7 +90,7 @@ export default function DocsPage() {
               <tr><td><code>to</code></td><td>Nomor tujuan dengan kode negara, tanpa spasi, misalnya <code>6281234567890</code>.</td></tr>
               <tr><td><code>message</code></td><td>Isi pesan, sampai 4096 karakter. Bila ada <code>media_url</code>, ini menjadi keterangan gambar dan boleh kosong. Tautan (https://…) di dalamnya bisa diketuk penerima.</td></tr>
               <tr><td><code>media_url</code></td><td>Opsional. Alamat publik <code>https</code> untuk gambar, video, atau dokumen. Alamat lokal ditolak.</td></tr>
-              <tr><td><code>media_type</code></td><td><code>image</code> (bawaan), <code>video</code>, atau <code>document</code>. Nomor yang masih masa pemanasan belum boleh mengirim media sampai hari ke-5.</td></tr>
+              <tr><td><code>media_type</code></td><td><code>image</code> (bawaan), <code>video</code>, atau <code>document</code>. Device dapat mengirim media setelah tersambung dan online.</td></tr>
               <tr><td><code>priority</code></td><td>Nilai dari pemanggil tidak memberi pengecualian atau jalur khusus. OTP yang lolos pemeriksaan server memakai antrean cepat secara otomatis.</td></tr>
               <tr><td><code>external_id</code></td><td>Opsional, penanda dari sistem Anda (maks 64 karakter).</td></tr>
               <tr><td><code>reply_to_message_id</code></td><td>Opsional. ID pesan masuk pelanggan yang sedang dibalas. Balasan harus merujuk pesan dari nomor dan device yang sama, maksimal 24 jam, dan tetap ditolak jika penerima sudah mengirim STOP.</td></tr>
@@ -106,18 +106,10 @@ export default function DocsPage() {
           <p><code>GET /api/v1/messages/&#123;id&#125;</code> mengembalikan status dan riwayatnya. Urutan normal: <code>queued</code> → <code>sending</code> → <code>sent</code> → <code>delivered</code> → <code>read</code>. Status akhir gagal: <code>failed</code> atau <code>blocked</code> (ditolak aturan keamanan nomor). <code>POST /api/v1/messages/&#123;id&#125;/retry</code> mencoba ulang pesan yang gagal.</p>
           <p>Centang biru (<code>read</code>) hanya muncul jika penerima mengaktifkan tanda baca di WhatsApp-nya.</p>
 
-          <H2 id="pemanasan">Pemanasan dan batas</H2>
-          <p>Nomor baru dilatih bertahap. Pesan masuk tidak otomatis menjadi consent untuk promosi atau campaign. Balasan manual yang merujuk pesan masuk dan balasan otomatis untuk chat langsung dapat dilakukan tanpa <code>START</code> selama jendela 24 jam; instruksi <code>STOP</code> tetap memblokir balasan.</p>
-          <table>
-            <thead><tr><th>Hari</th><th>Batas kirim per hari</th><th>Catatan</th></tr></thead>
-            <tbody>
-              <tr><td>1–2</td><td>5</td><td>Hanya membalas, belum memulai percakapan</td></tr>
-              <tr><td>3–4</td><td>10</td><td>Pesan pertama ke kontak baru mulai boleh</td></tr>
-              <tr><td>5–7</td><td>20</td><td>Media mulai boleh</td></tr>
-              <tr><td>8+</td><td>50</td><td>Batas normal</td></tr>
-            </tbody>
-          </table>
-          <p>Ada juga batas per menit dan kuota pesan bulanan sesuai paket. Pesan OTP yang dikirim melalui API tenant tetap mengikuti aturan consent, kuota, dan pacing biasa. Nilai <code>priority: &quot;urgent&quot;</code> maupun <code>otp_code</code> dari pemanggil tidak mengaktifkan jalur istimewa.</p>
+          <H2 id="kontrol">Kontrol pengiriman</H2>
+          <p>Device dapat digunakan setelah tersambung dan online; tidak ada batas berdasarkan umur device untuk memulai chat atau mengirim media. Pesan tetap tunduk pada saldo/kuota, batas harian berdasarkan catatan kualitas pengiriman, batas laju, jam aktif, pemeriksaan isi, dan status device. Sistem dapat menahan atau menolak pesan berdasarkan kontrol tersebut.</p>
+          <p>Pesan masuk tidak otomatis menjadi consent untuk promosi atau campaign. Balasan manual yang merujuk pesan masuk dan balasan otomatis untuk chat langsung dapat dilakukan dalam jendela 24 jam; instruksi <code>STOP</code> tetap memblokir pengiriman proaktif. Broadcast berisiko membuat WhatsApp membatasi nomor; kirim hanya kepada penerima yang setuju. KONEVA tidak menjamin nomor bebas pembatasan.</p>
+          <p>Pesan OTP yang dikirim melalui API tenant tetap mengikuti aturan consent, kuota, dan kontrol biasa. Nilai <code>priority: &quot;urgent&quot;</code> maupun <code>otp_code</code> dari pemanggil tidak mengaktifkan jalur istimewa.</p>
 
           <H2 id="webhook">Webhook</H2>
           <p>Webhook adalah panggilan dari kami ke server Anda saat ada kejadian, sehingga Anda tidak perlu menanyakan status terus-menerus. Simpan alamat di dashboard menu <strong>Webhook</strong>, buat kunci tanda tangan, lalu tekan <em>Kirim tes</em>.</p>
@@ -146,7 +138,7 @@ export default function DocsPage() {
               <tr><td><code>402 PLAN_MEMBER_LIMIT</code></td><td>Batas anggota tim paket tercapai.</td></tr>
               <tr><td><code>404 DEVICE_NOT_FOUND</code></td><td><code>device_key</code> tidak ada di workspace ini.</td></tr>
               <tr><td><code>429 QUOTA_EXCEEDED</code></td><td>Kuota pesan bulanan habis; jawaban menyebut tanggal reset.</td></tr>
-              <tr><td><code>failed</code> / <code>blocked</code></td><td>Pesan ditolak aturan keamanan nomor (batas harian, pemanasan) atau nomor bermasalah; alasan ada di detail pesan.</td></tr>
+              <tr><td><code>failed</code> / <code>blocked</code></td><td>Pesan ditolak kontrol pengiriman atau device bermasalah; alasan ada di detail pesan.</td></tr>
             </tbody>
           </table>
           <p className="mt-10 text-sm text-muted-foreground">{SITE.name} adalah layanan pihak ketiga, tidak berafiliasi dengan WhatsApp atau Meta.</p>

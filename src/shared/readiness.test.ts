@@ -4,7 +4,7 @@ import { computeReadiness, hasRecipientOptedOut, type QueryFn, type ReadinessInp
 
 function inputs(overrides: Partial<ReadinessInputs> = {}): ReadinessInputs {
   return {
-    status: 'online', ageDays: 10, warmupCompleted: true,
+    status: 'online',
     maturedSent: 50, maturedDelivered: 50,
     uniqueRecipients: 40, engagedRecipients: 20, unsolicitedRecipients: 4, optOuts: 0,
     ...overrides,
@@ -12,14 +12,14 @@ function inputs(overrides: Partial<ReadinessInputs> = {}): ReadinessInputs {
 }
 const factor = (report: ReturnType<typeof computeReadiness>, id: string) => report.factors.find((f) => f.id === id)!;
 
-test('a brand-new online number is mid-scale, unproven, never a free 25', () => {
+test('a brand-new online number is immediately usable while evidence remains unproven', () => {
   const report = computeReadiness(inputs({
-    ageDays: 0, warmupCompleted: false, maturedSent: 0, maturedDelivered: 0,
+    maturedSent: 0, maturedDelivered: 0,
     uniqueRecipients: 0, engagedRecipients: 0, unsolicitedRecipients: 0,
   }));
-  assert.equal(report.score, 15 + 0 + 13 + 10 + 10);
+  assert.equal(report.score, 15 + 20 + 13 + 10 + 10);
   assert.equal(report.confidence, 'low');
-  assert.equal(report.tier, 'fair');
+  assert.equal(report.tier, 'good');
   assert.equal(factor(report, 'delivery').proven, false);
 });
 
@@ -30,9 +30,10 @@ test('a mature, consented, engaged number scores 100', () => {
   assert.equal(report.confidence, 'high');
 });
 
-test('device age contributes only the existing internal indicator score', () => {
-  const at = (ageDays: number) => factor(computeReadiness(inputs({ ageDays, warmupCompleted: false })), 'maturity').score;
-  assert.deepEqual([at(0), at(1), at(2), at(3), at(4), at(6), at(7)], [0, 0, 6, 6, 12, 12, 20]);
+test('activation readiness does not depend on device age', () => {
+  const activation = factor(computeReadiness(inputs()), 'maturity');
+  assert.equal(activation.score, 20);
+  assert.equal(activation.description, 'Tidak ada masa tunggu berdasarkan usia device');
 });
 
 test('delivery tiers use only sends older than 24h and need a minimum sample', () => {

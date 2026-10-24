@@ -15,8 +15,8 @@ const ruleBody = z.object({
   device_key: z.string().min(1).max(32),
   trigger_type: z.enum(['keyword', 'regex', 'all']),
   trigger_pattern: triggerPattern.default(''),
-  response_type: z.enum(['text', 'template', 'ai']).default('text'),
-  response_content: z.string().min(1).max(4096),
+  response_type: z.enum(['text', 'template', 'ai', 'ai_general']).default('text'),
+  response_content: z.string().max(4096),
   delay_ms: z.number().int().min(0).max(300_000).default(3000),
   is_active: z.boolean().default(true),
 }).strict().superRefine((input, context) => {
@@ -26,16 +26,21 @@ const ruleBody = z.object({
   if (input.trigger_type === 'regex' && !isSafeAutoReplyRegex(input.trigger_pattern)) {
     context.addIssue({ code: 'custom', path: ['trigger_pattern'], message: 'Regex tidak valid atau terlalu kompleks. Gunakan pola sederhana tanpa grup atau alternasi.' });
   }
+  if (input.response_type !== 'ai_general' && input.response_content.trim().length === 0) {
+    context.addIssue({ code: 'custom', path: ['response_content'], message: 'Isi balasan atau instruksi AI wajib diisi' });
+  }
 });
 const updateBody = z.object({
   device_key: z.string().min(1).max(32).optional(),
   trigger_type: z.enum(['keyword', 'regex', 'all']).optional(),
   trigger_pattern: triggerPattern.optional(),
-  response_type: z.enum(['text', 'template', 'ai']).optional(),
-  response_content: z.string().min(1).max(4096).optional(),
+  response_type: z.enum(['text', 'template', 'ai', 'ai_general']).optional(),
+  response_content: z.string().max(4096).optional(),
   delay_ms: z.number().int().min(0).max(300_000).optional(),
   is_active: z.boolean().optional(),
-}).strict().refine((input) => Object.keys(input).length > 0, 'At least one update is required');
+}).strict().refine((input) => Object.keys(input).length > 0, 'At least one update is required')
+  .refine((input) => input.response_type === 'ai_general' || input.response_content === undefined || input.response_content.trim().length > 0,
+    { path: ['response_content'], message: 'Isi balasan atau instruksi AI wajib diisi' });
 const listSchema = z.object({
   device_key: z.string().min(1).max(32).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),

@@ -46,7 +46,7 @@ test('matched inbound message sends and records an auto-reply', async () => {
     { id: 'in-1', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?', isGroup: true, replyJid: '120363000000@g.us' },
     [baseRule], sock, queryFn, silent,
     { wait: async () => undefined, guard: async () => ({ allowed: true }), canSend: async () => ({ allowed: true, delayMs: 0,
-      typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }),
+      typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 80, dailyCap: 20, sentToday: 1 }),
       consentLock: async (_tenant, _recipient, work) => work() },
   );
 
@@ -70,7 +70,7 @@ test('auto-reply answers an inbound chat without a prior START opt-in', async ()
     { id: 'in-no-consent', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?', isGroup: true, replyJid: '120363000000@g.us' },
     [baseRule], sock, queryFn, silent,
     { wait: async () => undefined, guard: async () => ({ allowed: true }), canSend: async () => ({ allowed: true, delayMs: 0,
-      typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }),
+      typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 80, dailyCap: 20, sentToday: 1 }),
       consentLock: async (_tenant, _recipient, work) => work() },
   );
   assert.equal(sent, true);
@@ -145,7 +145,7 @@ test('auto-reply total delay includes reading and typing, so a flat 5 s is 5 s',
     { wait: async (ms) => { waits.push(ms); }, guard: async () => ({ allowed: true }),
       consentLock: async (_tenant, _recipient, work) => work(),
       canSend: async () => ({ allowed: true, delayMs: 5000, typing: { shouldSimulate: true, durationMs: 3200 },
-        healthScore: 80, dailyCap: 20, sentToday: 1, warmupDay: 5 }) },
+        healthScore: 80, dailyCap: 20, sentToday: 1 }) },
   );
 
   assert.equal(waits.reduce((a, b) => a + b, 0), 5000);

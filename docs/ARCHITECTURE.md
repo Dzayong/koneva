@@ -98,7 +98,7 @@ index.ts (entrypoint)
  │                  → sock.sendMessage (traced) → update `messages` → webhook
  │                  + a separate `messages.update` listener that turns
  │                  Baileys delivery/read acks into status updates + webhooks
- ├─ anti-ban.ts     warm-up stages, health-score-based daily cap, per-minute
+ ├─ anti-ban.ts     health-score-based daily cap, per-minute
  │                  rate limit, 8am–10pm WIB sending window, human-like delay
  ├─ health-score.ts pure scoring function + DB-backed calculation/cache
  ├─ content-filter.ts spam/caps/similarity/spintax/personalization checks
@@ -120,14 +120,14 @@ Design decisions worth knowing:
   api-gateway and bot-container independently arrived at the identical
   convention.
 - **Anti-ban denials are split into transient vs. permanent.** Rate/cap/time
-  -window/warm-up denials re-queue the job with a delay instead of failing
+  -window denials re-queue the job with a delay instead of failing
   it; `device_not_found` and `content_rejected` throw `UnrecoverableError`
   and fail immediately — retrying the same rejected content wouldn't help.
 - **A device with zero message history does not get force-paused.** The raw
   health-score formula is purely additive from 0, so a brand-new device would
   otherwise score 0 (below the pause threshold) on day one. Below 10 sent
   messages, the health cap falls back to the lowest non-pause tier (5/day)
-  instead of pausing — warm-up caps already keep new devices slow.
+  instead of pausing — health-based caps apply while the delivery history is limited.
 - **Two independent pause mechanisms both gate sending.** An admin calling
   `POST /api/v1/devices/:key/pause` only sets `devices.status`; anti-ban's
   own automatic health-score pause sets `status` *and* `paused_until`.

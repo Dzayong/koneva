@@ -7,7 +7,7 @@ export function GET() {
 
 > ${SITE.description}
 
-${SITE.name} is a third-party service that connects a customer's own WhatsApp number to a REST API (QR pairing, like WhatsApp Web). It is NOT the official WhatsApp Business API and is not affiliated with WhatsApp or Meta. WhatsApp states that unofficial clients can lead to number restrictions or bans; ${SITE.name} reduces the risk (gradual warm-up, human-like random delays, daily limits, readiness score) but does not guarantee a number will never be banned.
+${SITE.name} is a third-party service that connects a customer's own WhatsApp number to a REST API (QR pairing, like WhatsApp Web). It is NOT the official WhatsApp Business API and is not affiliated with WhatsApp or Meta. Unofficial use can lead to number restrictions or bans. KONEVA records recipient consent and opt-outs and applies general sending controls, but does not guarantee a number will never be banned. Connected devices can be used immediately; this does not mean unrestricted or risk-free sending.
 
 ## Facts
 - Language: Indonesian. Target customers: students (Pelajar) and small businesses (UMKM) in Indonesia.
@@ -17,7 +17,7 @@ ${SITE.name} is a third-party service that connects a customer's own WhatsApp nu
 - Direct chats only for now; group and channel sending are not available.
 
 ## Pages
-- [Home](${SITE.url}/): product overview, warm-up, readiness score, plans, FAQ
+- [Home](${SITE.url}/): product overview, sending controls, plans, FAQ
 - [Documentation](${SITE.url}/docs): authentication, sending, statuses, webhooks with verification code
 - [Terms](${SITE.url}/syarat)
 - [Privacy](${SITE.url}/privasi)

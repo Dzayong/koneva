@@ -31,6 +31,7 @@ export default function TeamPage() {
   const issueLegacyNotice = useIssueLegacyRoleNotice();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [email, setEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"developer" | "cs">("developer");
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [link, setLink] = useState<CreatedInvitation | null>(null);
   const [toRemove, setToRemove] = useState<TeamMember | null>(null);
@@ -49,8 +50,8 @@ export default function TeamPage() {
     e.preventDefault();
     setInviteError(null);
     if (!GMAIL.test(email.trim())) { setInviteError("Undangan hanya untuk alamat Gmail (@gmail.com): alamat yang akan dipakai penerima di KONEVA."); return; }
-    invite.mutate({ email: email.trim(), role: "developer" }, {
-      onSuccess: (created) => { setLink(created); setInviteOpen(false); setEmail(""); },
+    invite.mutate({ email: email.trim(), role: inviteRole }, {
+      onSuccess: (created) => { setLink(created); setInviteOpen(false); setEmail(""); setInviteRole("developer"); },
       onError: (err) => {
         const f = apiFailure(err);
         if (f.code === "EMAIL_NOT_VERIFIED") { setInviteError("Verifikasi email Anda dulu sebelum mengundang anggota."); setVerifyOpen(true); return; }
@@ -64,9 +65,9 @@ export default function TeamPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-display">Tim</h2>
-          <p className="mt-2 max-w-2xl text-muted-foreground">Owner mengundang Developer untuk mengurus integrasi teknis. Setiap orang masuk dengan akunnya sendiri, jadi semua tindakan tercatat atas nama mereka.</p>
+          <p className="mt-2 max-w-2xl text-muted-foreground">Undang Developer untuk integrasi teknis atau Customer Service untuk membaca dan membalas percakapan. Setiap orang masuk dengan akunnya sendiri.</p>
         </div>
-        {isOwner && <Button onClick={() => setInviteOpen(true)}><UserPlus className="mr-2 h-4 w-4" />Undang Developer</Button>}
+        {isOwner && <Button onClick={() => setInviteOpen(true)}><UserPlus className="mr-2 h-4 w-4" />Undang anggota</Button>}
       </div>
 
       {isOwner && (legacyTransition?.legacy_member_count ?? 0) > 0 && (
@@ -107,6 +108,12 @@ export default function TeamPage() {
                           <Button variant="link" size="sm" className="ml-2 h-auto p-0 text-xs" disabled={changeRole.isPending}
                             onClick={() => changeRole.mutate({ userId: m.user_id, role: "developer" })}>Jadikan Developer</Button>
                         )}
+                        {isOwner && !self && (m.role === "developer" || m.role === "cs") && (
+                          <Button variant="link" size="sm" className="ml-2 h-auto p-0 text-xs" disabled={changeRole.isPending}
+                            onClick={() => changeRole.mutate({ userId: m.user_id, role: m.role === "cs" ? "developer" : "cs" })}>
+                            Jadikan {m.role === "cs" ? "Developer" : "Customer Service"}
+                          </Button>
+                        )}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-sm text-muted-foreground">{formatDate(m.joined_at)}</TableCell>
                       <TableCell className="whitespace-nowrap text-sm text-muted-foreground">{m.last_login_at ? formatRelativeTime(m.last_login_at) : "Belum pernah"}</TableCell>
@@ -145,7 +152,7 @@ export default function TeamPage() {
       <section aria-labelledby="peran" className="rounded-lg border bg-card p-5">
         <h3 id="peran" className="text-heading mb-3 text-lg">Apa yang boleh dilakukan tiap peran</h3>
         <dl className="grid gap-4 sm:grid-cols-2">
-          {((hasLegacy ? ["owner", "developer", "admin", "viewer"] : ["owner", "developer"]) as Role[]).map((r) => (
+          {((hasLegacy ? ["owner", "developer", "cs", "admin", "viewer"] : ["owner", "developer", "cs"]) as Role[]).map((r) => (
             <div key={r}><dt className="font-medium">{ROLE_LABEL[r]}</dt><dd className="text-sm text-muted-foreground">{ROLE_HELP[r]}</dd></div>
           ))}
         </dl>
@@ -160,8 +167,7 @@ export default function TeamPage() {
           <form onSubmit={submitInvite} className="space-y-4">
             <div className="space-y-2"><Label htmlFor="inv-email">Alamat Gmail penerima</Label><Input id="inv-email" type="email" required placeholder="nama@gmail.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus /><p className="text-xs text-muted-foreground">Pakai alamat Gmail yang akan dipakai penerima untuk akun KONEVA. Penerima harus mengonfirmasi kode yang dikirim ke alamat ini.</p></div>
             <div className="space-y-1">
-              <p className="text-sm font-medium">Peran: Developer</p>
-              <p className="text-xs text-muted-foreground">{ROLE_HELP.developer}</p>
+              <div className="space-y-2"><Label htmlFor="inv-role">Peran</Label><select id="inv-role" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={inviteRole} onChange={(e) => setInviteRole(e.target.value as "developer" | "cs")}><option value="developer">Developer</option><option value="cs">Customer Service</option></select><p className="text-xs text-muted-foreground">{ROLE_HELP[inviteRole]}</p></div>
             </div>
             {inviteError && <p role="alert" className="text-sm text-destructive">{inviteError}</p>}
             <DialogFooter><Button type="submit" disabled={invite.isPending || !email}>{invite.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Membuat…</> : <><Plus className="mr-2 h-4 w-4" />Buat tautan undangan</>}</Button></DialogFooter>

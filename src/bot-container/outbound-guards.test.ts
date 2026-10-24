@@ -89,7 +89,7 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
     } as unknown as WASocket;
     return tr;
   }
-  const allow = async (): Promise<AntiBanDecision> => ({ allowed: true, delayMs: 0, typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 90, dailyCap: 100, sentToday: 0, warmupDay: 10 });
+  const allow = async (): Promise<AntiBanDecision> => ({ allowed: true, delayMs: 0, typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 90, dailyCap: 100, sentToday: 0 });
   const deps = (tr: Transport, over: Partial<QueueProcessorDeps> = {}): QueueProcessorDeps => ({ getSocket: () => tr.sock, isConnected: () => true, canSend: async () => allow(), delay: async () => undefined, ...over });
   const job = (messageId: string, over: Record<string, unknown> = {}) => ({ id: `job-${messageId}`, data: { messageId }, attemptsMade: 0, opts: { attempts: 3 }, ...over }) as unknown as Job<{ messageId: string }>;
   const run = async (j: Job<{ messageId: string }>, d: { deviceKey: string }, tr: Transport, over: Partial<QueueProcessorDeps> = {}) => {
@@ -427,7 +427,7 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
     const decision = async (): Promise<AntiBanDecision> => {
       const sent = await countMessagesSince(d.id, new Date(Date.now() - 60_000), query);
       return sent >= 2
-        ? { allowed: false, reason: 'rate_limit_per_minute', delayMs: 0, typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 90, dailyCap: 20, sentToday: sent, warmupDay: 10 }
+        ? { allowed: false, reason: 'rate_limit_per_minute', delayMs: 0, typing: { shouldSimulate: false, durationMs: 0 }, healthScore: 90, dailyCap: 20, sentToday: sent }
         : { ...await allow(), sentToday: sent, dailyCap: 20 };
     };
     const normalId = await message(d);

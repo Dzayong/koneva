@@ -24,7 +24,7 @@ test('a new key is random, prefixed, and only its hash is meant for storage', ()
 });
 
 test('keys can never carry key, team or billing management', () => {
-  for (const reserved of ['keys:manage', 'team:manage', 'billing:manage']) {
+  for (const reserved of ['keys:manage', 'team:manage', 'billing:manage', 'inbox:read', 'messages:reply']) {
     assert.equal((KEY_SCOPES as readonly string[]).includes(reserved), false, reserved);
     assert.throws(() => assertScopesAllowed([reserved], 'owner'), (e: unknown) => e instanceof ServiceError && e.code === 'INVALID_SCOPE');
   }

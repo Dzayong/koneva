@@ -80,7 +80,6 @@ export interface MessageRecord {
   /** Outbound reply is tied to this recent inbound customer message. */
   replyToMessageId?: string | null;
   /** Explicit per-message approval; worker still applies every other safety gate. */
-  allowWarmupOverride?: boolean;
   createdAt: Date;
   /** When this queued attempt became eligible to send; separate from creation/schedule time. */
   queueStartedAt: Date;

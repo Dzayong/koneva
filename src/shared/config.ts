@@ -16,7 +16,6 @@ const environmentSchema = z.object({
   SESSION_PATH: z.string().min(1).default('./sessions'),
   MAX_MSG_PER_MINUTE: z.coerce.number().int().positive().default(2),
   MAX_MSG_PER_HOUR: z.coerce.number().int().positive().default(50),
-  WARMUP_DAYS: z.coerce.number().int().nonnegative().default(7),
   DEVICE_MANAGER_URL: z.string().url().default('http://127.0.0.1:8001'),
   DEVICE_MANAGER_PORT: z.coerce.number().int().positive().max(65535).default(8001),
   BOT_DOCKER_NETWORK: z.string().min(1).default('docker_default'),
@@ -31,6 +30,8 @@ const environmentSchema = z.object({
   OPERATOR_CONTACT: z.string().optional(),
   DOKU_CLIENT_ID: z.string().optional(),
   DOKU_SHARED_KEY: z.string().optional(),
+  DUITKU_MERCHANT_CODE: z.string().optional(),
+  DUITKU_API_KEY: z.string().optional(),
   APP_PUBLIC_URL: z.string().url().optional(),
 });
 
@@ -78,13 +79,19 @@ const config = {
     sharedKey: environment.DOKU_SHARED_KEY ?? null,
     configured: Boolean(environment.DOKU_CLIENT_ID && environment.DOKU_SHARED_KEY),
   },
+  // PAYG top-ups use Duitku POP sandbox only. Production endpoint requires a deliberate code change.
+  duitku: {
+    baseUrl: 'https://api-sandbox.duitku.com',
+    merchantCode: environment.DUITKU_MERCHANT_CODE ?? null,
+    apiKey: environment.DUITKU_API_KEY ?? null,
+    configured: Boolean(environment.DUITKU_MERCHANT_CODE && environment.DUITKU_API_KEY),
+  },
   appPublicUrl: environment.APP_PUBLIC_URL ?? null,
   sessionPath: environment.SESSION_PATH,
   sessionHostPath: environment.SESSION_HOST_PATH,
   limits: {
     messagesPerMinute: environment.MAX_MSG_PER_MINUTE,
     messagesPerHour: environment.MAX_MSG_PER_HOUR,
-    warmupDays: environment.WARMUP_DAYS,
   },
   deviceManager: {
     url: environment.DEVICE_MANAGER_URL,

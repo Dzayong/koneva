@@ -127,32 +127,17 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
   const accept = (token: string, body: unknown, bearerToken?: string) => call(`/auth/invitations/${token}/accept`, { method: 'POST', body, ...(bearerToken ? { token: bearerToken } : {}) });
   const newUserBody = (otp: string) => ({ otp, name: 'Developer Uji', password, accept_terms: true });
 
-  await t.test('signup creates no active account or workspace before mailbox OTP, and a pending email can safely restart registration', async () => {
-    newClient(); useOutbox();
-    const email = `${randomUUID()}@gmail.com`, firstPassword = 'first-synthetic-password-26', secondPassword = 'second-synthetic-password-26';
-    const first = await call('/auth/signup', { method: 'POST', body: { email, password: firstPassword, name: 'Pendaftar Pertama', accept_terms: true } });
-    assert.equal(first.status, 202, first.text);
-    assert.deepEqual(first.body.data, { verification_required: true, verification_method: 'email', email, resend_after: 60 });
-    assert.equal('token' in first.body.data, false);
-    const pending = (await pool.query<{ status: string; email_verified_at: Date | null }>('SELECT status,email_verified_at FROM users WHERE lower(email)=lower($1)', [email])).rows[0];
-    assert.deepEqual(pending, { status: 'pending_email', email_verified_at: null });
-    assert.equal(Number((await pool.query('SELECT count(*) FROM memberships m JOIN users u ON u.id=m.user_id WHERE lower(u.email)=lower($1)', [email])).rows[0]!.count), 0);
-    assert.equal((await call('/auth/login', { method: 'POST', body: { email, password: firstPassword } })).status, 401);
-
-    const staleCode = otpFor(email).at(-1)!;
-    newClient();
-    const restarted = await call('/auth/signup', { method: 'POST', body: { email, password: secondPassword, name: 'Pemilik Sebenarnya', accept_terms: true } });
-    assert.equal(restarted.status, 202, restarted.text);
-    // The original OTP still proves the mailbox, while the pending password/name now belong to the latest attempt.
-    const activated = await call('/auth/signup/verification/confirm', { method: 'POST', body: { email, code: staleCode } });
-    assert.equal(activated.status, 200, activated.text);
-    assert.equal(activated.body.data.user.email, email);
-    assert.equal(activated.body.data.workspaces.length, 1);
-    const active = (await pool.query<{ status: string; verified: boolean }>('SELECT status,email_verified_at IS NOT NULL AS verified FROM users WHERE lower(email)=lower($1)', [email])).rows[0];
-    assert.deepEqual(active, { status: 'active', verified: true });
-    assert.equal((await call('/auth/login', { method: 'POST', body: { email, password: firstPassword } })).status, 401);
-    assert.equal((await call('/auth/login', { method: 'POST', body: { email, password: secondPassword } })).status, 200);
-    noEmail();
+  await t.test('new signup rejects missing phone number and email-based registration verification', async () => {
+    newClient(); noEmail();
+    const email = `${randomUUID()}@gmail.com`;
+    const base = { email, password, name: 'Pendaftar Uji', accept_terms: true };
+    const missingPhone = await call('/auth/signup', { method: 'POST', body: base });
+    assert.equal(missingPhone.status, 400, missingPhone.text);
+    const emailVerification = await call('/auth/signup', { method: 'POST', body: {
+      ...base, verification_method: 'email', phone_number: '081234567890',
+    } });
+    assert.equal(emailVerification.status, 400, emailVerification.text);
+    assert.equal(Number((await pool.query('SELECT count(*) FROM users WHERE lower(email)=lower($1)', [email])).rows[0]!.count), 0);
   });
 
   await t.test('WhatsApp signup OTP is correlated to its system message and activates only after the matching code', {
@@ -213,27 +198,33 @@ test('roles, Gmail invitations and OTP (disposable database only)', { skip: !ena
     assert.equal(tracking.message_id, proof.message_id);
   });
 
-  await t.test('database: one owner per workspace; no new admin/viewer memberships; invitations Developer+Gmail only; system admin is not a customer role', async () => {
+  await t.test('database: one owner, CS is assignable, legacy roles are blocked, invitations allow Developer/CS+Gmail', async () => {
     newClient();
     const o = await owner();
     const other = await owner();
     await assert.rejects(pool.query("INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'owner')", [other.userId, o.tenant]), /memberships_one_owner_idx/);
     for (const role of ['admin', 'viewer']) await assert.rejects(pool.query('INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,$3)', [other.userId, o.tenant, role]), /can no longer be assigned/, role);
+    await assert.doesNotReject(pool.query("INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,'cs')", [other.userId, o.tenant]));
     for (const role of ['operator', 'system_admin', 'superadmin']) await assert.rejects(pool.query('INSERT INTO memberships(user_id,tenant_id,role) VALUES ($1,$2,$3)', [other.userId, o.tenant, role]), /check|constraint/i, role);
     const ins = (role: string, email: string) => pool.query('INSERT INTO invitations(tenant_id,email,role,token_hash,expires_at) VALUES ($1,$2,$3,$4,now()+interval \'1 day\')', [o.tenant, email, role, randomUUID().replace(/-/g, '').padEnd(64, '0')]);
-    await assert.rejects(ins('viewer', 'a@gmail.com'), /only grant the developer role|check/i);
-    await assert.rejects(ins('admin', 'a@gmail.com'), /only grant the developer role|check/i);
+    await assert.rejects(ins('viewer', 'a@gmail.com'), /only grant developer or cs|check/i);
+    await assert.rejects(ins('admin', 'a@gmail.com'), /only grant developer or cs|check/i);
     await assert.rejects(ins('developer', 'a@yahoo.com'), /gmail\.com/);
     await assert.rejects(ins('developer', 'A@gmail.com'), /gmail\.com/, 'unnormalised address never reaches the table');
     await assert.doesNotReject(ins('developer', 'ok@gmail.com'));
+    await assert.doesNotReject(ins('cs', 'cs-ok@gmail.com'));
   });
 
-  await t.test('owner invites Developer by Gmail; non-Gmail and every other role are refused; Developer cannot invite', async () => {
+  await t.test('owner invites Developer or CS by Gmail; non-Gmail and other roles are refused; Developer cannot invite', async () => {
     newClient();
     const o = await owner();
     const good = await call('/api/v1/team/invitations', { method: 'POST', token: o.token, body: { email: '  Rekan.Uji@GMAIL.com ', role: 'developer' } });
     assert.equal(good.status, 201, good.text);
     assert.equal(good.body.data.email, 'rekan.uji@gmail.com');
+    const csInvite = await call('/api/v1/team/invitations', { method: 'POST', token: o.token, body: { email: 'cs.rekan@gmail.com', role: 'cs' } });
+    assert.equal(csInvite.status, 201, csInvite.text);
+    assert.equal(csInvite.body.data.role, 'cs');
+    assert.equal((await call(`/api/v1/team/invitations/${csInvite.body.data.id}`, { method: 'DELETE', token: o.token })).status, 200);
     for (const email of ['x@yahoo.com', 'x@googlemail.com', 'x@kampus.ac.id', 'x@gmail.com.evil.test']) {
       const r = await call('/api/v1/team/invitations', { method: 'POST', token: o.token, body: { email, role: 'developer' } });
       assert.equal(r.status, 400, email); assert.equal(r.body.error.code, 'GMAIL_REQUIRED', email);

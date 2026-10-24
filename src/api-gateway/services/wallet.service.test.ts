@@ -9,6 +9,7 @@ class WalletDb {
   reserved = 0;
   reservations = new Set<string>();
   ledger = new Map<string, { amount_idr: number; event_type: string }>();
+  lastLedgerSql = '';
   async query(text: string, values: unknown[] = []) {
     if (text.includes('SELECT enabled,price_per_message_idr FROM payg_settings')) return { rows: [{ enabled: this.enabled, price_per_message_idr: this.price }] };
     if (text.startsWith('INSERT INTO wallet_accounts')) return { rows: [], rowCount: 0 };
@@ -33,6 +34,7 @@ class WalletDb {
       return { rows: [], rowCount: 1 };
     }
     if (text.includes('INSERT INTO wallet_ledger')) {
+      this.lastLedgerSql = text;
       const event = text.includes("'topup'") ? 'topup' : 'reserve';
       const key = String(values[event === 'topup' ? 2 : 2]);
       this.ledger.set(key, { amount_idr: Number(values[1]), event_type: event });
@@ -50,6 +52,7 @@ test('PAYG reserves a send before enqueue and rejects an empty wallet', async ()
   assert.deepEqual(reserved, { enabled: true, priceIdr: 100 });
   assert.equal(db.available, 400);
   assert.equal(db.reserved, 100);
+  assert.match(db.lastLedgerSql, /-\(\$2::bigint\)/, 'reservation debit must have an explicit numeric type for PostgreSQL');
 
   db.available = 99;
   await assert.rejects(

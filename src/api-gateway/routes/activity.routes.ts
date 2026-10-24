@@ -28,6 +28,7 @@ const personaPatch = z.object({
   rest_min_ms: z.number().int().min(60_000).max(7_200_000).optional(),
   rest_max_ms: z.number().int().min(60_000).max(7_200_000).optional(),
   typing_ms_per_char: z.number().int().min(20).max(200).optional(),
+  typing_enabled: z.boolean().optional(),
   // Shortcut for a fixed delay: sets both delay_min_ms and delay_max_ms.
   delay_ms: z.number().int().min(1_000).max(600_000).optional(),
   always_on: z.boolean().optional(),
@@ -47,6 +48,7 @@ function publicPersona(p: Persona) {
     delay_min_ms: p.delayMinMs, delay_max_ms: p.delayMaxMs, burst_size: p.burstSize,
     delay_mode: delayMode(p),
     rest_min_ms: p.restMinMs, rest_max_ms: p.restMaxMs, typing_ms_per_char: p.typingMsPerChar,
+    typing_enabled: p.typingEnabled,
     always_on: p.alwaysOn,
     presence_enabled: p.presenceEnabled, presence_min_ms: p.presenceMinMs, presence_max_ms: p.presenceMaxMs,
     preset: p.preset ?? 'custom',
@@ -183,6 +185,7 @@ export async function updatePersona(request: Request, response: Response): Promi
     burst_size: patch.burst_size ?? current.burstSize,
     rest_min_ms: patch.rest_min_ms ?? current.restMinMs, rest_max_ms: patch.rest_max_ms ?? current.restMaxMs,
     typing_ms_per_char: patch.typing_ms_per_char ?? current.typingMsPerChar,
+    typing_enabled: patch.typing_enabled ?? current.typingEnabled,
   };
   if (next.wake_hour >= next.sleep_hour) throw new ServiceError(400, 'VALIDATION_ERROR', 'wake_hour must be earlier than sleep_hour');
   if (next.delay_max_ms < next.delay_min_ms) throw new ServiceError(400, 'VALIDATION_ERROR', 'delay_max_ms must be >= delay_min_ms');
@@ -192,11 +195,11 @@ export async function updatePersona(request: Request, response: Response): Promi
   await pool.query(
     `UPDATE device_personas SET timezone=$2, wake_hour=$3, sleep_hour=$4, delay_min_ms=$5, delay_max_ms=$6,
        burst_size=$7, rest_min_ms=$8, rest_max_ms=$9, typing_ms_per_char=$10, always_on=$11, presence_enabled=$12, presence_min_ms=$13, presence_max_ms=$14,
-       preset=NULL, updated_at=now()
+       preset=NULL, typing_enabled=$15, updated_at=now()
      WHERE device_id=$1`,
     [device.id, next.timezone, next.wake_hour, next.sleep_hour, next.delay_min_ms, next.delay_max_ms,
       next.burst_size, next.rest_min_ms, next.rest_max_ms, next.typing_ms_per_char, next.always_on,
-      next.presence_enabled, next.presence_min_ms, next.presence_max_ms],
+      next.presence_enabled, next.presence_min_ms, next.presence_max_ms, next.typing_enabled],
   );
   response.json({ success: true, data: { ...next, delay_mode: next.delay_min_ms === next.delay_max_ms ? 'flat' : 'random' } });
 }

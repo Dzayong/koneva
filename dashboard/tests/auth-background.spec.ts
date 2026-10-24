@@ -19,6 +19,7 @@ test.describe("login/signup background", () => {
     await expect(page.locator('[data-slot="card-title"]')).toHaveText("Masuk");
     await expect(page.getByLabel("Email")).toBeVisible();
     await expect(page.getByLabel("Kata sandi", { exact: true })).toBeVisible();
+    await expect(page.getByLabel(/Ingat saya selama 14 hari/)).not.toBeChecked();
 
     await expect(page.getByText("Masuk dengan API key")).toHaveCount(0);
     await expect(page.locator('input[placeholder="wg_..."]')).toHaveCount(0);
@@ -29,6 +30,51 @@ test.describe("login/signup background", () => {
     expect(Number(response.headers()["content-length"] ?? "0")).toBeLessThan(300 * 1024);
 
     expect(consoleErrors).toEqual([]);
+  });
+
+  test("remember-me stores a persistent or browser-session login as selected", async ({ page }) => {
+    await page.route("**/auth/login", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          token: "remember-me-test-token",
+          expires_at: "2026-11-06T00:00:00.000Z",
+          user: { id: "user-1", email: "test@example.com", name: "Test" },
+          workspaces: [{ id: "workspace-1", name: "Test workspace" }],
+        },
+      }),
+    }));
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("test@example.com");
+    await page.getByLabel("Kata sandi", { exact: true }).fill("test-password");
+    await page.getByLabel(/Ingat saya selama 14 hari/).setChecked(true);
+    await page.getByRole("button", { name: "Masuk" }).click();
+    await page.waitForFunction(() => localStorage.getItem("wa_gateway_session") === "remember-me-test-token");
+    expect(await page.evaluate(() => sessionStorage.getItem("wa_gateway_session"))).toBeNull();
+  });
+
+  test("without remember-me the session is kept only in browser session storage", async ({ page }) => {
+    await page.route("**/auth/login", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          token: "remember-me-test-token",
+          expires_at: "2026-11-06T00:00:00.000Z",
+          user: { id: "user-1", email: "test@example.com", name: "Test" },
+          workspaces: [{ id: "workspace-1", name: "Test workspace" }],
+        },
+      }),
+    }));
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("test@example.com");
+    await page.getByLabel("Kata sandi", { exact: true }).fill("test-password");
+    await page.getByRole("button", { name: "Masuk" }).click();
+    await page.waitForFunction(() => sessionStorage.getItem("wa_gateway_session") === "remember-me-test-token");
+    expect(await page.evaluate(() => localStorage.getItem("wa_gateway_session"))).toBeNull();
   });
 
   test("signup page uses the local dark red-purple mesh background with a dark overlay", async ({ page }) => {

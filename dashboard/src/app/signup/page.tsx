@@ -20,10 +20,8 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [phone, setPhone] = useState("");
-  const [verificationMethod, setVerificationMethod] = useState<'email' | 'whatsapp'>('email');
   const [terms, setTerms] = useState(false);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
-  const [pendingMethod, setPendingMethod] = useState<'email' | 'whatsapp'>('email');
   const [code, setCode] = useState("");
   const [resendWait, setResendWait] = useState(0);
   const [error, setError] = useState<{ message: string; taken?: boolean } | null>(null);
@@ -46,12 +44,10 @@ export default function SignupPage() {
       const result = await api.signup({
         name: name.trim(), email: email.trim(), password,
         ...(workspace.trim() ? { workspace_name: workspace.trim() } : {}),
-        verification_method: verificationMethod,
-        ...(verificationMethod === 'whatsapp' ? { phone_number: phone.trim() } : {}),
+        verification_method: 'whatsapp', phone_number: phone.trim(),
         accept_terms: true,
       });
       setPendingEmail(result.email);
-      setPendingMethod(result.verification_method);
       setCode("");
       setResendWait(result.resend_after);
       setPassword("");
@@ -72,7 +68,7 @@ export default function SignupPage() {
     if (!pendingEmail) return;
     setError(null); setBusy(true);
     try {
-      loginWithSession(await api.confirmSignupEmailVerification(pendingEmail, code, pendingMethod), "/dashboard?welcome=1");
+      loginWithSession(await api.confirmSignupEmailVerification(pendingEmail, code, 'whatsapp'), "/dashboard?welcome=1");
     } catch (err) {
       const failure = apiFailure(err);
       setError({ message: failure.code === "OTP_INVALID" ? "Kode salah, kedaluwarsa, atau sudah dipakai. Minta kode baru." : failure.message });
@@ -83,7 +79,7 @@ export default function SignupPage() {
     if (!pendingEmail) return;
     setError(null); setBusy(true);
     try {
-      const result = await api.requestSignupEmailVerification(pendingEmail, pendingMethod);
+      const result = await api.requestSignupEmailVerification(pendingEmail, 'whatsapp');
       setResendWait(result.resend_after);
     } catch (err) {
       const failure = apiFailure(err);
@@ -95,17 +91,15 @@ export default function SignupPage() {
     <AuthShell background="signup">
       <Card>
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl">{pendingEmail ? `Verifikasi ${pendingMethod === 'whatsapp' ? 'WhatsApp' : 'email'}` : "Buat akun"}</CardTitle>
+          <CardTitle className="text-2xl">{pendingEmail ? "Verifikasi WhatsApp" : "Buat akun"}</CardTitle>
           <CardDescription>{pendingEmail
-            ? pendingMethod === 'whatsapp'
-              ? `Masukkan kode 6 digit yang dikirim ke nomor WhatsApp Anda. Akun dan workspace aktif setelah nomor terverifikasi; email tetap belum terverifikasi sampai Anda mengonfirmasinya nanti.`
-              : `Masukkan kode 6 digit yang kami kirim ke ${pendingEmail}. Akun dan workspace baru aktif setelah email terverifikasi.`
-            : "Pilih email atau WhatsApp untuk menerima kode verifikasi."}</CardDescription>
+            ? `Masukkan kode 6 digit yang dikirim ke WhatsApp ${phone}. Akun aktif setelah nomor terverifikasi.`
+            : "Verifikasi pendaftaran dikirim melalui WhatsApp. Gmail digunakan untuk pemulihan kata sandi."}</CardDescription>
         </CardHeader>
         {pendingEmail ? <form onSubmit={confirm}>
           <CardContent className="space-y-4 pb-4">
             <div className="space-y-2">
-              <Label htmlFor="signup-verify-code">Kode verifikasi {pendingMethod === 'whatsapp' ? 'WhatsApp' : 'email'}</Label>
+              <Label htmlFor="signup-verify-code">Kode verifikasi WhatsApp</Label>
               <Input id="signup-verify-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} className="font-mono tracking-widest" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} />
             </div>
             {error && <p role="alert" className="text-sm text-destructive">{error.message}</p>}
@@ -142,22 +136,11 @@ export default function SignupPage() {
               <Label htmlFor="workspace">Nama workspace <span className="font-normal text-muted-foreground">(opsional)</span></Label>
               <Input id="workspace" maxLength={80} placeholder="mis. Toko Sinar" value={workspace} onChange={(e) => setWorkspace(e.target.value)} />
             </div>
-            <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">Kirim kode verifikasi melalui</legend>
-              <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm">
-                <input type="radio" name="verification_method" value="email" checked={verificationMethod === 'email'} onChange={() => setVerificationMethod('email')} className="mt-0.5" />
-                <span><span className="block font-medium">Email</span><span className="text-muted-foreground">Email harus bisa menerima kode verifikasi.</span></span>
-              </label>
-              <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm">
-                <input type="radio" name="verification_method" value="whatsapp" checked={verificationMethod === 'whatsapp'} onChange={() => setVerificationMethod('whatsapp')} className="mt-0.5" />
-                <span><span className="block font-medium">WhatsApp</span><span className="text-muted-foreground">Memverifikasi nomor; email tetap belum terverifikasi dan tetap diperlukan untuk pemulihan sandi.</span></span>
-              </label>
-            </fieldset>
-            {verificationMethod === 'whatsapp' && <div className="space-y-2">
+            <div className="space-y-2">
               <Label htmlFor="signup-phone">Nomor WhatsApp</Label>
               <Input id="signup-phone" type="tel" inputMode="tel" autoComplete="tel" required placeholder="08xxxxxxxxxx atau +628xxxxxxxxxx" value={phone} onChange={(e) => setPhone(e.target.value)} />
-              <p className="text-xs text-muted-foreground">Kode akan dikirim dari nomor pengirim verifikasi KONEVA yang terhubung.</p>
-            </div>}
+              <p className="text-xs text-muted-foreground">Kode pendaftaran dikirim ke nomor ini. Pastikan nomor aktif dan dapat menerima pesan WhatsApp.</p>
+            </div>
             <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm leading-snug">
               <input id="terms" type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--primary)]" checked={terms} onChange={(e) => setTerms(e.target.checked)} required />
               <span><TermsLabel /></span>
@@ -170,7 +153,7 @@ export default function SignupPage() {
             )}
           </CardContent>
           <CardFooter className="flex-col gap-3">
-            <Button type="submit" className="w-full" disabled={busy || !terms || !passwordOk || !name.trim() || !email || (verificationMethod === 'whatsapp' && phone.trim().length < 8)}>
+            <Button type="submit" className="w-full" disabled={busy || !terms || !passwordOk || !name.trim() || !email || phone.trim().length < 8}>
               {busy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Membuat akun…</> : "Buat akun"}
             </Button>
             <p className="text-sm text-muted-foreground">

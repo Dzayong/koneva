@@ -36,8 +36,6 @@ const HEALTH = {
   data: {
     health_score: 80,
     device_age_days: 30,
-    warmup_completed: true,
-    warmup_day: 30,
     metrics: { total_sent: 10, delivered: 10, replied: 2, blocked: 0, reported: 0 },
     rates: { delivery: 1, reply: 0.2, block: 0, report: 0 },
     breakdown: [],

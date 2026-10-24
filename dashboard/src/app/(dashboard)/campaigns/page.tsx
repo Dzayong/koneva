@@ -29,6 +29,7 @@ export default function CampaignsPage() {
   const [groupId, setGroupId] = useState("");
   const [deviceKey, setDeviceKey] = useState("");
   const [scheduledAt, setScheduledAt] = useState(() => localDateTime(new Date(Date.now() + 10 * 60_000)));
+  const [minimumScheduledAt] = useState(() => localDateTime(new Date(Date.now() + 6 * 60_000)));
   const [message, setMessage] = useState("");
 
   const submit = async () => {
@@ -73,7 +74,7 @@ export default function CampaignsPage() {
           <div className="space-y-2"><Label htmlFor="campaign-name">Nama campaign</Label><Input id="campaign-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={100} placeholder="Promo akhir pekan" /></div>
           <div className="space-y-2"><Label>Grup kontak</Label><Select value={groupId} onValueChange={setGroupId}><SelectTrigger className="w-full"><SelectValue placeholder="Pilih grup" /></SelectTrigger><SelectContent>{groups.map((group) => <SelectItem key={group.id} value={group.id}>{group.name} ({group.member_count})</SelectItem>)}</SelectContent></Select>{groups.length === 0 && <p className="text-xs text-muted-foreground">Buat grup terlebih dahulu di halaman Kontak.</p>}</div>
           <div className="space-y-2"><Label>Device pengirim</Label><Select value={deviceKey} onValueChange={setDeviceKey}><SelectTrigger className="w-full"><SelectValue placeholder="Pilih device online" /></SelectTrigger><SelectContent>{onlineDevices.map((device) => <SelectItem key={device.id} value={device.device_key}>{device.label || device.device_key}</SelectItem>)}</SelectContent></Select></div>
-          <div className="space-y-2"><Label htmlFor="campaign-time">Waktu kirim (zona waktu lokal Anda)</Label><Input id="campaign-time" type="datetime-local" min={localDateTime(new Date(Date.now() + 6 * 60_000))} value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></div>
+          <div className="space-y-2"><Label htmlFor="campaign-time">Waktu kirim (zona waktu lokal Anda)</Label><Input id="campaign-time" type="datetime-local" min={minimumScheduledAt} value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></div>
           <div className="space-y-2 md:col-span-2"><Label htmlFor="campaign-message">Pesan</Label><Textarea id="campaign-message" rows={5} value={message} onChange={(event) => setMessage(event.target.value)} maxLength={4096} placeholder="Tulis pesan. Gunakan {{nama}} untuk menyapa nama kontak." /><p className="text-xs text-muted-foreground">Pesan tetap mengikuti pemeriksaan consent, status langganan, kuota, dan batas pengiriman. Jadwal minimal 5 menit dan maksimal 90 hari ke depan.</p></div>
           <div className="md:col-span-2"><Button onClick={submit} disabled={createCampaign.isPending || groups.length === 0 || onlineDevices.length === 0}><CalendarClock className="mr-2 h-4 w-4" />{createCampaign.isPending ? "Menyimpan…" : "Jadwalkan campaign"}</Button></div>
         </CardContent>

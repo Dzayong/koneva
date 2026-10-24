@@ -3,7 +3,7 @@
 import { apiFailure, sendRejectionGuidance } from "@/lib/errors";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, Loader2, Radio, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Radio, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -189,9 +189,13 @@ export default function BroadcastPage() {
       <div>
         <h2 className="text-display">Broadcast</h2>
         <p className="text-muted-foreground">
-          Kirim pesan bertemplat ke banyak penerima. Setiap pesan tetap melewati aturan anti-blokir di server,
-          jadi batas kirim, jeda, dan masa pemanasan nomor tidak dilewati.
+          Kirim pesan bertemplat ke banyak penerima.
         </p>
+      </div>
+
+      <div role="note" className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <p><span className="font-semibold">Perhatikan risiko broadcast.</span> Pengiriman ke banyak nomor dapat membuat WhatsApp membatasi nomor pengirim. Kirim hanya kepada penerima yang sudah setuju menerima pesan; pembatasan nomor tetap dapat terjadi.</p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -297,7 +301,7 @@ export default function BroadcastPage() {
             <input id="mediaUrl" value={mediaUrl} onChange={(e) => setMediaUrl(e.target.value)} inputMode="url" placeholder="https://situs-anda.com/promo.jpg"
               className="h-10 w-full rounded-md border bg-background px-3 text-sm" />
             {mediaUrl && !/^https:\/\//i.test(mediaUrl.trim()) && <p role="alert" className="text-sm text-destructive">Alamat harus diawali https://</p>}
-            <p className="text-xs text-muted-foreground">Teks di atas menjadi keterangan gambar. Nomor baru belum boleh mengirim gambar sampai hari ke-5 masa pemanasan.</p>
+            <p className="text-xs text-muted-foreground">Teks di atas menjadi keterangan gambar.</p>
           </CardContent>
         </Card>
       </div>

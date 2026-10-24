@@ -76,13 +76,13 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-3 md:gap-4">
-        <GlobalSearch />
+        {role !== "cs" && <GlobalSearch />}
         <Badge variant="outline" className="hidden border-border bg-card px-2.5 py-1 font-medium lg:flex">
           {workspace?.name ?? "…"}
         </Badge>
-        <TrialChip />
-        <HelpButton />
-        <NotificationCenter />
+        {role !== "cs" && <TrialChip />}
+        {role !== "cs" && <HelpButton />}
+        {role !== "cs" && <NotificationCenter />}
         <ThemeToggle />
         <div className="flex items-center gap-3">
           <Avatar>

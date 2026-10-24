@@ -85,18 +85,17 @@ export async function deviceStats(request: Request, response: Response): Promise
 export async function deviceHealthBreakdown(request: Request, response: Response): Promise<void> {
   const { key } = request.validated!.params as { key: string };
   const deviceResult = await pool.query(
-    `SELECT id, status, created_at, warmup_started_at, warmup_completed_at
+    `SELECT id, status
      FROM devices WHERE tenant_id=$1 AND device_key=$2`,
     [request.tenant!.id, key],
   );
   const device = deviceResult.rows[0] as {
-    id: string; status: string; created_at: Date; warmup_started_at: Date | null; warmup_completed_at: Date | null;
+    id: string; status: string;
   } | undefined;
   if (!device) throw new ServiceError(404, 'DEVICE_NOT_FOUND', 'Device not found');
 
   const inputs = await getReadinessInputs({
-    id: device.id, status: device.status, createdAt: device.created_at,
-    warmupStartedAt: device.warmup_started_at, warmupCompletedAt: device.warmup_completed_at,
+    id: device.id, status: device.status,
   }, (text, params) => pool.query(text, params));
   const report = computeReadiness(inputs);
   const rate = (part: number, whole: number): number => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : 0);

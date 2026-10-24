@@ -46,7 +46,7 @@ reported explicitly and does not count as a pass.
 | Message flow | HTTP 202; Redis job exists; worker sends via the WhatsApp adapter; history is `queued → sent → delivered`; signed sent/delivered webhooks are received and logged |
 | Device lifecycle | Device Manager provisions a mock StatefulSet; DB reaches `pending_qr`; QR is readable; mocked scan reaches `online`; pause/resume work; delete removes the workload and marks the row offline |
 | Error handling | Invalid key 401; quota 429; offline device 503; invalid payload 400; failed webhook retries; unavailable DB makes `/ready` return 503 while `/health` stays 200 |
-| Anti-ban | Day-one warm-up cap is active; per-minute limit denies; spam is rejected; health score is persisted from delivery history |
+| Anti-ban | New devices can send immediately; per-minute and health-based limits deny when reached; spam is rejected; health score is persisted from delivery history |
 
 The mock WhatsApp adapter is deliberate: it tests the same BullMQ processor and
 receipt listener used in production but avoids sending a real message. A staging

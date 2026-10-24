@@ -52,7 +52,7 @@ export function useIssueLegacyRoleNotice() {
 export function useInviteMember() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ email, role }: { email: string; role: "developer" }) => api.inviteMember(email, role),
+    mutationFn: ({ email, role }: { email: string; role: "developer" | "cs" }) => api.inviteMember(email, role),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["team"] }),
   });
 }
@@ -69,7 +69,7 @@ export function useRevokeInvitation() {
 export function useChangeRole() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ userId, role }: { userId: string; role: "developer" }) => api.changeMemberRole(userId, role),
+    mutationFn: ({ userId, role }: { userId: string; role: "developer" | "cs" }) => api.changeMemberRole(userId, role),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["team"] }); toast.success("Peran diubah"); },
     onError: fail("Gagal mengubah peran"),
   });

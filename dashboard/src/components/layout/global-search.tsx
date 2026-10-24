@@ -29,7 +29,7 @@ export function GlobalSearch() {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
-  const { can } = usePermissions();
+  const { can, role } = usePermissions();
   const normalized = query.trim().toLocaleLowerCase("id-ID");
   const canSearchDevices = can("devices:read");
   const devices = useQuery({
@@ -65,8 +65,12 @@ export function GlobalSearch() {
     return () => window.clearTimeout(id);
   }, [open]);
 
-  const pages = useMemo(() => destinations.filter((item) => !item.permission || can(item.permission))
-    .filter((item) => !normalized || `${item.label} ${item.keywords}`.toLocaleLowerCase("id-ID").includes(normalized)), [can, normalized]);
+  const pages = useMemo(() => destinations
+    .filter((item) => role !== "cs" || item.href === "/messages")
+    .filter((item) => item.href === "/messages"
+      ? can("messages:read") || can("inbox:read")
+      : !item.permission || can(item.permission))
+    .filter((item) => !normalized || `${item.label} ${item.keywords}`.toLocaleLowerCase("id-ID").includes(normalized)), [can, normalized, role]);
   const matchingDevices = (devices.data ?? []).filter((device) => normalized && `${device.label ?? ""} ${device.phone_number ?? ""} ${device.device_key}`.toLocaleLowerCase("id-ID").includes(normalized)).slice(0, 5);
   const matchingContacts = contacts.data?.data ?? [];
   const hasQuery = normalized.length > 0;

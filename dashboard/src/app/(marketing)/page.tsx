@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   title: { absolute: SITE.title },
   description: SITE.description,
   alternates: { canonical: "/" },
-  keywords: ["API WhatsApp", "WhatsApp API Indonesia", "kirim OTP WhatsApp", "notifikasi WhatsApp", "WhatsApp gateway", "webhook WhatsApp", "pemanasan nomor WhatsApp"],
+  keywords: ["API WhatsApp", "WhatsApp API Indonesia", "kirim OTP WhatsApp", "notifikasi WhatsApp", "WhatsApp gateway", "webhook WhatsApp"],
   openGraph: { type: "website", url: "/", siteName: SITE.name, title: SITE.title, description: SITE.description, locale: SITE.locale, images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: SITE.title }] },
   twitter: { card: "summary_large_image", title: SITE.title, description: SITE.description, images: ["/opengraph-image"] },
 };
@@ -28,7 +28,7 @@ const structuredData = {
       description: SITE.description,
       featureList: [
         "Kirim dan terima pesan WhatsApp lewat REST API dengan nomor sendiri",
-        "Pemanasan nomor bertahap dan jeda pengiriman seperti manusia",
+        "Persetujuan penerima, opt-out, dan batas pengiriman",
         "Skor kesiapan nomor dan deteksi nomor bermasalah",
         "Webhook bertanda tangan HMAC",
         "Prioritas urgent untuk OTP",

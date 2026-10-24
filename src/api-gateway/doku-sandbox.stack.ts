@@ -35,9 +35,13 @@ function sign(requestId: string, timestamp: string, rawBody: string) {
   return computeDokuSignature({ clientId: CLIENT_ID, requestId, requestTimestamp: timestamp, requestTarget: REQUEST_TARGET, rawBody }, SHARED_KEY);
 }
 
-function notificationBody(invoiceNumber: string, status: string, overrides: { amount?: number; currency?: string } = {}) {
+function notificationBody(invoiceNumber: string, status: string, overrides: { amount?: number | string; currency?: string | null } = {}) {
   return JSON.stringify({
-    order: { invoice_number: invoiceNumber, amount: overrides.amount ?? ASISTEN_MONTHLY_IDR, currency: overrides.currency ?? 'IDR' },
+    order: {
+      invoice_number: invoiceNumber,
+      amount: overrides.amount ?? ASISTEN_MONTHLY_IDR,
+      ...(overrides.currency === null ? {} : { currency: overrides.currency ?? 'IDR' }),
+    },
     transaction: { status, date: new Date().toISOString() },
   });
 }
@@ -143,6 +147,29 @@ test('a currency other than IDR is rejected without activating anything', async 
   assert.deepEqual(result, { applied: false, reason: 'currency_mismatch' });
   const stillUnpaid = await getLatestUnpaidInvoice(tenantId);
   assert.equal(stillUnpaid?.id, invoice.id);
+});
+
+test('a verified wallet top-up accepts DOKU Non-SNAP callbacks with omitted currency and string amount', async () => {
+  const tenantId = await seedTenant();
+  const invoiceNumber = `TOP-TEST-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  await pool.query('INSERT INTO wallet_topups(tenant_id,invoice_number,amount_idr) VALUES($1,$2,50000)', [tenantId, invoiceNumber]);
+  const rawBody = notificationBody(invoiceNumber, 'SUCCESS', { amount: '50000', currency: null });
+  const requestId = `req-wallet-${invoiceNumber}`;
+  const timestamp = freshTimestamp();
+
+  const result = await handleDokuNotification(rawBody, {
+    clientId: CLIENT_ID, requestId, requestTimestamp: timestamp, signature: sign(requestId, timestamp, rawBody),
+  }, REQUEST_TARGET);
+  assert.deepEqual(result, { applied: true, reason: 'wallet_topped_up' });
+  const paid = (await pool.query<{ status: string }>(
+    'SELECT status FROM wallet_topups WHERE invoice_number=$1', [invoiceNumber],
+  )).rows[0]!;
+  const ledger = (await pool.query<{ amount_idr: number; event_type: string }>(
+    'SELECT amount_idr,event_type FROM wallet_ledger WHERE tenant_id=$1 AND invoice_number=$2', [tenantId, invoiceNumber],
+  )).rows[0]!;
+  assert.equal(paid.status, 'paid');
+  assert.equal(Number(ledger.amount_idr), 50000);
+  assert.equal(ledger.event_type, 'topup');
 });
 
 test('a Request-Timestamp older than the allowed window is rejected even with a mathematically valid signature', async () => {

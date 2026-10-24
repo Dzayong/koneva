@@ -36,6 +36,18 @@ EOF
   fi
   cat <<'EOF'
     location /admin { return 404; }
+    # DOKU posts signed notifications outside the tenant API prefix. Route this exact endpoint
+    # to the gateway (not the dashboard) so verified top-ups reach the personal database.
+    location = /billing/doku/notify {
+        set $api http://api-gateway:8000;
+        proxy_pass $api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 90s;
+    }
     location /api/v1/ {
         set $api http://api-gateway:8000;
         proxy_pass $api;

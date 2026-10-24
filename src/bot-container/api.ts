@@ -126,7 +126,6 @@ export function createApiRouter(deps: ApiDependencies): Router {
               tenantId: device.tenantId,
               status: device.status,
               healthScore: device.healthScore,
-              warmupCompletedAt: device.warmupCompletedAt,
               pausedUntil: device.pausedUntil,
             }
           : null,

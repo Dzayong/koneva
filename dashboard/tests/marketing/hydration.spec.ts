@@ -91,8 +91,7 @@ test.describe("marketing page hydration (UI evidence)", () => {
         await mockPublicEndpoints(page);
         await page.goto(path);
         await page.waitForLoadState("networkidle");
-        // WarmupFlow renders unconditionally; give whileInView a chance to fire either way.
-        await page.locator("text=Nomor baru dilatih dulu").scrollIntoViewIfNeeded();
+        await page.getByRole("heading", { name: "Mulai gunakan device setelah terhubung" }).scrollIntoViewIfNeeded();
         await page.waitForTimeout(300);
         expect(issues).toEqual([]);
         await context.close();
@@ -100,16 +99,14 @@ test.describe("marketing page hydration (UI evidence)", () => {
     }
   }
 
-  test("warm-up cards still animate in with normal motion and settle instantly with reduced motion", async ({ browser }) => {
+  test("device availability and broadcast-risk disclosure render with both motion preferences", async ({ browser }) => {
     for (const reducedMotion of ["no-preference", "reduce"] as const) {
       const context = await browser.newContext({ reducedMotion });
       const page = await context.newPage();
       await mockPublicEndpoints(page);
       await page.goto("/");
-      const firstCard = page.locator("text=Hanya membalas orang yang lebih dulu menulis").locator("xpath=ancestor::*[contains(@class,'rounded-2xl')][1]");
-      await firstCard.scrollIntoViewIfNeeded();
-      await expect(firstCard).toBeVisible();
-      await expect.poll(async () => firstCard.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+      await expect(page.getByRole("heading", { name: "Mulai gunakan device setelah terhubung" })).toBeVisible();
+      await expect(page.getByText(/Tidak ada masa tunggu berdasarkan usia nomor/)).toBeVisible();
       await context.close();
     }
   });

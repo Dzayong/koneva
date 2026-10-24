@@ -49,8 +49,6 @@ const TRANSIENT_DENIAL_REASONS = new Set<AntiBanDenialReason>([
   'rate_limit_per_minute',
   'resting',
   'outside_sending_window',
-  'proactive_not_allowed_in_warmup',
-  'media_not_allowed_in_warmup',
 ]);
 
 function isTransientDenial(reason: AntiBanDenialReason | undefined): boolean {
@@ -131,7 +129,6 @@ interface MessageRow {
   system_otp: boolean;
   system_notification: boolean;
   reply_to_message_id: string | null;
-  allow_warmup_override: boolean;
   created_at: Date;
   queue_started_at: Date;
   send_started_at: Date | null;
@@ -157,7 +154,6 @@ function mapMessageRow(row: MessageRow): MessageRecord {
     ...(row.system_otp ? { systemOtp: true } : {}),
     ...(row.system_notification ? { systemNotification: true } : {}),
     ...(row.reply_to_message_id ? { replyToMessageId: row.reply_to_message_id } : {}),
-    ...(row.allow_warmup_override ? { allowWarmupOverride: true } : {}),
     createdAt: row.created_at,
     queueStartedAt: row.queue_started_at,
   };
@@ -168,7 +164,7 @@ async function getMessageById(id: string, queryFn: QueryFn): Promise<MessageReco
     `SELECT id, tenant_id, device_id, device_key, to_number, content, media_url, type, status,
             whatsapp_message_id, error_message, priority, COALESCE(quota_exempt, false) AS quota_exempt,
             COALESCE(system_otp, false) AS system_otp, COALESCE(system_notification, false) AS system_notification,
-            reply_to_message_id, allow_warmup_override, created_at, queue_started_at, send_started_at
+            reply_to_message_id, created_at, queue_started_at, send_started_at
      FROM messages WHERE id = $1`,
     [id],
   );
@@ -287,7 +283,7 @@ export async function enqueueMessage(
 
 /**
  * A message to someone who wrote to us in the last 24 hours is a reply, not outreach (WhatsApp's own
- * customer-service window). Replies stay allowed during warm-up; unsolicited messages do not.
+ * customer-service window). Consent and opt-out checks still apply to proactive sends.
  */
 export async function hasRecentInbound(deviceId: string, to: string, queryFn: QueryFn): Promise<boolean> {
   const digits = to.replace(/\D/g, '');
@@ -555,7 +551,6 @@ async function processJobBody(
     recipient: consentRecipient,
     hasMedia: message.type !== 'text',
     isProactive,
-    allowWarmupOverride: message.allowWarmupOverride,
     priority: message.priority,
     ...(deps.now ? { now: deps.now() } : {}),
   });
@@ -674,7 +669,6 @@ async function processJobBody(
         recipient: consentRecipient,
         hasMedia: message.type !== 'text',
         isProactive: groupReply ? !currentReplyContext : isProactive,
-        allowWarmupOverride: message.allowWarmupOverride,
         priority: message.priority,
         ...(deps.now ? { now: deps.now() } : {}),
       });

@@ -89,7 +89,9 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
       <nav aria-label="Navigasi utama" className="flex-1 space-y-1 overflow-y-auto p-4">
         {groups.map((group) => {
-          const visible = group.items.filter((item) => !item.permission || can(item.permission));
+          if (role === "cs" && group.label !== "WORKSPACE") return null;
+          const visible = group.items.filter((item) => (role !== "cs" || item.href === "/messages") &&
+            (item.href === "/messages" ? can("messages:read") || can("inbox:read") : (!item.permission || can(item.permission))));
           if (visible.length === 0) return null;
           return (
             <div key={group.label} className="space-y-1">

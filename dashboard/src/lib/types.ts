@@ -80,6 +80,35 @@ export interface Message {
   status_history?: MessageStatusHistoryEntry[];
 }
 
+export interface InboxDevice {
+  device_key: string;
+  label: string | null;
+  phone_number: string | null;
+  status: DeviceStatus;
+}
+
+export interface InboxConversation {
+  latest_message_id: string;
+  device_key: string;
+  device_label: string | null;
+  chat_key: string;
+  chat_jid: string | null;
+  peer_number: string | null;
+  direction: "inbound" | "outbound";
+  content: string;
+  type: Message["type"];
+  status: MessageStatus;
+  created_at: string;
+  message_count: number;
+}
+
+export type Role = "owner" | "admin" | "developer" | "viewer" | "cs";
+
+export type Permission =
+  | "devices:read" | "devices:write" | "devices:delete"
+  | "messages:read" | "messages:send" | "inbox:read" | "messages:reply" | "content:write"
+  | "webhooks:manage" | "keys:manage" | "team:manage" | "billing:manage" | "audit:read";
+
 // ---- API envelopes -------------------------------------------------------
 // api-gateway wraps most responses as { success, data }, except GET
 // /api/v1/messages which returns { data, pagination } directly (no
@@ -97,7 +126,7 @@ export interface ApiErrorBody {
 
 export interface PaginatedResponse<T> {
   data: T[];
-  pagination: { limit: number; offset: number; total: number };
+  pagination: { limit: number; offset: number; total: number; has_more?: boolean };
 }
 
 export interface SendMessageRequest {
@@ -108,7 +137,6 @@ export interface SendMessageRequest {
   media_type?: "image" | "video" | "document";
   external_id?: string;
   reply_to_message_id?: string;
-  allow_warmup_override?: boolean;
 }
 
 export interface SendMessageResponse {
@@ -257,7 +285,7 @@ export interface AutoReplyRule {
   device_key: string;
   trigger_type: AutoReplyTriggerType;
   trigger_pattern: string;
-  response_type: "text" | "template" | "ai";
+  response_type: "text" | "template" | "ai" | "ai_general";
   response_content: string;
   delay_ms: number;
   is_active: boolean;
@@ -268,7 +296,7 @@ export interface AutoReplyRuleInput {
   device_key: string;
   trigger_type: AutoReplyTriggerType;
   trigger_pattern: string;
-  response_type?: "text" | "template" | "ai";
+  response_type?: "text" | "template" | "ai" | "ai_general";
   response_content: string;
   delay_ms: number;
 }
@@ -333,13 +361,6 @@ export interface WorkspaceReadiness {
 }
 
 // ---- Accounts, roles, keys, team, audit ------------------------------------
-
-export type Role = "owner" | "admin" | "developer" | "viewer";
-
-export type Permission =
-  | "devices:read" | "devices:write" | "devices:delete"
-  | "messages:read" | "messages:send" | "content:write"
-  | "webhooks:manage" | "keys:manage" | "team:manage" | "billing:manage" | "audit:read";
 
 export interface WorkspaceRef { id: string; name: string; role: Role }
 
@@ -442,6 +463,7 @@ export interface Persona {
   rest_min_ms: number;
   rest_max_ms: number;
   typing_ms_per_char: number;
+  typing_enabled: boolean;
   always_on: boolean;
   presence_enabled: boolean;
   presence_min_ms: number;

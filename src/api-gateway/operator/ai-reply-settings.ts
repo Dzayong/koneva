@@ -6,6 +6,13 @@ import { OperatorError, lockActor, operatorTransaction, writeAudit, type Actor }
 interface ProviderConfig { baseUrl: string; model: string; apiKey: string; enabled: boolean }
 interface ProviderRow { settings_enc: string; updated_at: Date }
 
+export function buildAiReplySystemInstruction(responseType: 'ai' | 'ai_general', rolePrompt: string): string {
+  if (responseType === 'ai_general') {
+    return 'Kamu adalah asisten layanan pelanggan yang ramah dan profesional. Jawab hanya berdasarkan informasi yang tersedia di pesan pengguna. Jika informasi tidak cukup, tanyakan dengan singkat; jangan mengarang harga, kebijakan, atau mengaku melakukan tindakan yang belum dilakukan. Balas dalam bahasa yang digunakan pengguna dan secara ringkas.';
+  }
+  return `Ikuti peran dan aturan berikut. Balas hanya pesan pemicu ini dengan singkat dan relevan. Jangan mengaku melakukan tindakan yang belum dilakukan.\n\n${rolePrompt.slice(0, 4000)}`;
+}
+
 function publicSettings(row: ProviderRow | undefined) {
   const config = row ? readProviderConfig(row) : undefined;
   return {
@@ -60,10 +67,10 @@ export async function saveAiReplySettings(db: Pool, actor: Actor, requestId: str
 
 /** Internal bot-to-gateway proxy. The bot supplies only a rule and inbound text; prompt and provider key stay server-side. */
 export async function generateInternalAiReply(db: Pool, input: { deviceKey: string; ruleId: string; inboundText: string }): Promise<string> {
-  const row = (await db.query<{ trigger_type: string; trigger_pattern: string; response_content: string; tenant_id: string }>(
-    `SELECT r.trigger_type,r.trigger_pattern,r.response_content,r.tenant_id
+  const row = (await db.query<{ trigger_type: string; trigger_pattern: string; response_type: string; response_content: string; tenant_id: string }>(
+    `SELECT r.trigger_type,r.trigger_pattern,r.response_type,r.response_content,r.tenant_id
      FROM auto_reply_rules r JOIN devices d ON d.device_key=r.device_key AND d.tenant_id=r.tenant_id
-     WHERE r.id=$1 AND r.device_key=$2 AND r.is_active=true AND r.response_type='ai' AND d.status='online'`,
+     WHERE r.id=$1 AND r.device_key=$2 AND r.is_active=true AND r.response_type IN ('ai','ai_general') AND d.status='online'`,
     [input.ruleId, input.deviceKey],
   )).rows[0];
   if (!row) throw new OperatorError(404, 'AI_REPLY_RULE_NOT_AVAILABLE', 'Aturan AI tidak aktif untuk device ini.');
@@ -86,7 +93,7 @@ export async function generateInternalAiReply(db: Pool, input: { deviceKey: stri
     response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST', headers: { authorization: `Bearer ${provider.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({ model: provider.model, temperature: 0.3, max_tokens: 400, messages: [
-        { role: 'system', content: `Ikuti peran dan aturan berikut. Balas hanya pesan pemicu ini dengan singkat dan relevan. Jangan mengaku melakukan tindakan yang belum dilakukan.\n\n${row.response_content.slice(0, 4000)}` },
+        { role: 'system', content: buildAiReplySystemInstruction(row.response_type as 'ai' | 'ai_general', row.response_content) },
         { role: 'user', content: text },
       ] }), signal: AbortSignal.timeout(12_000),
     });

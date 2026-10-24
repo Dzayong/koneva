@@ -21,7 +21,7 @@ export default function OpengraphImage() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           <div style={{ fontSize: 76, fontWeight: 700, lineHeight: 1.05, letterSpacing: -2 }}>Kirim WhatsApp lewat API, dengan nomor Anda sendiri.</div>
-          <div style={{ fontSize: 30, color: "#a9b7d6" }}>Pemanasan bertahap · jeda seperti manusia · skor kesiapan · webhook bertanda tangan</div>
+          <div style={{ fontSize: 30, color: "#a9b7d6" }}>WhatsApp API · status pesan · izin penerima · webhook</div>
         </div>
         <div style={{ display: "flex", fontSize: 26, color: "#67e8f9" }}>Coba gratis 14 hari, tanpa kartu kredit</div>
       </div>

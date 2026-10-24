@@ -63,7 +63,7 @@ async function listWorkspaces(db: Queryable, userId: string): Promise<Workspace[
 
 export interface SignupInput {
   email: string; password: string; name: string; workspace_name?: string | undefined;
-  verification_method?: 'email' | 'whatsapp' | undefined; phone_number?: string | undefined;
+  verification_method?: 'whatsapp' | undefined; phone_number?: string | undefined;
 }
 
 export interface PendingSignup { user_id: string; email: string }
@@ -84,8 +84,8 @@ export function normalizeSignupPhone(value: string): string {
 export async function signup(input: SignupInput): Promise<PendingSignup> {
   const passwordHash = await hashPassword(input.password);
   const workspaceName = input.workspace_name ?? `Workspace ${input.name}`;
-  const verificationMethod = input.verification_method ?? 'email';
-  const pendingPhone = verificationMethod === 'whatsapp' && input.phone_number ? normalizeSignupPhone(input.phone_number) : null;
+  const verificationMethod = 'whatsapp';
+  const pendingPhone = normalizeSignupPhone(input.phone_number ?? '');
   try {
     return await transaction(async (client) => {
       const existing = (await client.query<{ id: string; status: string; email_verified_at: Date | null }>(

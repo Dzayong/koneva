@@ -21,8 +21,6 @@ export type ReadinessTier = 'excellent' | 'good' | 'fair' | 'poor' | 'critical';
 
 export interface ReadinessInputs {
   status: string;
-  ageDays: number;
-  warmupCompleted: boolean;
   maturedSent: number;
   maturedDelivered: number;
   uniqueRecipients: number;
@@ -65,17 +63,9 @@ function stability(status: string): ReadinessFactor {
   return { id: 'stability', label: 'Stabilitas Koneksi', score: 8, max, status: 'partial', description: `Belum online (${status})`, proven: true };
 }
 
-function maturity(ageDays: number, warmupCompleted: boolean): ReadinessFactor {
+function maturity(): ReadinessFactor {
   const max = 20;
-  const day = ageDays + 1;
-  if (warmupCompleted || ageDays >= 7) {
-    return { id: 'maturity', label: 'Usia Device', score: max, max, status: 'complete', description: `Device tercatat aktif selama ${ageDays + 1} hari`, proven: true };
-  }
-  const score = ageDays >= 4 ? 12 : ageDays >= 2 ? 6 : 0;
-  return {
-    id: 'maturity', label: 'Usia Device', score, max, status: score > 0 ? 'partial' : 'locked',
-    description: `Device tercatat pada hari ke-${day}`, proven: true,
-  };
+  return { id: 'maturity', label: 'Akses langsung', score: max, max, status: 'complete', description: 'Tidak ada masa tunggu berdasarkan usia device', proven: true };
 }
 
 function delivery(i: ReadinessInputs): ReadinessFactor {
@@ -153,7 +143,7 @@ function recommend(i: ReadinessInputs, factors: ReadinessFactor[]): string[] {
 export function computeReadiness(inputs: ReadinessInputs): ReadinessReport {
   const factors = [
     stability(inputs.status),
-    maturity(inputs.ageDays, inputs.warmupCompleted),
+    maturity(),
     delivery(inputs),
     engagement(inputs),
     consent(inputs),
@@ -209,20 +199,14 @@ const INPUTS_SQL = `
 export interface ReadinessDevice {
   id: string;
   status: string;
-  createdAt: Date;
-  warmupStartedAt: Date | null;
-  warmupCompletedAt: Date | null;
 }
 
 export async function getReadinessInputs(device: ReadinessDevice, queryFn: QueryFn): Promise<ReadinessInputs> {
   const { rows } = await queryFn(INPUTS_SQL, [device.id, OPT_OUT_PATTERN]);
   const row = rows[0] ?? {};
   const n = (key: string): number => Number(row[key] ?? 0);
-  const warmupStart = device.warmupStartedAt ?? device.createdAt;
   return {
     status: device.status,
-    ageDays: Math.max(0, Math.floor((Date.now() - new Date(warmupStart).getTime()) / 86_400_000)),
-    warmupCompleted: device.warmupCompletedAt !== null,
     maturedSent: n('matured_sent'),
     maturedDelivered: n('matured_delivered'),
     uniqueRecipients: n('unique_recipients'),

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, ContactRound, MessageSquare, ShieldCheck, Smartphone } from "lucide-react";
+import { ArrowRight, CheckCircle2, ContactRound, MessageSquare, ShieldCheck, Smartphone, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeviceStatusBadge } from "@/components/devices/device-status-badge";
@@ -49,6 +49,52 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {canReadBilling && <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle>{billingLoading || billing?.wallet.enabled ? "Saldo" : "Ringkasan paket"}</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {billing?.wallet.enabled
+                ? "Pantau saldo dan biaya pesan workspace."
+                : "Pemakaian paket workspace saat ini."}
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/billing">
+              {billing?.wallet.enabled ? "Isi saldo" : "Buka tagihan"}
+              {billing?.wallet.enabled ? <Wallet className="ml-2 h-4 w-4" /> : <ArrowRight className="ml-2 h-4 w-4" />}
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {billingLoading ? <div className="h-16 animate-pulse rounded-lg bg-muted" aria-label="Memuat ringkasan paket" /> : billing ? (
+            billing.wallet.enabled ? (
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">Saldo tersedia</p>
+                  <p className="mt-1 text-xl font-semibold">Rp {billing.wallet.available_idr.toLocaleString("id-ID")}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Saldo ditahan · status belum pasti</p>
+                  <p className="mt-1 text-xl font-semibold">Rp {billing.wallet.reserved_idr.toLocaleString("id-ID")}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Tarif per pesan berhasil</p>
+                  <p className="mt-1 text-xl font-semibold">Rp {(billing.wallet.price_per_message_idr ?? 0).toLocaleString("id-ID")}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Saldo dipotong setelah WhatsApp mengonfirmasi.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div><p className="text-xs text-muted-foreground">Paket aktif</p><p className="mt-1 font-semibold">{billing.subscription?.plan_name ?? "Belum ada paket aktif"}</p></div>
+                <div><p className="text-xs text-muted-foreground">Pesan bulan ini</p><p className="mt-1 font-semibold">{billing.usage.quota_headline ?? `${billing.usage.messages_used.toLocaleString("id-ID")} / ${billing.usage.messages_limit.toLocaleString("id-ID")}`}</p>{billing.usage.quota_note && <p className="mt-1 text-xs text-muted-foreground">{billing.usage.quota_note}</p>}</div>
+                <div><p className="text-xs text-muted-foreground">Nomor terpakai</p><p className="mt-1 font-semibold">{billing.usage.devices_used} / {billing.usage.devices_limit}</p></div>
+              </div>
+            )
+          ) : <p className="text-sm text-muted-foreground">Ringkasan paket tidak dapat dimuat.</p>}
+        </CardContent>
+      </Card>}
+
       <QuickActions />
       <SetupChecklist />
 
@@ -86,27 +132,6 @@ export default function DashboardPage() {
           isLoading={canReadContacts && contactsLoading}
         />
       </StatGrid>
-
-      {canReadBilling && <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3">
-          <div>
-            <CardTitle>Ringkasan paket</CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">Pemakaian paket workspace saat ini.</p>
-          </div>
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/billing">Buka tagihan<ArrowRight className="ml-2 h-4 w-4" /></Link>
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {billingLoading ? <div className="h-16 animate-pulse rounded-lg bg-muted" aria-label="Memuat ringkasan paket" /> : billing ? (
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div><p className="text-xs text-muted-foreground">Paket aktif</p><p className="mt-1 font-semibold">{billing.subscription?.plan_name ?? "Belum ada paket aktif"}</p></div>
-              <div><p className="text-xs text-muted-foreground">Pesan bulan ini</p><p className="mt-1 font-semibold">{billing.usage.quota_headline ?? `${billing.usage.messages_used.toLocaleString("id-ID")} / ${billing.usage.messages_limit.toLocaleString("id-ID")}`}</p>{billing.usage.quota_note && <p className="mt-1 text-xs text-muted-foreground">{billing.usage.quota_note}</p>}</div>
-              <div><p className="text-xs text-muted-foreground">Nomor terpakai</p><p className="mt-1 font-semibold">{billing.usage.devices_used} / {billing.usage.devices_limit}</p></div>
-            </div>
-          ) : <p className="text-sm text-muted-foreground">Ringkasan paket tidak dapat dimuat.</p>}
-        </CardContent>
-      </Card>}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3">

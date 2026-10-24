@@ -124,7 +124,7 @@ export default function AutoReplyPage() {
                           <Reply className="h-3.5 w-3.5" />
                           Reply
                         </div>
-                        <p className="mt-1.5 line-clamp-2 text-sm">{rule.response_content}</p>
+                        <p className="mt-1.5 line-clamp-2 text-sm">{rule.response_type === "ai_general" ? "AI umum · jawaban ringkas dan relevan" : rule.response_content}</p>
                       </div>
                     </div>
                     <div className="mt-4 flex items-center gap-3 text-sm text-muted-foreground">
@@ -207,8 +207,10 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
   const [deviceKey, setDeviceKey] = useState(rule?.device_key ?? "");
   const [type, setType] = useState<AutoReplyTriggerType>(rule?.trigger_type ?? "keyword");
   const [pattern, setPattern] = useState(rule?.trigger_pattern ?? "");
-  const [responseType, setResponseType] = useState<"text" | "ai">(rule?.response_type === "ai" ? "ai" : "text");
-  const [content, setContent] = useState(rule?.response_content ?? "");
+  const [responseType, setResponseType] = useState<"text" | "ai_general" | "ai">(rule?.response_type === "ai" || rule?.response_type === "ai_general" ? rule.response_type : "text");
+  const [textContent, setTextContent] = useState(rule?.response_type === "ai" || rule?.response_type === "ai_general" ? "" : rule?.response_content ?? "");
+  const [aiPrompt, setAiPrompt] = useState(rule?.response_type === "ai" ? rule.response_content : "");
+  const content = responseType === "ai" ? aiPrompt : responseType === "ai_general" ? "" : textContent;
   const [delaySeconds, setDelaySeconds] = useState(String((rule?.delay_ms ?? 3000) / 1000));
 
   const delay = Number(delaySeconds);
@@ -222,7 +224,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
     !Number.isFinite(delay) || delay < 0 || delay > MAX_DELAY_SECONDS
       ? `Jeda harus 0–${MAX_DELAY_SECONDS} detik.`
       : null;
-  const canSubmit = deviceKey && content.trim() && !patternError && !delayError;
+  const canSubmit = deviceKey && (responseType === "ai_general" || content.trim()) && !patternError && !delayError;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -278,13 +280,15 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
 
       <div className="space-y-2">
         <Label>Jenis balasan</Label>
-        <Select value={responseType} onValueChange={(v) => setResponseType(v as "text" | "ai")}>
+        <Select value={responseType} onValueChange={(value) => setResponseType(value as typeof responseType)}>
           <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="text">Balasan tetap</SelectItem>
-            <SelectItem value="ai">AI memakai prompt</SelectItem>
+            <SelectItem value="ai_general">AI umum</SelectItem>
+            <SelectItem value="ai">AI memakai instruksi peran</SelectItem>
           </SelectContent>
         </Select>
+        {responseType !== "text" && <p className="text-xs text-muted-foreground">API key dan model dikelola admin sistem. AI hanya dipanggil saat pemicu cocok.</p>}
       </div>
 
       {type !== "all" && (
@@ -307,17 +311,19 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
       )}
 
       <div className="space-y-2">
-        <Label htmlFor="rule-content">{responseType === "ai" ? "Prompt: peran dan aturan AI" : "Isi balasan"}</Label>
+        {responseType !== "ai_general" && <>
+        <Label htmlFor="rule-content">{responseType === "ai" ? "Deskripsi peran dan aturan AI" : "Isi balasan"}</Label>
         <Textarea
           id="rule-content"
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={(e) => responseType === "ai" ? setAiPrompt(e.target.value) : setTextContent(e.target.value)}
           rows={4}
           placeholder={responseType === "ai" ? "Kamu adalah admin toko. Jawab pertanyaan tentang harga dengan ramah dan singkat." : "Halo {nama}! Ada yang bisa kami bantu?"}
         />
         <p className="text-xs text-muted-foreground">
-          {responseType === "ai" ? "API key dan model AI dikelola admin server. AI dipanggil hanya jika pesan grup cocok dengan pemicu." : <>Variables: {"{nama}"}, {"{nomor}"}, {"{tanggal}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
+          {responseType === "ai" ? "Tulis dalam satu deskripsi: peran AI, tugasnya, batas jawaban, dan hal yang boleh dilakukan." : <>Variables: {"{nama}"}, {"{nomor}"}, {"{tanggal}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
         </p>
+        </>}
       </div>
 
       {responseType === "text" && content.trim() && (

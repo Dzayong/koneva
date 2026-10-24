@@ -18,6 +18,8 @@ export interface Persona {
   restMinMs: number;
   restMaxMs: number;
   typingMsPerChar: number;
+  /** Whether outgoing messages show WhatsApp's composing indicator. */
+  typingEnabled: boolean;
   /** 24-hour mode: no active-hours window (pacing and rests still apply). */
   alwaysOn: boolean;
   /** Online/read/offline routine around messages; each pause is random within these bounds. */
@@ -51,6 +53,7 @@ export function generatePersona(seed: string, timezone = 'Asia/Jakarta'): Person
     restMinMs,
     restMaxMs: restMinMs + Math.round((5 + unit(seed, 'rmax') * 8) * 60_000),
     typingMsPerChar: 45 + Math.floor(unit(seed, 'type') * 36),
+    typingEnabled: true,
     alwaysOn: false,
     presenceEnabled: true,
     presenceMinMs: 1_000,
@@ -156,7 +159,7 @@ export async function getBurstState(deviceId: string, queryFn: QueryFn): Promise
 
 interface PersonaRow {
   seed: string; timezone: string; wake_hour: number; sleep_hour: number; delay_min_ms: number; delay_max_ms: number;
-  burst_size: number; rest_min_ms: number; rest_max_ms: number; typing_ms_per_char: number; always_on: boolean; preset?: string | null;
+  burst_size: number; rest_min_ms: number; rest_max_ms: number; typing_ms_per_char: number; typing_enabled?: boolean; always_on: boolean; preset?: string | null;
   presence_enabled?: boolean; presence_min_ms?: number; presence_max_ms?: number;
 }
 
@@ -165,6 +168,7 @@ function fromRow(row: PersonaRow): Persona {
     seed: row.seed, timezone: row.timezone, wakeHour: Number(row.wake_hour), sleepHour: Number(row.sleep_hour),
     delayMinMs: row.delay_min_ms, delayMaxMs: row.delay_max_ms, burstSize: row.burst_size,
     restMinMs: row.rest_min_ms, restMaxMs: row.rest_max_ms, typingMsPerChar: row.typing_ms_per_char,
+    typingEnabled: row.typing_enabled !== false,
     alwaysOn: row.always_on === true,
     presenceEnabled: row.presence_enabled !== false,
     presenceMinMs: row.presence_min_ms ?? 1_000,
@@ -174,7 +178,7 @@ function fromRow(row: PersonaRow): Persona {
 }
 
 const SELECT_SQL = `SELECT seed, timezone, wake_hour, sleep_hour, delay_min_ms, delay_max_ms, burst_size,
-  rest_min_ms, rest_max_ms, typing_ms_per_char, always_on, preset, presence_enabled, presence_min_ms, presence_max_ms FROM device_personas WHERE device_id = $1::uuid`;
+  rest_min_ms, rest_max_ms, typing_ms_per_char, typing_enabled, always_on, preset, presence_enabled, presence_min_ms, presence_max_ms FROM device_personas WHERE device_id = $1::uuid`;
 
 export async function getOrCreatePersona(deviceId: string, queryFn: QueryFn): Promise<Persona> {
   const existing = (await queryFn(SELECT_SQL, [deviceId])).rows[0] as PersonaRow | undefined;

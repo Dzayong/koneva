@@ -1,21 +1,21 @@
 // One place that says who may do what. Roles are for people signed in to the console;
 // API keys carry a subset of the same permissions (scopes).
 
-// Customer access model: Owner (owns the workspace, one at a time) and Developer (technical integration, per workspace).
-// `admin` and `viewer` are LEGACY: they still exist in old data and keep their historical (safe) permissions, but nothing
+// Customer access model: Owner, Developer (technical integration), and CS (Inbox only).
+// `admin` and `viewer` are LEGACY: they still exist in old data and keep their historical permissions, but nothing
 // new can create, invite or assign them (enforced in the service layer and by database triggers, see migration 021).
 // The KONEVA system admin is NOT a customer role: it is a separate operator account (docs/OPERATOR_PANEL.md).
-export const ROLES = ['owner', 'admin', 'developer', 'viewer'] as const;
+export const ROLES = ['owner', 'admin', 'developer', 'viewer', 'cs'] as const;
 export type Role = (typeof ROLES)[number];
-export const CURRENT_ROLES = ['owner', 'developer'] as const;
+export const CURRENT_ROLES = ['owner', 'developer', 'cs'] as const;
 export const LEGACY_ROLES = ['admin', 'viewer'] as const;
 /** The only role an owner can hand out to someone else. Ownership is one per workspace and is never invited. */
-export const ASSIGNABLE_ROLES = ['developer'] as const;
+export const ASSIGNABLE_ROLES = ['developer', 'cs'] as const;
 export const isLegacyRole = (role: Role): boolean => (LEGACY_ROLES as readonly string[]).includes(role);
 
 export const PERMISSIONS = [
   'devices:read', 'devices:write', 'devices:delete',
-  'messages:read', 'messages:send',
+  'messages:read', 'messages:send', 'inbox:read', 'messages:reply',
   'content:write',
   'webhooks:manage', 'keys:manage',
   'team:manage', 'billing:manage', 'audit:read',
@@ -27,10 +27,12 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   admin: PERMISSIONS.filter((p) => p !== 'billing:manage'),
   // Everything technical, including deleting a device. Never billing or the team.
   developer: [
-    'devices:read', 'devices:write', 'devices:delete', 'messages:read', 'messages:send', 'content:write',
+    'devices:read', 'devices:write', 'devices:delete', 'messages:read', 'messages:send', 'inbox:read', 'messages:reply', 'content:write',
     'webhooks:manage', 'keys:manage',
   ],
-  viewer: ['devices:read', 'messages:read'],
+  viewer: ['devices:read', 'messages:read', 'inbox:read'],
+  // Customer service can only read and reply in the inbox. No broadcast, campaign, API, or settings access.
+  cs: ['inbox:read', 'messages:reply'],
 };
 
 export function can(role: Role, permission: Permission): boolean {
@@ -42,6 +44,8 @@ const ANY_WRITE = ['POST', 'PATCH', 'PUT', 'DELETE'] as const;
 
 // Order matters: the first matching rule wins, so specific rules come before general ones.
 const RULES: readonly Rule[] = [
+  [['GET'], /^\/inbox\/(devices|conversations|messages)$/, 'inbox:read'],
+  [['POST'], /^\/inbox\/messages\/[^/]+\/reply$/, 'messages:reply'],
   [['POST'], /^\/message\/send$/, 'messages:send'],
   [['POST'], /^\/contacts\/broadcast-consent$/, 'messages:send'],
   [['POST'], /^\/broadcast$/, 'messages:send'],

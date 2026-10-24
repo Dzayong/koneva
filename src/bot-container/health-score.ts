@@ -15,9 +15,6 @@ export interface DeviceRecord {
   deviceKey: string;
   status: string;
   healthScore: number;
-  createdAt: Date;
-  warmupStartedAt: Date | null;
-  warmupCompletedAt: Date | null;
   pausedUntil: Date | null;
 }
 
@@ -27,9 +24,6 @@ interface DeviceRow {
   device_key: string;
   status: string;
   health_score: number;
-  created_at: Date;
-  warmup_started_at: Date | null;
-  warmup_completed_at: Date | null;
   paused_until: Date | null;
 }
 
@@ -40,9 +34,6 @@ function mapDeviceRow(row: DeviceRow): DeviceRecord {
     deviceKey: row.device_key,
     status: row.status,
     healthScore: row.health_score,
-    createdAt: row.created_at,
-    warmupStartedAt: row.warmup_started_at,
-    warmupCompletedAt: row.warmup_completed_at,
     pausedUntil: row.paused_until,
   };
 }
@@ -52,8 +43,7 @@ export async function getDeviceByKey(
   queryFn: QueryFn = defaultQueryFn,
 ): Promise<DeviceRecord | undefined> {
   const { rows } = await queryFn(
-    `SELECT id, tenant_id, device_key, status, health_score, created_at,
-            warmup_started_at, warmup_completed_at, paused_until
+    `SELECT id, tenant_id, device_key, status, health_score, paused_until
      FROM devices WHERE device_key = $1`,
     [deviceKey],
   );
@@ -86,9 +76,6 @@ export async function getDeviceByKeyCached(
       const parsed = JSON.parse(cached) as DeviceRecord;
       return {
         ...parsed,
-        createdAt: new Date(parsed.createdAt),
-        warmupStartedAt: parsed.warmupStartedAt ? new Date(parsed.warmupStartedAt) : null,
-        warmupCompletedAt: parsed.warmupCompletedAt ? new Date(parsed.warmupCompletedAt) : null,
         pausedUntil: parsed.pausedUntil ? new Date(parsed.pausedUntil) : null,
       };
     }

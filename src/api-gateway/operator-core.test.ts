@@ -13,6 +13,9 @@ test('operator configuration fails closed and never weakens production cookies',
   assert.throws(() => readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000/' }));
   assert.throws(() => readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000', OPERATOR_COOKIE_SECURE: 'false' }));
   assert.equal(readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGIN: 'http://localhost:13000', OPERATOR_COOKIE_NAME: 'koneva_op_dev', OPERATOR_COOKIE_SECURE: 'false', OPERATOR_INSECURE_DEV_COOKIES: 'true' }).secure, false);
+  assert.deepEqual(readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGINS: 'https://ops.example.test, https://ops-lan.example.test' }).origins,
+    ['https://ops.example.test', 'https://ops-lan.example.test']);
+  assert.throws(() => readOperatorConfig({ OPERATOR_ENABLED: 'true', OPERATOR_ALLOWED_ORIGINS: 'https://ops.example.test, http://example.test' }));
 });
 test('payload hash canonicalization ignores key order but preserves actual payload changes', () => {
   assert.equal(canonicalJson({ a: 1, b: { x: 2, y: 'a' } }), canonicalJson({ b: { y: 'a', x: 2 }, a: 1 }));

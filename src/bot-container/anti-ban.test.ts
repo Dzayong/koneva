@@ -4,7 +4,6 @@ import {
   canSendMessage,
   countMessagesSince,
   getDailyCapByHealthScore,
-  getWarmupStage,
   isWithinSendingWindow,
   type QueryFn,
 } from './anti-ban';
@@ -18,37 +17,22 @@ test('send budget counts persisted in-flight sends as reservations', async () =>
   assert.match(statement, /COALESCE\(sent_at, send_started_at, created_at\)/);
 });
 
-test('warm-up stages match the spec tiers', () => {
-  assert.equal(getWarmupStage(1).maxMessagesPerDay, 5);
-  assert.equal(getWarmupStage(2).maxMessagesPerDay, 5);
-  assert.equal(getWarmupStage(1).proactiveAllowed, false);
-  assert.equal(getWarmupStage(3).maxMessagesPerDay, 10);
-  assert.equal(getWarmupStage(3).mediaAllowed, false);
-  assert.equal(getWarmupStage(5).maxMessagesPerDay, 20);
-  assert.equal(getWarmupStage(5).mediaAllowed, true);
-  assert.equal(getWarmupStage(8).maxMessagesPerDay, 50);
-  assert.equal(getWarmupStage(30).maxMessagesPerDay, 50);
-});
-
-test('one-message warm-up approval bypasses only the warm-up gate, not caps or paused-device checks', async () => {
+test('new devices can send proactive messages and media immediately; ordinary caps and pause checks remain', async () => {
   const now = new Date('2026-09-24T05:00:00Z');
   const newDevice: FakeDeviceRow = {
-    id: 'device-warmup-approval', tenant_id: 'tenant-1', device_key: 'WAPI-WARMUP-APPROVAL', status: 'online', health_score: 50,
-    created_at: new Date(now.getTime() - 60 * 60_000), warmup_started_at: null, warmup_completed_at: null, paused_until: null,
+    id: 'device-immediate-send', tenant_id: 'tenant-1', device_key: 'WAPI-IMMEDIATE-SEND', status: 'online', health_score: 50,
+    paused_until: null,
   };
   const queryFn = makeFakeQueryFn(newDevice, 0);
   const input = { queryFn, isProactive: true, recipient: '6281234567890', content: 'Hai', now };
-  const held = await canSendMessage(newDevice.device_key, input);
-  assert.equal(held.reason, 'proactive_not_allowed_in_warmup');
-
-  const approved = await canSendMessage(newDevice.device_key, { ...input, allowWarmupOverride: true });
+  const approved = await canSendMessage(newDevice.device_key, { ...input, hasMedia: true });
   assert.equal(approved.allowed, true, `denied: ${approved.reason}`);
 
-  const capped = await canSendMessage(newDevice.device_key, { ...input, allowWarmupOverride: true, queryFn: makeFakeQueryFn(newDevice, 5) });
+  const capped = await canSendMessage(newDevice.device_key, { ...input, hasMedia: true, queryFn: makeFakeQueryFn(newDevice, approved.dailyCap) });
   assert.equal(capped.reason, 'daily_cap_reached');
 
   const paused = { ...newDevice, status: 'paused' };
-  const blocked = await canSendMessage(paused.device_key, { ...input, allowWarmupOverride: true, queryFn: makeFakeQueryFn(paused, 0) });
+  const blocked = await canSendMessage(paused.device_key, { ...input, hasMedia: true, queryFn: makeFakeQueryFn(paused, 0) });
   assert.equal(blocked.reason, 'device_paused');
 });
 
@@ -81,9 +65,6 @@ interface FakeDeviceRow {
   device_key: string;
   status: string;
   health_score: number;
-  created_at: Date;
-  warmup_started_at: Date | null;
-  warmup_completed_at: Date | null;
   paused_until: Date | null;
 }
 
@@ -120,9 +101,6 @@ test('canSendMessage denies when device is currently paused', async () => {
     device_key: 'WAPI-TEST01',
     status: 'paused',
     health_score: 10,
-    created_at: new Date(Date.now() - 40 * 86_400_000),
-    warmup_started_at: null,
-    warmup_completed_at: null,
     paused_until: new Date(Date.now() + 3_600_000),
   };
   const decision = await canSendMessage('WAPI-TEST01', {
@@ -142,9 +120,6 @@ test('canSendMessage denies a device paused via the admin API even without pause
     device_key: 'WAPI-ADMIN-PAUSED',
     status: 'paused',
     health_score: 80,
-    created_at: new Date(Date.now() - 40 * 86_400_000),
-    warmup_started_at: null,
-    warmup_completed_at: null,
     paused_until: null,
   };
   const decision = await canSendMessage('WAPI-ADMIN-PAUSED', {
@@ -161,9 +136,6 @@ test('canSendMessage denies a banned device', async () => {
     device_key: 'WAPI-BANNED',
     status: 'banned',
     health_score: 80,
-    created_at: new Date(Date.now() - 40 * 86_400_000),
-    warmup_started_at: null,
-    warmup_completed_at: null,
     paused_until: null,
   };
   const decision = await canSendMessage('WAPI-BANNED', {
@@ -173,42 +145,36 @@ test('canSendMessage denies a banned device', async () => {
   assert.equal(decision.reason, 'device_banned');
 });
 
-test('canSendMessage allows a brand-new device within warm-up cap', async () => {
+test('canSendMessage allows proactive media from a brand-new device', async () => {
   const device: FakeDeviceRow = {
     id: 'device-2',
     tenant_id: 'tenant-1',
     device_key: 'WAPI-TEST02',
     status: 'online',
     health_score: 50,
-    created_at: new Date('2026-09-24T04:00:00Z'),
-    warmup_started_at: null,
-    warmup_completed_at: null,
     paused_until: null,
   };
   const decision = await canSendMessage('WAPI-TEST02', {
     queryFn: makeFakeQueryFn(device, 0),
     now: new Date('2026-09-24T05:00:00Z'), // within sending window
+    isProactive: true,
+    hasMedia: true,
   });
   assert.equal(decision.allowed, true);
-  // Warm-up cap is 5; the per-day persona factor may only lower it (never above the cap).
-  assert.ok(decision.dailyCap >= 4 && decision.dailyCap <= 5, `cap ${decision.dailyCap}`);
-  assert.equal(decision.warmupDay, 1);
+  assert.ok(decision.dailyCap > 0, `cap ${decision.dailyCap}`);
 });
 
-test('canSendMessage denies once the warm-up daily cap is reached', async () => {
+test('canSendMessage still denies once the health-based daily cap is reached', async () => {
   const device: FakeDeviceRow = {
     id: 'device-3',
     tenant_id: 'tenant-1',
     device_key: 'WAPI-TEST03',
     status: 'online',
     health_score: 50,
-    created_at: new Date('2026-09-24T04:00:00Z'),
-    warmup_started_at: null,
-    warmup_completed_at: null,
     paused_until: null,
   };
   const decision = await canSendMessage('WAPI-TEST03', {
-    queryFn: makeFakeQueryFn(device, 5),
+    queryFn: makeFakeQueryFn(device, 100),
     now: new Date('2026-09-24T05:00:00Z'),
   });
   assert.equal(decision.allowed, false);
@@ -222,9 +188,6 @@ test('canSendMessage rejects spammy content even when quota allows it', async ()
     device_key: 'WAPI-TEST04',
     status: 'online',
     health_score: 50,
-    created_at: new Date('2026-09-24T04:00:00Z'),
-    warmup_started_at: null,
-    warmup_completed_at: null,
     paused_until: null,
   };
   const decision = await canSendMessage('WAPI-TEST04', {
@@ -244,9 +207,6 @@ test('canSendMessage refuses proactive sends to a recipient who asked to stop, b
     device_key: 'WAPI-OPTOUT',
     status: 'online',
     health_score: 50,
-    created_at: new Date('2026-09-24T04:00:00Z'),
-    warmup_started_at: null,
-    warmup_completed_at: null,
     paused_until: null,
   };
   const base = makeFakeQueryFn(device, 0);
@@ -267,7 +227,7 @@ test('canSendMessage refuses proactive sends to a recipient who asked to stop, b
 test('proactive sends rest after a burst and are re-queued at the end of the rest; replies are not held back', async () => {
   const device: FakeDeviceRow = {
     id: 'device-rest', tenant_id: 'tenant-1', device_key: 'WAPI-REST', status: 'online', health_score: 50,
-    created_at: new Date('2026-09-24T04:00:00Z'), warmup_started_at: null, warmup_completed_at: null, paused_until: null,
+    paused_until: null,
   };
   const now = new Date('2026-09-24T05:00:00Z');
   const base = makeFakeQueryFn(device, 0);
@@ -288,7 +248,7 @@ test('proactive sends rest after a burst and are re-queued at the end of the res
 test('outside the number\'s active hours the send is deferred until it wakes up', async () => {
   const device: FakeDeviceRow = {
     id: 'device-night', tenant_id: 'tenant-1', device_key: 'WAPI-NIGHT', status: 'online', health_score: 50,
-    created_at: new Date('2026-09-24T04:00:00Z'), warmup_started_at: null, warmup_completed_at: null, paused_until: null,
+    paused_until: null,
   };
   const decision = await canSendMessage('WAPI-NIGHT', {
     queryFn: makeFakeQueryFn(device, 0), isProactive: false, content: 'Halo',
@@ -301,7 +261,7 @@ test('outside the number\'s active hours the send is deferred until it wakes up'
 function urgentFixture(id: string): FakeDeviceRow {
   return {
     id, tenant_id: 'tenant-1', device_key: id.toUpperCase(), status: 'online', health_score: 50,
-    created_at: new Date('2026-09-24T04:00:00Z'), warmup_started_at: null, warmup_completed_at: null, paused_until: null,
+    paused_until: null,
   };
 }
 
@@ -354,5 +314,27 @@ test('a 24-hour number keeps sending at night, and a flat delay is exactly that 
     queryFn, isProactive: false, content: 'Halo Kak', now: new Date('2026-09-23T20:00:00Z'), // 03:00 WIB
   });
   assert.equal(decision.allowed, true, `denied: ${decision.reason}`);
+  assert.equal(decision.delayMs, 5000);
+});
+
+test('typing indicator can be disabled per device without disabling the send delay', async () => {
+  const device = urgentFixture('device-no-typing');
+  const base = makeFakeQueryFn(device, 0);
+  const queryFn: QueryFn = async (text, params) => {
+    if (text.includes('FROM device_personas WHERE device_id')) {
+      return { rows: [{
+        seed: 's', timezone: 'Asia/Jakarta', wake_hour: 7, sleep_hour: 22,
+        delay_min_ms: 5000, delay_max_ms: 5000, burst_size: 15,
+        rest_min_ms: 300000, rest_max_ms: 600000, typing_ms_per_char: 55,
+        typing_enabled: false, always_on: true,
+      }] };
+    }
+    return base(text, params);
+  };
+  const decision = await canSendMessage('DEVICE-NO-TYPING', {
+    queryFn, isProactive: false, content: 'Halo Kak', now: new Date('2026-09-23T20:00:00Z'),
+  });
+  assert.equal(decision.allowed, true, `denied: ${decision.reason}`);
+  assert.equal(decision.typing.shouldSimulate, false);
   assert.equal(decision.delayMs, 5000);
 });

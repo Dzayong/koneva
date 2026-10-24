@@ -86,6 +86,9 @@ test('visitors never see a price the operator has not made final', async () => {
 
 // Runs createOrder against a transaction whose statements are answered by `handler`.
 function withTransaction(handler: (text: string, values?: unknown[]) => { rows: unknown[] }) {
+  database.query = async (text) => text.includes('FROM payg_settings')
+    ? { rows: [{ enabled: false }] }
+    : { rows: [] };
   const client = { query: async (text: string, values?: unknown[]) => (/^(BEGIN|COMMIT|ROLLBACK)/.test(text)
     ? { rows: [] }
     : text.startsWith('SELECT name,email FROM tenants')
@@ -98,6 +101,11 @@ const plan = (over: Record<string, unknown> = {}) => ({
   id: 'umkm', name: 'UMKM', audience: 'umkm', price_month_idr: 99000, price_year_idr: 990000, max_devices: 3,
   monthly_messages: 10000, max_members: 3, trial_days: null, requires_student_verification: false, price_is_final: true,
   published: true, sort_order: 2, features: [], quota_headline: null, quota_note: null, ...over,
+});
+
+test('PAYG workspaces cannot create legacy package invoices', async () => {
+  database.query = async () => ({ rows: [{ enabled: true }] });
+  await assert.rejects(() => createOrder('t1', 'umkm', 'monthly'), code('PACKAGES_RETIRED'));
 });
 
 test('an order needs a real plan and a final price', async () => {

@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
 import { Activity, BarChart3, BellRing, Building2, CreditCard, GraduationCap, HeartPulse, LayoutDashboard, LogOut, Menu, ScrollText, ShieldCheck, Smartphone, ScanLine, Bot, Wallet } from "lucide-react";
 import { KonevaMark } from "@/components/brand/koneva-logo";
+import { LegalLinksFooter } from "@/components/layout/legal-links-footer";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -166,6 +167,7 @@ export function OperatorShell({ children }: { children: React.ReactNode }) {
         </header>
         <div className="flex min-h-10 items-center gap-2 border-b bg-card/70 px-4 text-xs text-muted-foreground md:px-8"><Activity className="h-3.5 w-3.5 text-primary" aria-hidden /><span>Aktivitas internal tercatat · akses mengikuti izin akun</span></div>
         <main className="mx-auto w-full max-w-[1600px] flex-1 p-4 py-6 md:p-8 lg:p-10">{children}</main>
+        <LegalLinksFooter />
       </div>
     </div>
   );

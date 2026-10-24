@@ -10,7 +10,7 @@ import { assertCanAddMember } from './billing.service';
 import { emailAvailable, requireEmail, sendInvitationOtp } from './mailer';
 import { reserveIpRequest, reserveOtpSend } from './otp-limits';
 
-/** Only Developer can be invited. Owner is the workspace owner (one at a time); admin and viewer are legacy and never assigned. */
+/** Developer handles integrations; CS is restricted to Inbox. Owner is never invited; admin/viewer are legacy. */
 export const INVITABLE_ROLES = ASSIGNABLE_ROLES;
 export const INVITE_HOURS = 48;
 export const OTP_MINUTES = 10;
@@ -39,7 +39,7 @@ export const newInviteToken = (): { token: string; hash: string } => {
   return { token, hash: sha256(token) };
 };
 
-/** Only the workspace owner hands out access, and the only role to hand out is Developer. */
+/** Only the workspace owner hands out access. */
 export function canGrant(actor: Role, target: Role): boolean {
   return actor === 'owner' && (INVITABLE_ROLES as readonly string[]).includes(target);
 }
@@ -60,7 +60,7 @@ export async function createInvitation(
   tenantId: string, inviter: { userId: string; role: Role }, input: { email: string; role: Role },
 ): Promise<{ id: string; email: string; role: Role; expires_at: Date; token: string; accept_path: string }> {
   if (!(INVITABLE_ROLES as readonly string[]).includes(input.role)) {
-    throw new ServiceError(400, 'INVALID_ROLE', 'Undangan hanya untuk peran Developer. Owner tidak diundang, dan Admin/Viewer sudah tidak diberikan.');
+    throw new ServiceError(400, 'INVALID_ROLE', 'Undangan hanya untuk peran Developer atau Customer Service.');
   }
   if (!canGrant(inviter.role, input.role)) {
     throw new ServiceError(403, 'ROLE_NOT_GRANTABLE', 'Hanya Owner workspace yang bisa mengundang.');
@@ -314,7 +314,7 @@ export async function changeMemberRole(tenantId: string, actor: { userId: string
   if (!target) throw new ServiceError(404, 'MEMBER_NOT_FOUND', 'Member not found');
   if (target.role === 'owner') throw new ServiceError(403, 'ROLE_NOT_GRANTABLE', 'Kepemilikan workspace tidak diubah lewat peran anggota.');
   if (!canManageMember(actor.role, target.role) || !canGrant(actor.role, newRole)) {
-    throw new ServiceError(403, 'ROLE_NOT_GRANTABLE', 'Hanya Owner yang bisa mengubah peran, dan satu-satunya peran yang bisa diberikan adalah Developer.');
+    throw new ServiceError(403, 'ROLE_NOT_GRANTABLE', 'Hanya Owner yang bisa mengubah peran menjadi Developer atau Customer Service.');
   }
   await pool.query('UPDATE memberships SET role = $3 WHERE tenant_id = $1 AND user_id = $2', [tenantId, targetUserId, newRole]);
 }

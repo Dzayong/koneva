@@ -12,30 +12,6 @@ import {
 const MIN_SAMPLES_FOR_PAUSE = 10;
 const FALLBACK_CAP_WHEN_UNPROVEN = 5;
 
-export interface WarmupStage {
-  minDay: number;
-  maxMessagesPerDay: number;
-  proactiveAllowed: boolean;
-  mediaAllowed: boolean;
-}
-
-const WARMUP_STAGES: WarmupStage[] = [
-  { minDay: 1, maxMessagesPerDay: 5, proactiveAllowed: false, mediaAllowed: false },
-  { minDay: 3, maxMessagesPerDay: 10, proactiveAllowed: true, mediaAllowed: false },
-  { minDay: 5, maxMessagesPerDay: 20, proactiveAllowed: true, mediaAllowed: true },
-  { minDay: 8, maxMessagesPerDay: 50, proactiveAllowed: true, mediaAllowed: true },
-];
-
-export function getWarmupStage(warmupDay: number): WarmupStage {
-  let selected = WARMUP_STAGES[0]!;
-  for (const stage of WARMUP_STAGES) {
-    if (warmupDay >= stage.minDay) {
-      selected = stage;
-    }
-  }
-  return selected;
-}
-
 export interface HealthTier {
   minScore: number;
   maxMessagesPerDay: number | null;
@@ -156,14 +132,6 @@ async function pauseDevice(deviceId: string, now: Date, queryFn: QueryFn): Promi
   );
 }
 
-async function markWarmupCompleted(deviceId: string, now: Date, queryFn: QueryFn): Promise<void> {
-  await queryFn(
-    `UPDATE devices SET warmup_completed_at = $1, updated_at = now()
-     WHERE id = $2 AND warmup_completed_at IS NULL`,
-    [now, deviceId],
-  );
-}
-
 export type AntiBanDenialReason =
   | 'device_not_found'
   | 'device_paused'
@@ -174,8 +142,6 @@ export type AntiBanDenialReason =
   | 'recipient_opted_out'
   | 'rate_limit_per_minute'
   | 'outside_sending_window'
-  | 'proactive_not_allowed_in_warmup'
-  | 'media_not_allowed_in_warmup'
   | 'content_rejected';
 
 export interface AntiBanDecision {
@@ -187,7 +153,6 @@ export interface AntiBanDecision {
   healthScore: number;
   dailyCap: number;
   sentToday: number;
-  warmupDay: number;
   /** When a denial is temporary: how long the queue should wait before trying again. */
   retryAfterMs?: number | undefined;
 }
@@ -198,8 +163,6 @@ export interface CanSendMessageOptions {
   /** 'urgent' (OTP, transactional) skips pacing, active hours, rests and content rules; caps and pauses still apply. */
   priority?: MessagePriority | undefined;
   isProactive?: boolean | undefined;
-  /** Explicit user approval for this message only; never bypasses other anti-ban checks. */
-  allowWarmupOverride?: boolean | undefined;
   hasMedia?: boolean | undefined;
   content?: string | undefined;
   recipient?: string | undefined;
@@ -215,7 +178,7 @@ export interface CanSendMessageOptions {
 
 function denial(
   reason: AntiBanDenialReason,
-  extra: Partial<Pick<AntiBanDecision, 'healthScore' | 'dailyCap' | 'sentToday' | 'warmupDay' | 'retryAfterMs'>> = {},
+  extra: Partial<Pick<AntiBanDecision, 'healthScore' | 'dailyCap' | 'sentToday' | 'retryAfterMs'>> = {},
 ): AntiBanDecision {
   return {
     allowed: false,
@@ -225,7 +188,6 @@ function denial(
     healthScore: extra.healthScore ?? 0,
     dailyCap: extra.dailyCap ?? 0,
     sentToday: extra.sentToday ?? 0,
-    warmupDay: extra.warmupDay ?? 0,
     ...(extra.retryAfterMs !== undefined ? { retryAfterMs: extra.retryAfterMs } : {}),
   };
 }
@@ -266,8 +228,8 @@ export async function canSendMessage(
   const metrics = await getDeliveryMetrics(device.id, queryFn);
   const rawHealthCap = getDailyCapByHealthScore(healthScore);
 
-  // A device with too little history to judge fairly must not be paused purely
-  // for lacking data; warm-up caps already keep it slow until it earns a real score.
+  // A device with too little history is limited by the ordinary health cap until
+  // there is enough delivery history to assess it; device age is not a send gate.
   const healthCap =
     rawHealthCap === null && metrics.totalSent < MIN_SAMPLES_FOR_PAUSE
       ? FALLBACK_CAP_WHEN_UNPROVEN
@@ -278,28 +240,21 @@ export async function canSendMessage(
     return denial('health_score_too_low', { healthScore });
   }
 
-  const warmupStart = device.warmupStartedAt ?? device.createdAt;
-  const warmupDay = Math.floor((now.getTime() - warmupStart.getTime()) / 86_400_000) + 1;
-  const stage = getWarmupStage(warmupDay);
-
-  if (warmupDay >= 8 && !device.warmupCompletedAt) {
-    await markWarmupCompleted(device.id, now, queryFn);
-  }
 
   const persona = await getOrCreatePersona(device.id, queryFn);
-  const dailyCap = Math.max(1, Math.floor(Math.min(stage.maxMessagesPerDay, healthCap) * dailyFactor(persona, now)));
+  const dailyCap = Math.max(1, Math.floor(healthCap * dailyFactor(persona, now)));
   const sentToday = await countMessagesSince(device.id, startOfDayJakartaUtc(now), queryFn);
 
   if (sentToday >= dailyCap) {
     return denial('daily_cap_reached', {
-      healthScore, dailyCap, sentToday, warmupDay,
+      healthScore, dailyCap, sentToday,
       retryAfterMs: msUntilNextDayWindow(persona, now) + Math.round(Math.random() * 10 * 60_000),
     });
   }
 
   const sentLastMinute = await countMessagesSince(device.id, new Date(now.getTime() - 60_000), queryFn);
   if (sentLastMinute >= (urgent ? URGENT_PER_MINUTE_LIMIT : PER_MINUTE_LIMIT)) {
-    return denial('rate_limit_per_minute', { healthScore, dailyCap, sentToday, warmupDay });
+    return denial('rate_limit_per_minute', { healthScore, dailyCap, sentToday });
   }
 
   const inFridayLunch = options.blockFridayLunch
@@ -307,7 +262,7 @@ export async function canSendMessage(
     : false;
   if (!urgent && (!isWithinPersonaWindow(persona, now) || inFridayLunch)) {
     return denial('outside_sending_window', {
-      healthScore, dailyCap, sentToday, warmupDay,
+      healthScore, dailyCap, sentToday,
       retryAfterMs: msUntilWindowOpens(persona, now) + Math.round(Math.random() * 10 * 60_000),
     });
   }
@@ -318,22 +273,10 @@ export async function canSendMessage(
     const fatigue = evaluateFatigue(persona, await getBurstState(device.id, queryFn), now);
     if (fatigue.resting && fatigue.restEndsAt) {
       return denial('resting', {
-        healthScore, dailyCap, sentToday, warmupDay,
+        healthScore, dailyCap, sentToday,
         retryAfterMs: fatigue.restEndsAt.getTime() - now.getTime() + Math.round(Math.random() * 60_000),
       });
     }
-  }
-
-  if (!urgent && options.isProactive && !stage.proactiveAllowed && !options.allowWarmupOverride) {
-    return denial('proactive_not_allowed_in_warmup', { healthScore, dailyCap, sentToday, warmupDay });
-  }
-
-  if (!urgent && options.hasMedia && !stage.mediaAllowed && !options.allowWarmupOverride) {
-    return denial('media_not_allowed_in_warmup', { healthScore, dailyCap, sentToday, warmupDay });
-  }
-
-  if (options.allowWarmupOverride && ((!stage.proactiveAllowed && options.isProactive) || (!stage.mediaAllowed && options.hasMedia))) {
-    logger.warn('User approved warm-up restriction override for one message', { deviceKey, deviceId: device.id, warmupDay });
   }
 
   if (!urgent && options.content !== undefined) {
@@ -355,12 +298,11 @@ export async function canSendMessage(
         healthScore,
         dailyCap,
         sentToday,
-        warmupDay,
       };
     }
   }
 
-  const typing = urgent
+  const typing = urgent || !persona.typingEnabled
     ? { shouldSimulate: false, durationMs: 0 }
     : getTypingSimulation(options.hasMedia ? 0 : (options.content?.length ?? 0), persona.typingMsPerChar);
 
@@ -370,7 +312,6 @@ export async function canSendMessage(
     healthScore,
     dailyCap,
     sentToday,
-    warmupDay,
   });
 
   return {
@@ -380,6 +321,5 @@ export async function canSendMessage(
     healthScore,
     dailyCap,
     sentToday,
-    warmupDay,
   };
 }

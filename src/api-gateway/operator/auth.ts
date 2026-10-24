@@ -32,7 +32,8 @@ const cookieOptions = (config: OperatorConfig): CookieOptions => ({ httpOnly: tr
 export function clearSessionCookie(response: Response, config: OperatorConfig): void { response.clearCookie(config.cookieName, cookieOptions(config)); }
 
 export function checkOrigin(request: Request, config: OperatorConfig): void {
-  if (request.get('Origin') !== config.origin || (request.get('Sec-Fetch-Site') && request.get('Sec-Fetch-Site') !== 'same-origin')) {
+  const allowedOrigins = config.origins ?? [config.origin];
+  if (!allowedOrigins.includes(request.get('Origin') ?? '') || (request.get('Sec-Fetch-Site') && request.get('Sec-Fetch-Site') !== 'same-origin')) {
     throw new OperatorError(403, 'ORIGIN_NOT_ALLOWED', 'Origin tidak diizinkan.');
   }
 }

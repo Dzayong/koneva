@@ -170,14 +170,15 @@ export default function BillingPage() {
   const [created, setCreated] = useState<{ invoice: Invoice; payment: BillingState["payment"] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [verifyOpen, setVerifyOpen] = useState(false);
-  const [dokuReturned] = useState<string | null>(() => {
+  const [checkoutReturned] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
-    return new URLSearchParams(window.location.search).get("doku");
+    const params = new URLSearchParams(window.location.search);
+    return params.get("duitku") ?? params.get("doku");
   });
 
   useEffect(() => {
-    if (dokuReturned) window.history.replaceState(null, "", "/billing");
-  }, [dokuReturned]);
+    if (checkoutReturned) window.history.replaceState(null, "", "/billing");
+  }, [checkoutReturned]);
 
   if (!permsLoading && !can("billing:manage")) return <p className="text-muted-foreground">Hanya pemilik workspace yang bisa membuka Tagihan.</p>;
   if (isLoading || !data) return <div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-40" /><Skeleton className="h-64" /></div>;
@@ -192,21 +193,21 @@ export default function BillingPage() {
       } catch { /* Mutation error is shown below. */ }
     };
     return <div className="mx-auto max-w-4xl space-y-6">
-      <div><h1 className="text-2xl font-semibold tracking-tight">Saldo PAYG</h1><p className="text-sm text-muted-foreground">Paket bulanan sudah digantikan saldo prabayar. Saldo dipotong hanya setelah WhatsApp mengonfirmasi pesan terkirim.</p></div>
-      {dokuReturned && <div role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">{dokuReturned === "cancel" ? "Pembayaran dibatalkan. Saldo belum berubah." : "Menunggu konfirmasi DOKU. Saldo akan masuk otomatis setelah pembayaran terverifikasi."}</div>}
+      <div><h1 className="text-2xl font-semibold tracking-tight">Saldo</h1><p className="text-sm text-muted-foreground">Paket bulanan sudah digantikan saldo prabayar. Saldo dipotong hanya setelah WhatsApp mengonfirmasi pesan terkirim.</p></div>
+      {checkoutReturned && <div role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">{checkoutReturned === "cancel" ? "Pembayaran dibatalkan. Saldo belum berubah." : "Menunggu konfirmasi pembayaran. Saldo akan masuk otomatis setelah pembayaran terverifikasi."}</div>}
       <section className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Saldo tersedia</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.available_idr)}</p></div>
         <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Saldo ditahan untuk status belum pasti</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.reserved_idr)}</p></div>
         <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Tarif per pesan berhasil</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.price_per_message_idr ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">Balasan AI memakai tarif yang sama.</p></div>
       </section>
       <section className="rounded-xl border bg-card p-5">
-        <div className="flex items-center gap-2"><Wallet className="h-5 w-5 text-primary" aria-hidden /><h2 className="font-semibold">Isi saldo lewat DOKU</h2></div>
+        <div className="flex items-center gap-2"><Wallet className="h-5 w-5 text-primary" aria-hidden /><h2 className="font-semibold">Isi saldo lewat Duitku</h2></div>
         <form className="mt-4 flex flex-col gap-3 sm:flex-row" onSubmit={(event) => void startTopup(event)}>
           <label className="sr-only" htmlFor="payg-topup-amount">Nominal isi saldo</label>
           <input id="payg-topup-amount" type="number" min={10000} max={10000000} step={1000} required value={topupAmount} onChange={(event) => setTopupAmount(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2" />
-          <Button type="submit" disabled={topup.isPending || !Number.isInteger(amount) || amount < 10000 || amount > 10000000}>{topup.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Lanjutkan ke DOKU</Button>
+          <Button type="submit" disabled={topup.isPending || !Number.isInteger(amount) || amount < 10000 || amount > 10000000}>{topup.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Lanjutkan ke Duitku</Button>
         </form>
-        {topup.error && <p role="alert" className="mt-3 text-sm text-destructive">{apiFailure(topup.error).code === "DOKU_NOT_CONFIGURED" ? "DOKU belum dikonfigurasi di server." : topup.error.message}</p>}
+        {topup.error && <p role="alert" className="mt-3 text-sm text-destructive">{apiFailure(topup.error).code === "DUITKU_NOT_CONFIGURED" ? "Duitku sandbox belum dikonfigurasi di server." : topup.error.message}</p>}
         <p className="mt-2 text-xs text-muted-foreground">Isi saldo Rp10.000–Rp10.000.000 per transaksi. Pesan gagal pasti tidak dikenai biaya; jika hasil pengiriman tidak pasti, saldonya ditahan untuk pemeriksaan dan tidak dikirim ulang otomatis.</p>
       </section>
       <section className="rounded-xl border bg-card p-5"><h2 className="font-semibold">Pemakaian per device</h2>
@@ -261,13 +262,13 @@ export default function BillingPage() {
         </section>
       )}
 
-      {dokuReturned && dokuReturned !== "cancel" && !shown && (
+      {checkoutReturned && checkoutReturned !== "cancel" && !shown && (
         <div role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-5">
           <p className="font-medium">Menunggu konfirmasi pembayaran</p>
           <p className="mt-1 text-sm text-muted-foreground">Jika Anda baru menyelesaikan pembayaran via DOKU, status akan diperbarui otomatis setelah diverifikasi.</p>
         </div>
       )}
-      {shown && <Payment invoice={shown.invoice} payment={shown.payment} dokuReturned={dokuReturned} />}
+      {shown && <Payment invoice={shown.invoice} payment={shown.payment} dokuReturned={checkoutReturned} />}
 
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

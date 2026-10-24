@@ -10,7 +10,7 @@ import { listAutoReplyRules } from './routes/auto-reply.routes';
 import { dashboardStats } from './routes/stats.routes';
 import { broadcastSchema } from './routes/broadcast.routes';
 import { scheduledCampaignSchema } from './routes/campaign.routes';
-import { listMessages, retryMessage } from './services/message.service';
+import { listInboxConversations, listInboxMessages, listMessages, queueInboxReply, retryMessage } from './services/message.service';
 import { renderMessageTemplate, templateVariables } from '../shared/utils/message-template';
 
 type Query = (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
@@ -153,4 +153,42 @@ test('message list can be scoped to one exact WhatsApp group conversation', asyn
   assert.match(sql[0]!, /device_key = \$2/);
   assert.match(sql[0]!, /chat_jid = \$3/);
   assert.deepEqual(result.data.map((message) => message.id), ['group-message']);
+});
+
+test('Inbox conversation list groups by device and chat, excludes system messages, and applies workspace filters', async () => {
+  const sql: string[] = [];
+  const params: unknown[][] = [];
+  let call = 0;
+  database.query = async (text, values) => {
+    sql.push(text); params.push([...(values ?? [])]);
+    return call++ === 0 ? { rows: [{ total: 2 }] } : { rows: [{ chat_key: '6281234567890@s.whatsapp.net' }] };
+  };
+  const result = await listInboxConversations(tenant.id, { device_key: 'WAPI-1', search: 'halo', limit: 30, offset: 0 });
+  assert.match(sql[0]!, /GROUP BY m\.device_key/);
+  assert.match(sql[0]!, /system_otp = false AND m\.system_notification = false/);
+  assert.match(sql[1]!, /ROW_NUMBER\(\) OVER \(PARTITION BY m\.device_key/);
+  assert.match(sql[1]!, /ORDER BY created_at DESC/);
+  assert.deepEqual(params[0], [tenant.id, 'WAPI-1', '%halo%']);
+  assert.deepEqual(params[1], [tenant.id, 'WAPI-1', '%halo%', 30, 0]);
+  assert.equal(result.pagination.total, 2);
+});
+
+test('Inbox message history is constrained to one tenant, device, and chat key', async () => {
+  const sql: string[] = [];
+  let call = 0;
+  database.query = async (text, values) => {
+    sql.push(text);
+    if (call++ === 0) assert.deepEqual(values, [tenant.id, 'WAPI-1', '120363000000-123456@g.us']);
+    return call === 1 ? { rows: [{ total: 1 }] } : { rows: [{ id: 'group-message' }] };
+  };
+  const result = await listInboxMessages(tenant.id, { device_key: 'WAPI-1', chat_key: '120363000000-123456@g.us', limit: 100, offset: 0 });
+  assert.match(sql[0]!, /tenant_id = \$1 AND device_key = \$2/);
+  assert.match(sql[0]!, /system_otp = false AND system_notification = false/);
+  assert.deepEqual(result.data.map((message) => message.id), ['group-message']);
+});
+
+test('Inbox reply rejects unsupported source addresses before attempting to queue a send', async () => {
+  database.query = async () => ({ rows: [{ device_key: 'WAPI-1', from_number: 'unknown@lid', chat_jid: 'unknown@lid' }] });
+  await assert.rejects(() => queueInboxReply(tenant.id, '00000000-0000-0000-0000-000000000001', 'Halo'),
+    (error) => error instanceof ServiceError && error.code === 'INBOX_REPLY_UNAVAILABLE');
 });

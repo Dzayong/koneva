@@ -21,14 +21,10 @@ export const signupSchema = z.object({
   password: z.string().min(10, 'Password must be at least 10 characters').max(128),
   name: z.string().trim().min(1).max(120),
   workspace_name: z.string().trim().min(2).max(80).optional(),
-  verification_method: z.enum(['email', 'whatsapp']).default('email'),
-  phone_number: z.string().trim().min(8).max(24).regex(/^\+?[0-9\s().-]+$/).optional(),
+  verification_method: z.literal('whatsapp').default('whatsapp'),
+  phone_number: z.string().trim().min(8).max(24).regex(/^\+?[0-9\s().-]+$/),
   accept_terms: z.literal(true, { error: 'You must accept the terms to create an account' }),
-}).strict().superRefine((value, ctx) => {
-  if (value.verification_method === 'whatsapp' && !value.phone_number) {
-    ctx.addIssue({ code: 'custom', path: ['phone_number'], message: 'Nomor WhatsApp wajib diisi untuk verifikasi lewat WhatsApp.' });
-  }
-});
+}).strict();
 
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(255),
@@ -61,9 +57,7 @@ router.post('/signup', limited(60 * 60_000, 10), validate({ body: signupSchema }
   const pending = await signup(body);
   let resendAfter: number;
   try {
-    const verification = body.verification_method === 'whatsapp'
-      ? await requestSignupWhatsAppVerification(pending.email, request.ip)
-      : await requestEmailVerification(pending.user_id, request.ip);
+  const verification = await requestSignupWhatsAppVerification(pending.email, request.ip);
     resendAfter = 'resend_after' in verification ? verification.resend_after : 60;
   } catch (error) {
     // A restarted pending signup may reuse an already-sent, still-valid OTP during its cooldown.
@@ -71,7 +65,7 @@ router.post('/signup', limited(60 * 60_000, 10), validate({ body: signupSchema }
     else throw error;
   }
   response.status(202).json({ success: true, data: {
-    verification_required: true, verification_method: body.verification_method, email: pending.email,
+    verification_required: true, verification_method: 'whatsapp', email: pending.email,
     resend_after: resendAfter,
   } });
 });

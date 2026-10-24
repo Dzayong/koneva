@@ -1,4 +1,5 @@
 import { KonevaLogo } from "@/components/brand/koneva-logo";
+import { LegalLinksFooter } from "@/components/layout/legal-links-footer";
 
 // Local assets only (dashboard/public/, see ASSETS.md for source/license/creator/date); never hotlinked.
 const BACKGROUND_IMAGE = {
@@ -15,7 +16,7 @@ export function AuthShell({
   background?: keyof typeof BACKGROUND_IMAGE;
 }) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-muted/50 px-4 py-10">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-muted/50">
       {background && (
         <>
           <div
@@ -29,12 +30,15 @@ export function AuthShell({
           <div aria-hidden data-testid="auth-background-overlay" className="absolute inset-0 bg-black/40" />
         </>
       )}
-      <div className="relative z-10 w-full max-w-md space-y-6">
-        <div className="flex items-center justify-center">
-          <KonevaLogo markClassName="h-10 w-10" textClassName={background ? "text-xl text-white" : "text-xl"} />
+      <main className="relative z-10 flex flex-1 items-center justify-center px-4 py-10">
+        <div className="w-full max-w-md space-y-6">
+          <div className="flex items-center justify-center">
+            <KonevaLogo markClassName="h-10 w-10" textClassName={background ? "text-xl text-white" : "text-xl"} />
+          </div>
+          {children}
         </div>
-        {children}
-      </div>
+      </main>
+      <LegalLinksFooter className="relative z-10 bg-background/90" />
     </div>
   );
 }

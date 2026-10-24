@@ -6,7 +6,7 @@ export const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: "Apakah ini WhatsApp API resmi dan apakah nomor bisa diblokir?",
-    a: "Bukan. Layanan ini memakai koneksi tidak resmi dan tidak berafiliasi dengan WhatsApp maupun Meta. WhatsApp menyatakan penggunaan aplikasi tidak resmi dapat berujung pada pembatasan atau pemblokiran nomor. Kami mengurangi risikonya lewat pemanasan bertahap, jeda acak seperti manusia, batas kirim, dan pemantauan kesehatan nomor, tetapi kami tidak menjamin nomor bebas blokir.",
+    a: "Bukan. Layanan ini memakai koneksi tidak resmi dan tidak berafiliasi dengan WhatsApp maupun Meta. WhatsApp menyatakan penggunaan aplikasi tidak resmi dapat berujung pada pembatasan atau pemblokiran nomor. KONEVA menyediakan pencatatan izin penerima, opt-out, dan kontrol pengiriman, tetapi tidak menjamin nomor bebas blokir.",
   },
   {
     q: "Apa bedanya dengan WhatsApp Business API resmi?",
@@ -15,10 +15,6 @@ export const FAQ: Array<{ q: string; a: string }> = [
   {
     q: "Bagaimana cara menyambungkan nomor?",
     a: "Buat akun, tambahkan nomor di dashboard, lalu pindai kode QR dari WhatsApp: Perangkat tertaut, Tautkan perangkat. Sesi tersimpan sehingga tidak perlu memindai ulang setiap hari. Nomor tetap bisa dipakai di HP Anda seperti biasa.",
-  },
-  {
-    q: "Apa itu pemanasan nomor?",
-    a: "Nomor yang baru disambungkan dilatih bertahap. Pada hari 1 sampai 2 nomor hanya membalas orang yang menulis lebih dulu, lalu batas kirim naik dari 5, 10, 20, hingga 50 pesan per hari. Tujuannya membuat pola pemakaian terlihat wajar.",
   },
   {
     q: "Bagaimana dengan OTP yang harus cepat?",

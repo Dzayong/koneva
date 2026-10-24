@@ -15,7 +15,7 @@ export interface AutoReplyRule {
   tenant_id: string;
   device_key: string;
   trigger: { type: 'keyword' | 'regex' | 'all'; pattern: string };
-  response: { type: 'text' | 'template' | 'ai'; content: string; delay_ms: number };
+  response: { type: 'text' | 'template' | 'ai' | 'ai_general'; content: string; delay_ms: number };
   is_active: boolean;
 }
 
@@ -174,7 +174,7 @@ export async function processAutoReply(
   const contactName = (contactResult.rows[0] as { name?: string } | undefined)?.name;
   let content: string;
   try {
-    content = rule.response.type === 'ai'
+    content = rule.response.type === 'ai' || rule.response.type === 'ai_general'
       ? await generateAiReply(rule.id, message.deviceKey, message.content)
       : rule.response.type === 'template'
         ? renderMessageTemplate(rule.response.content, {
@@ -184,7 +184,7 @@ export async function processAutoReply(
         : rule.response.content;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    if (rule.response.type === 'ai') {
+    if (rule.response.type === 'ai' || rule.response.type === 'ai_general') {
       await logActivity(queryFn, rule, message, '[AI reply unavailable]', 'failed', reason, null);
       log.error('AI auto-reply generation failed', { ruleId: rule.id, error: reason });
       return false;

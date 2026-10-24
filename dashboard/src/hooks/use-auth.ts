@@ -22,8 +22,8 @@ export function useAuth() {
   );
 
   const loginWithSession = useCallback(
-    (result: AuthResult, destination = "/dashboard") => {
-      api.setSession(result.token, result.workspaces[0]?.id);
+    (result: AuthResult, destination = "/dashboard", rememberMe = true) => {
+      api.setSession(result.token, result.workspaces[0]?.id, rememberMe);
       queryClient.clear();
       router.push(destination);
     },

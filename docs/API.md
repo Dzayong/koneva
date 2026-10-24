@@ -25,6 +25,10 @@ fields on send and QR responses remain temporarily for frontend compatibility.
 | GET | `/api/v1/messages` | tenant | filters: `device_key`, `status`, `direction`, `search` |
 | GET | `/api/v1/messages/:id` | tenant | includes `status_history` |
 | POST | `/api/v1/messages/:id/retry` | tenant | retry failed/blocked messages; `delivery_uncertain` is refused with `DELIVERY_UNCERTAIN_MANUAL_REVIEW_REQUIRED` because WhatsApp may already have accepted it |
+| GET | `/api/v1/inbox/devices` | signed-in user | minimal device list for Inbox; requires `inbox:read` |
+| GET | `/api/v1/inbox/conversations` | signed-in user | grouped by device and WhatsApp chat; requires `inbox:read` |
+| GET | `/api/v1/inbox/messages` | signed-in user | requires `device_key` and exact `chat_key`; requires `inbox:read` |
+| POST | `/api/v1/inbox/messages/:id/reply` | signed-in user | recipient/device are derived from the inbound message; requires `messages:reply` |
 | POST | `/api/v1/broadcast` | tenant | queue up to 500 recipients |
 | GET | `/api/v1/contacts/:id/consent` | tenant | read consent and its audit events |
 | PUT | `/api/v1/contacts/:id/consent` | signed-in workspace user | manual changes require `source_note`; API keys cannot record consent |
@@ -183,8 +187,11 @@ inbound, outbound, delivered, and read counts.
 
 Bot containers load active `auto_reply_rules` for their device at startup.
 Trigger types are case-insensitive `keyword`, `regex`, and `all`. Responses may
-be plain text or templates, use the rule delay together with anti-ban controls,
-and are recorded in `messages` plus `auto_reply_logs` (`sent`, `blocked`, or
+be fixed text/templates, general AI (`ai_general`), or AI with the rule's single
+role/instructions description (`ai`). General AI receives only the triggering
+message and is instructed not to invent missing details. AI needs an enabled
+system provider; credentials stay in the API gateway. Replies use the rule delay
+together with anti-ban controls and are recorded in `messages` plus `auto_reply_logs` (`sent`, `blocked`, or
 `failed`). CRUD changes publish a device-specific Redis signal, so the relevant
 bot reloads active rules without a restart. Rule creation verifies that the
 target device belongs to the authenticated tenant; update, toggle, and deletion
@@ -197,25 +204,28 @@ are also tenant scoped.
 People sign in to the console with an account; systems call the API with a key. The two are separate
 credentials. Both reach the same `/api/v1` routes, and every route checks a permission.
 
-**Sign up** reserves a pending account and sends a one-time code by email by default. A person may
-instead choose WhatsApp and provide an Indonesian number. Confirming a WhatsApp code verifies that
-number and activates the account/workspace, but does not verify the email; email verification remains
-required for actions such as inviting teammates or billing, and password recovery still uses email.
-Until either selected code is confirmed, the account cannot log in and has no workspace, trial,
+**Sign up** reserves a pending account and sends a one-time code to the required Indonesian WhatsApp
+number. Confirming the WhatsApp code verifies that number and activates the account/workspace, but
+does not verify the email; email verification remains required for actions such as inviting teammates
+or billing, and password recovery uses the registered email. Until the WhatsApp code is confirmed,
+the account cannot log in and has no workspace, trial,
 membership, or session. A new workspace is a trial (1 number, 200 messages) until an operator raises
 the limits.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/auth/signup` | `{ email, password (10+ chars), name, workspace_name?, verification_method?: "email"|"whatsapp", phone_number?, accept_terms: true }`; WhatsApp selection requires `phone_number`. Returns `202 { verification_required, verification_method, email, resend_after }`. Terms include that this service connects through an unofficial channel. 10 per hour per IP. |
+| POST | `/auth/signup` | `{ email, password (10+ chars), name, workspace_name?, verification_method?: "whatsapp", phone_number, accept_terms: true }`; WhatsApp number is required. Returns `202 { verification_required, verification_method, email, resend_after }`. Terms include that this service connects through an unofficial channel. 10 per hour per IP. |
 | POST | `/auth/signup/verification/request` | `{ email, channel?: "email"|"whatsapp" }`; resends a pending signup OTP subject to cooldown/rate limits. |
 | POST | `/auth/signup/verification/confirm` | `{ email, code, channel?: "email"|"whatsapp" }`; consumes the selected OTP, activates the account and returns the first session/workspace. WhatsApp confirmation leaves `email_verified_at` unset. |
 | POST | `/auth/login` | `{ email, password }`. Five wrong attempts lock that email and IP for 15 minutes. |
+| POST | `/auth/password-reset/request` | `{ email }`; sends a 6-digit reset code by email if the account exists. Response shape is identical for unknown addresses. Code expires in 30 minutes; resend is rate limited. |
+| POST | `/auth/password-reset/confirm` | `{ email, code, new_password (10+ chars) }`; consumes the code once, updates the password, and revokes all existing sessions for that account. |
 | POST | `/auth/logout` | Revokes the session in the `Authorization` header. |
 | GET | `/auth/me` | Current user, workspace, role and permission list. |
 
-A session token (`wgs_...`) goes in `Authorization: Bearer <token>`. It lasts 14 days and extends while you
-keep working. If you belong to several workspaces, select one with the `x-workspace` header (workspace id).
+A session token (`wgs_...`) goes in `Authorization: Bearer <token>`. The dashboard's “Remember me”
+keeps it for 14 days when selected; otherwise it uses browser-session storage. If you belong to several
+workspaces, select one with the `x-workspace` header (workspace id).
 `GET /api/v1/tenant` never returns the legacy tenant key to a signed-in person.
 
 **Roles**
@@ -224,13 +234,13 @@ keep working. If you belong to several workspaces, select one with the `x-worksp
 |---|---|
 | `owner` | The customer who owns the workspace (one per workspace). Everything, including billing, the team, and every Developer power, without a second membership |
 | `developer` | Technical integration: add, configure, connect, pause and **delete** numbers, send messages, webhooks, content, API keys. Cannot touch billing or the team, and cannot invite, remove or promote anyone |
+| `cs` | Reads and replies to conversations from all workspace devices through Inbox only. Cannot send arbitrary messages, broadcast, run campaigns, or access settings |
 | `admin` (legacy) | Existing memberships only: everything except billing. Can no longer be assigned or invite |
 | `viewer` (legacy) | Existing memberships only: read numbers and messages, no QR. Can no longer be assigned |
 
 Inviting, changing the team and ordering (`POST /billing/orders`) answer `403 EMAIL_NOT_VERIFIED` until the Owner has verified their email. `/auth/me` returns `user.email_verified`.
 
-Owner and Developer are memberships of a workspace, not account types: one account can be Owner of one workspace and
-Developer of another. The KONEVA system administrator is a separate operator account (Operator Panel), not a role here.
+Workspace roles are memberships, not account types: one account can hold different roles across workspaces. The KONEVA system administrator is a separate operator account (Operator Panel), not a role here.
 See [ROLES.md](ROLES.md).
 
 A route with no permission rule is denied. The QR code counts as a write-level permission because whoever
@@ -291,10 +301,11 @@ one rhythm. Editing pacing by hand afterwards makes the number `custom`.
 
 ### New numbers and replies
 
-A number in its first two days cannot start conversations (warm-up). Recent inbound messages do not
-create marketing consent; promotional sends and automated replies still require recorded opt-in. A
-message that has to wait stays `queued` and `error_message` says why (for example
-`proactive_not_allowed_in_warmup`); it is sent automatically once allowed.
+A connected online number can start conversations and send media immediately; no send block is based
+on device age. Recent inbound messages do not create marketing consent; promotional sends and
+automated replies still require recorded opt-in. A message that has to wait stays `queued`; the
+message status and error explain the delay. Device status, health-based daily caps, send-rate limits,
+consent, active hours, and content checks still apply.
 
 ### Consent and transactional sends
 
@@ -311,10 +322,10 @@ requests cannot classify a message as an OTP: `otp_code` is rejected. Tenant-sen
 the ordinary queue and rules. Only OTPs generated by KONEVA's internal verification flow receive the
 platform-managed transactional handling.
 
-A new number is capped by warm-up (about 4-5
-messages on day 1), so a fresh number is not ready for OTP traffic. Templated, high-volume OTP
-sending to many strangers is the pattern WhatsApp is most likely to treat as automated; volume and
-risk on your own numbers are your responsibility.
+There is no device-age delay before sending. Health-based daily caps and general sending controls
+still apply from the start. Tenant-sent OTP text follows the same consent and sending rules as other
+messages. Templated, high-volume OTP sending to many strangers may be treated as automated; volume
+and risk on your own numbers are your responsibility.
 
 ### OTP messages
 
@@ -370,7 +381,7 @@ maintenance endpoints below remain separate; their admin key never authenticates
 Legacy package billing supports manual confirmation and DOKU checkout.
 
 **PAYG (feature-gated):** When the superadmin enables PAYG in `/operator/system/payg`, package checkout is retired
-for customer workspaces. Owners top up Rp10.000–Rp10.000.000 through the DOKU sandbox checkout below. The configured
+for customer workspaces. Owners top up Rp10.000–Rp10.000.000 through the Duitku POP sandbox checkout below. The configured
 fixed IDR tariff is reserved atomically before a message enters the queue, charged only on a WhatsApp send/delivery/read
 receipt, returned for a definite failure, and held for an ambiguous result until a late receipt resolves it. AI replies
 use the same per-message tariff; KONEVA absorbs the AI provider cost. Unreserved old queue rows are stopped at cutover
@@ -397,7 +408,7 @@ are historical records and are never rewritten by a later price change either wa
 | `GET /public/plans` | anyone | Published plans, with `quota_headline`/`quota_note`. Prices are `null` until the operator marks them final. |
 | `GET /api/v1/billing` | owner | Subscription, usage (messages held/exempt included, numbers, members), invoices, payment instructions. |
 | `POST /api/v1/billing/orders` `{plan, cycle: "monthly"}` | owner | Creates an invoice. Replaces the previous unpaid one. `cycle: "yearly"` is refused (see above). |
-| `POST /api/v1/billing/payg/topup-checkout` `{amount_idr}` | verified owner | Creates a DOKU checkout for a PAYG wallet top-up (available only when PAYG is enabled). |
+| `POST /api/v1/billing/payg/topup-checkout` `{amount_idr}` | verified owner | Creates a Duitku POP sandbox checkout for a PAYG wallet top-up (available only when PAYG is enabled and Duitku credentials are configured). |
 | `POST /api/v1/billing/student-request` `{note}` | owner | Asks for student verification (campus/school email required). |
 | `GET /auth/me` | any member | Includes `subscription` (status, days left) for the banner. |
 
@@ -422,7 +433,7 @@ Operator (admin key): `GET/PATCH /plans`, `GET /subscriptions`, `GET /invoices`,
 `POST /api/v1/message/send` and `POST /api/v1/broadcast` accept `media_url` (public `https` address; private
 addresses are rejected) and `media_type` (`image` default, `video`, `document`). `message` then becomes the
 caption and may be empty. Links written in `message` are clickable for the recipient; no link preview card is
-generated. Numbers still in warm-up (days 1-4) cannot send media (`media_not_allowed_in_warmup`).
+generated. A device may send media as soon as it is connected and online; general sending controls still apply.
 
 `POST /api/v1/broadcast` requires an `Idempotency-Key` header (8–128 letters, digits, `.`, `:`, `_`, or `-`).
 Retry a request with the same key and identical body after a timeout; KONEVA reuses the same broadcast and
@@ -561,7 +572,7 @@ process/event-loop metrics under the `wa_bot_` prefix.
 ### `GET /status`
 
 Full device status: connection state + the device's row from the database
-(health score, warm-up, pause state). The device row is served from a 3s
+(health score and pause state). The device row is served from a 3s
 Redis cache — display-only, never used for anti-ban decisions.
 
 ```json
@@ -579,7 +590,6 @@ Redis cache — display-only, never used for anti-ban decisions.
     "tenantId": "8fca6485-...",
     "status": "online",
     "healthScore": 72,
-    "warmupCompletedAt": null,
     "pausedUntil": null
   },
   "uptimeSeconds": 3600.2
@@ -589,7 +599,7 @@ Redis cache — display-only, never used for anti-ban decisions.
 ### `POST /send`
 
 Queues a message (BullMQ) for this device. Actual sending is gated by
-`anti-ban.ts` (rate limits, warm-up caps, sending window, content rules) —
+`anti-ban.ts` (health-based daily caps, rate limits, sending window, content rules) —
 `202` means "accepted into the queue", not "delivered". Rate-limited to 60
 requests/minute per bot-container.
 

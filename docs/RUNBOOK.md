@@ -60,7 +60,7 @@ invisible to it.
 for it gets denied with reason `device_paused` (visible in
 `wa_bot_anti_ban_denials_total{reason="device_paused"}` or the worker log).
 
-### Rate limits / warm-up caps silently under-count, or content-window checks misfire
+### Rate limits silently under-count, or content-window checks misfire
 
 **Symptom**: `canSendMessage()` returns a denial reason that doesn't match
 reality — e.g. `outside_sending_window` when it's clearly daytime, or the

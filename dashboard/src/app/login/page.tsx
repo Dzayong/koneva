@@ -17,6 +17,7 @@ export default function LoginPage() {
   const { loginWithSession } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -25,7 +26,7 @@ export default function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      loginWithSession(await api.login(email.trim(), password));
+      loginWithSession(await api.login(email.trim(), password), "/dashboard", rememberMe);
     } catch (err) {
       const failure = apiFailure(err);
       setError(
@@ -54,6 +55,19 @@ export default function LoginPage() {
               <Label htmlFor="password">Kata sandi</Label>
               <PasswordInput id="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
+            <label htmlFor="remember-me" className="flex cursor-pointer items-start gap-2 text-sm">
+              <input
+                id="remember-me"
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 accent-primary"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+              />
+              <span>Ingat saya selama 14 hari. Jika tidak dicentang, sesi berakhir saat browser ditutup.</span>
+            </label>
+            <p className="text-right text-sm">
+              <Link href="/forgot-password" className="font-medium text-primary underline-offset-4 hover:underline">Lupa kata sandi?</Link>
+            </p>
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           </CardContent>
           <CardFooter className="flex-col gap-3">

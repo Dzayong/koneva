@@ -31,6 +31,7 @@ import deviceContentRoutes from './routes/device-content.routes';
 import billingRoutes from './routes/billing.routes';
 import publicRoutes from './routes/public.routes';
 import dokuWebhookRoutes from './routes/doku-webhook.routes';
+import duitkuWebhookRoutes from './routes/duitku-webhook.routes';
 import { drainStudentEmailOutbox, sweepStudentVerificationDeadlines, sweepSubscriptions } from './services/billing.service';
 import { sweepQuotaHolds } from './services/message.service';
 import { auditTrail } from './middleware/audit';
@@ -106,6 +107,7 @@ app.post('/internal/ai-reply', adminAuth, async (request, response, next) => {
 app.use('/auth', authRoutes);
 app.use('/public', publicRoutes);
 app.use(dokuWebhookRoutes);
+app.use(duitkuWebhookRoutes);
 app.use('/api/v1', tenantAuth, enforceDeviceKeyScope, authorize, auditTrail, messageRoutes, deviceRoutes, tenantRoutes,
   contactRoutes, templateRoutes, analyticsRoutes, autoReplyRoutes, statsRoutes, broadcastRoutes, campaignRoutes, deviceContentRoutes, activityRoutes, keysRoutes, auditRoutes, teamRoutes, billingRoutes);
 app.use('/admin', adminNetworkGuard(), adminAuth, adminRoutes);

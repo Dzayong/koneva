@@ -44,7 +44,7 @@ plain
 - [x] Device management (CRUD)
 - [x] Message queue (BullMQ)
 - [x] Webhook dispatcher (HMAC signed)
-- [x] Anti-ban system (warm-up, rate limit, content filter)
+- [x] Outbound safeguards (rate limits, recipient consent, content filter)
 - [x] Health score tracking
 - [x] Dashboard (Next.js)
 

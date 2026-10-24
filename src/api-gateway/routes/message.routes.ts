@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { mediaUrl, MEDIA_TYPES } from '../../shared/media-url';
 import { validate } from '../middleware/validate';
-import { getMessageStatus, listMessages, queueMessage, retryMessage } from '../services/message.service';
+import { getMessageStatus, listInboxConversations, listInboxDevices, listInboxMessages, listMessages, queueInboxReply, queueMessage, retryMessage } from '../services/message.service';
 
 const router = Router();
 export const sendSchema = z.object({
@@ -18,7 +18,6 @@ export const sendSchema = z.object({
   media_type: z.enum(MEDIA_TYPES).default('image'),
   external_id: z.string().max(64).optional(),
   reply_to_message_id: z.string().uuid().optional(),
-  allow_warmup_override: z.boolean().default(false),
   priority: z.enum(['normal', 'urgent']).default('normal'),
   // Tenant-provided OTP text is not proof that KONEVA generated a transactional OTP.
   otp_code: z.never().optional(),
@@ -36,6 +35,18 @@ const listSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
+const inboxConversationSchema = z.object({
+  device_key: z.string().max(32).optional(),
+  search: z.string().trim().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+const inboxMessagesSchema = z.object({
+  device_key: z.string().min(1).max(32),
+  chat_key: z.string().min(1).max(128),
+  limit: z.coerce.number().int().min(1).max(100).default(100),
+  offset: z.coerce.number().int().min(0).default(0),
+});
 
 router.post('/message/send', validate({ body: sendSchema }), async (request, response) => {
   const input = request.validated!.body as z.infer<typeof sendSchema>;
@@ -45,6 +56,35 @@ router.post('/message/send', validate({ body: sendSchema }), async (request, res
   const data = { message_id: message.id, status: message.status as 'queued' | 'quota_hold' };
   response.status(202).json({ success: true, data, ...data });
 });
+
+router.get('/inbox/devices', async (request, response) => {
+  response.json(await listInboxDevices(request.tenant!.id));
+});
+
+router.get('/inbox/conversations', validate({ query: inboxConversationSchema }), async (request, response) => {
+  const filter = request.validated!.query as z.infer<typeof inboxConversationSchema>;
+  response.json(await listInboxConversations(request.tenant!.id, {
+    ...(filter.device_key ? { device_key: filter.device_key } : {}),
+    ...(filter.search ? { search: filter.search } : {}),
+    limit: filter.limit,
+    offset: filter.offset,
+  }));
+});
+
+router.get('/inbox/messages', validate({ query: inboxMessagesSchema }), async (request, response) => {
+  response.json(await listInboxMessages(request.tenant!.id, request.validated!.query as z.infer<typeof inboxMessagesSchema>));
+});
+
+router.post(
+  '/inbox/messages/:id/reply',
+  validate({ params: z.object({ id: z.string().uuid() }), body: z.object({ message: z.string().trim().min(1).max(4096) }).strict() }),
+  async (request, response) => {
+    const { id } = request.validated!.params as { id: string };
+    const { message: content } = request.validated!.body as { message: string };
+    const queued = await queueInboxReply(request.tenant!.id, id, content);
+    response.status(202).json({ success: true, data: { message_id: queued.id, status: queued.status } });
+  },
+);
 
 router.get('/messages', validate({ query: listSchema }), async (request, response) => {
   const filter = request.validated!.query as z.infer<typeof listSchema>;
@@ -62,11 +102,10 @@ router.get(
 
 router.post(
   '/messages/:id/retry',
-  validate({ params: z.object({ id: z.string().uuid() }), body: z.object({ allow_warmup_override: z.boolean().default(false) }).strict() }),
+  validate({ params: z.object({ id: z.string().uuid() }), body: z.object({}).strict() }),
   async (request, response) => {
     const { id } = request.validated!.params as { id: string };
-    const body = request.validated!.body as { allow_warmup_override: boolean };
-    const message = await retryMessage(request.tenant!.id, id, body.allow_warmup_override);
+    const message = await retryMessage(request.tenant!.id, id);
     response.status(202).json({ success: true, data: { message_id: message.id, status: 'queued' } });
   },
 );

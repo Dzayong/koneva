@@ -18,7 +18,6 @@ import { RotatingText } from "@/components/marketing/rotating-text";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { Stage } from "@/components/marketing/stage";
 import { UseCaseMarquee } from "@/components/marketing/use-case-marquee";
-import { WarmupFlow } from "@/components/marketing/warmup-flow";
 import { useAuth } from "@/hooks/use-auth";
 import { usePublicPlans } from "@/hooks/use-billing";
 import { track } from "@/lib/track";
@@ -32,7 +31,7 @@ const rise: Variants = {
 // Every claim maps to a shipped backend capability.
 const FEATURES = [
   { icon: Smartphone, title: "Banyak nomor, banyak workspace", text: "Satu workspace bisa punya beberapa nomor WhatsApp. Setiap nomor berjalan terpisah dengan sesinya sendiri.", span: "md:col-span-2" },
-  { icon: ShieldCheck, title: "Perlindungan nomor", text: "Pemanasan bertahap, jeda seperti orang, batas kirim harian, dan filter isi sebelum pesan dikirim. Mengurangi risiko, tidak menjamin bebas blokir.", span: "" },
+  { icon: ShieldCheck, title: "Kendali pengiriman", text: "Catat izin penerima, hormati permintaan berhenti, dan pantau batas serta status pesan. Risiko pembatasan WhatsApp tetap ada.", span: "" },
   { icon: CheckCheck, title: "Status terkirim dan dibaca", text: "Pantau tiap pesan dari antre sampai dibaca, lengkap dengan waktunya.", span: "" },
   { icon: BellRing, title: "Webhook bertanda tangan", text: "Kabar dikirim ke server Anda dengan tanda tangan HMAC yang bisa diverifikasi, termasuk saat nomor bermasalah.", span: "" },
   { icon: Gauge, title: "Skor kesiapan nomor", text: "Lihat sekilas nomor mana yang sehat, sebelum WhatsApp yang memberi tahu Anda.", span: "" },
@@ -188,10 +187,11 @@ export function LandingPage() {
           </Stagger>
         </Section>
 
-        {/* Pemanasan: sand = hangat, sabar, bertahap */}
-        <Section tone="sand" label="Pemanasan nomor" backdrop={<PhotoBackdrop src="/media/photos/seller.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[560px]" />}>
-          <Heading eyebrow="Pemanasan" title="Nomor baru dilatih dulu, bukan langsung dipakai penuh" text="Batas kirim naik bertahap. Balasan ke orang yang menulis lebih dulu selalu diperbolehkan sejak hari pertama." />
-          <div className="mt-12"><WarmupFlow /></div>
+        <Section tone="sand" label="Kontrol pengiriman" backdrop={<PhotoBackdrop src="/media/photos/seller.jpg" side="right" blend="mix-blend-multiply" className="!bottom-auto h-[560px]" />}>
+          <Heading eyebrow="Kontrol pengiriman" title="Mulai gunakan device setelah terhubung" text="Tidak ada masa tunggu berdasarkan usia nomor. Tetap kirim hanya kepada penerima yang setuju; broadcast dapat membuat WhatsApp membatasi nomor pengirim." />
+          <div className="mt-8 max-w-2xl rounded-xl border border-amber-500/40 bg-amber-500/10 p-5 text-sm leading-relaxed">
+            <strong>Risiko tetap ada.</strong> KONEVA bukan WhatsApp Business API resmi dan tidak dapat menjamin nomor bebas pembatasan. Sistem tetap menghormati opt-out serta menerapkan kontrol pengiriman umum.
+          </div>
         </Section>
 
         {/* Skor: indigo = analitis, wawasan */}

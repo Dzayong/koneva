@@ -223,7 +223,7 @@ Browser -> Next.js dashboard (:13000) --proxy--> API gateway (Express 5, :18000)
 
 - **Kirim pesan:** `POST /api/v1/message/send` -> baris `messages` (status `queued`) -> job BullMQ
   `queue:messages:<deviceKey>` (+ antrean `-urgent` untuk OTP) -> bot `queue.ts` menjalankan anti-ban
-  (`anti-ban.ts`: pemanasan, batas harian/menit, jendela persona, kelelahan, filter isi), jeda ala manusia, mengetik,
+  (`anti-ban.ts`: batas harian berbasis health score, batas per menit, jendela persona, kelelahan, filter isi), jeda, mengetik,
   lalu `sock.sendMessage`. Status/recibo diperbarui dari event Baileys; webhook dikirim (`webhook.ts`).
 - **Pesan masuk:** `incoming.ts` -> tabel `messages` (`direction='inbound'`) -> webhook `message.received`
   -> balas otomatis (`auto-reply.ts`).
@@ -251,7 +251,7 @@ Legenda verifikasi: **LIVE** = terbukti di nomor WhatsApp asli; **STACK** = dija
 | Kirim/terima pesan, status terkirim/dibaca | LIVE | Pesan masuk sempat gagal (participant `''` di Baileys), sudah diperbaiki. |
 | Jeda ala manusia, mengetik, jendela persona, kelelahan, 24 jam, jeda tetap/acak per nomor | LIVE + UNIT | Preset peran nomor (`presets.ts`). |
 | OTP `priority: urgent` cepat (~0,75 s) | LIVE | Antrean terpisah, tanpa jeda. |
-| Pemanasan (hari 1-2: 5/hari tanpa memulai; 3-4: 10; 5-7: 20 + media; 8+: 50), balasan boleh sejak hari 1 | LIVE + UNIT | |
+| Device dapat langsung dipakai setelah online; batas pengiriman umum dan pemeriksaan consent tetap berlaku | UNIT | Tidak ada lagi batas berdasarkan usia device. Risiko pembatasan WhatsApp tetap ada. |
 | Skor kesiapan v2 (5 faktor berbobot) | UNIT + STACK | `readiness.ts`. |
 | Deteksi ban/logout/error + webhook `device.status_changed` | LIVE (sintetis) + UNIT | |
 | Antrean andal (retry, penyapu pesan tersangkut) | LIVE | Bug lama: re-queue tanpa attempts. |
@@ -311,7 +311,7 @@ Legenda verifikasi: **LIVE** = terbukti di nomor WhatsApp asli; **STACK** = dija
    `reducedMotion: 'reduce'` di Playwright, bukan hanya mode normal.
 4. **Baileys quirks:** `key.participant` bisa `''`; pesan `@lid` butuh `remoteJidAlt`; riwayat lama hanya datang saat
    pairing (`syncFullHistory` + browser Desktop bila mau); query yang tidak dijawab **diselesaikan kosong**, bukan error.
-5. **Pemanasan/anti-ban tidak bisa dibuktikan di sini**: efek nyata ke WhatsApp hanya terlihat dari waktu dan data
+5. **Kontrol pengiriman tidak menjamin bebas pembatasan**: efek nyata ke WhatsApp hanya terlihat dari waktu dan data
    nyata. Semua angka adalah kehati-hatian, bukan batas terukur.
 6. **Skor kesiapan** dulu memberi poin gratis (mis. `blocked_at`/`reported_at` tak pernah terisi). Sudah dibersihkan; hanya
    kirim keluar berstatus sent/delivered/read yang dihitung.
@@ -332,7 +332,7 @@ Legenda verifikasi: **LIVE** = terbukti di nomor WhatsApp asli; **STACK** = dija
   profil bisnis), status post (>30 hari).
 - `device_commands` yang tersisa `running` setelah bot restart ditandai `failed: INTERRUPTED` (tidak diulang agar
   status tidak terposting dobel).
-- Batas: status 3/hari/device (`STATUS_DAILY_LIMIT`), media hanya setelah hari ke-5 pemanasan.
+- Batas: status 3/hari/device (`STATUS_DAILY_LIMIT`); media tersedia setelah device online dan tetap tunduk pada kontrol umum.
 
 ## 7. Keamanan dan hal yang masih menggantung
 

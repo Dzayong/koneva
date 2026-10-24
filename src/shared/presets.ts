@@ -37,7 +37,6 @@ export const PRESETS: Record<PresetId, PresetDefinition> = {
     delay_min_ms: 1_000, delay_max_ms: 5_000, burst_size: 30, rest_min_ms: 90_000, rest_max_ms: 180_000, typing_ms_per_char: 35,
     notes: [
       'Untuk OTP kirim dengan priority "urgent": tanpa jeda sama sekali.',
-      'Nomor baru tetap dibatasi warm-up sampai hari ke-8.',
       'Pesan bertemplat ke banyak nomor asing paling mudah dianggap otomatis.',
     ],
   },

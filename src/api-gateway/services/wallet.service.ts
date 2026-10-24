@@ -54,7 +54,7 @@ export async function reserveMessageCharge(db: Db, tenantId: string, messageId: 
   await db.query(`UPDATE wallet_accounts SET available_idr=available_idr-$2,
     reserved_idr=reserved_idr+$2, updated_at=now() WHERE tenant_id=$1`, [tenantId, settings.pricePerMessageIdr]);
   await db.query(`INSERT INTO wallet_ledger(tenant_id,event_type,amount_idr,available_delta_idr,reserved_delta_idr,idempotency_key,message_id,attempt_no)
-    VALUES($1,'reserve',$2,-$2,$2,$3,$4,$5)`, [tenantId, settings.pricePerMessageIdr,
+    VALUES($1,'reserve',$2::bigint,-($2::bigint),$2::bigint,$3,$4,$5)`, [tenantId, settings.pricePerMessageIdr,
     `message:${messageId}:${attemptNo}:reserve`, messageId, attemptNo]);
   return { enabled: true, priceIdr: settings.pricePerMessageIdr };
 }
@@ -123,12 +123,26 @@ export async function createWalletTopup(tenantId: string, amountIdr: number) {
     )).rows[0];
     if (!tenant) throw new ServiceError(404, 'TENANT_NOT_FOUND', 'Workspace tidak ditemukan.');
     const invoice = (await client.query<{ invoice_number: string; amount_idr: number }>(
-      `INSERT INTO wallet_topups(tenant_id,invoice_number,amount_idr)
-       VALUES($1,'TOP-'||to_char(now(),'YYYYMM')||'-'||lpad(nextval('invoice_number_seq')::text,4,'0'),$2)
+      `INSERT INTO wallet_topups(tenant_id,invoice_number,amount_idr,payment_provider)
+       VALUES($1,'TOP-'||to_char(now(),'YYYYMM')||'-'||lpad(nextval('invoice_number_seq')::text,4,'0'),$2,'duitku')
        RETURNING invoice_number,amount_idr`, [tenantId, amountIdr],
     )).rows[0]!;
     return { ...invoice, customer: { id: tenantId, name: tenant.name, email: tenant.email } };
   });
+}
+
+export async function updateWalletTopupProviderReference(invoiceNumber: string, providerReference: string): Promise<void> {
+  await pool.query(
+    `UPDATE wallet_topups SET provider_reference=$2 WHERE invoice_number=$1 AND payment_provider='duitku' AND status='unpaid'`,
+    [invoiceNumber, providerReference],
+  );
+}
+
+export async function voidWalletTopup(invoiceNumber: string): Promise<void> {
+  await pool.query(
+    `UPDATE wallet_topups SET status='void' WHERE invoice_number=$1 AND payment_provider='duitku' AND status='unpaid'`,
+    [invoiceNumber],
+  );
 }
 
 export async function creditWallet(tenantId: string, amountIdr: number, idempotencyKey: string, invoiceNumber: string) {

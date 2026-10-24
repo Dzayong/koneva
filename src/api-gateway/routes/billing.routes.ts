@@ -5,8 +5,9 @@ import config from '../../shared/config';
 import { validate } from '../middleware/validate';
 import { createOrder, getBillingState, getLatestUnpaidInvoice, requestStudentVerification } from '../services/billing.service';
 import { createDokuCheckout } from '../services/doku.service';
+import { createDuitkuCheckout } from '../services/duitku.service';
 import { ServiceError } from '../services/service-error';
-import { createWalletTopup } from '../services/wallet.service';
+import { createWalletTopup, updateWalletTopupProviderReference, voidWalletTopup } from '../services/wallet.service';
 
 const router = Router();
 
@@ -49,11 +50,17 @@ router.post('/billing/doku/checkout', requireVerifiedEmail, async (request: Requ
 
 router.post('/billing/payg/topup-checkout', requireVerifiedEmail, validate({ body: walletTopupSchema }), async (request: Request, response: Response) => {
   const { amount_idr } = request.validated!.body as z.infer<typeof walletTopupSchema>;
-  if (!config.doku.configured) throw new ServiceError(503, 'DOKU_NOT_CONFIGURED', 'Pembayaran DOKU belum dikonfigurasi di server ini.');
-  if (!config.appPublicUrl) throw new ServiceError(503, 'APP_PUBLIC_URL_NOT_CONFIGURED', 'APP_PUBLIC_URL belum diatur untuk callback DOKU.');
+  if (!config.duitku.configured) throw new ServiceError(503, 'DUITKU_NOT_CONFIGURED', 'Pembayaran Duitku sandbox belum dikonfigurasi di server ini.');
+  if (!config.appPublicUrl) throw new ServiceError(503, 'APP_PUBLIC_URL_NOT_CONFIGURED', 'APP_PUBLIC_URL belum diatur untuk callback Duitku.');
   const topup = await createWalletTopup(request.tenant!.id, amount_idr);
-  const checkout = await createDokuCheckout(topup.invoice_number, topup.amount_idr, topup.customer);
-  response.status(201).json({ success: true, data: { invoice_number: topup.invoice_number, amount_idr: topup.amount_idr, payment_url: checkout.payment_url } });
+  try {
+    const checkout = await createDuitkuCheckout(topup.invoice_number, topup.amount_idr, topup.customer);
+    await updateWalletTopupProviderReference(topup.invoice_number, checkout.reference);
+    response.status(201).json({ success: true, data: { invoice_number: topup.invoice_number, amount_idr: topup.amount_idr, payment_url: checkout.payment_url } });
+  } catch (error) {
+    await voidWalletTopup(topup.invoice_number);
+    throw error;
+  }
 });
 
 router.post('/billing/student-request', validate({ body: studentSchema }), async (request: Request, response: Response) => {

@@ -10,9 +10,10 @@ test('signup accepts Indonesian WhatsApp number formats and canonicalizes to cou
   assert.throws(() => normalizeSignupPhone('12345'), /nomor WhatsApp Indonesia yang valid/);
 });
 
-test('WhatsApp signup requires a phone number; email signup remains backward compatible', () => {
+test('new signup always requires WhatsApp verification and a phone number', () => {
   const base = { name: 'Pemilik Uji', email: 'uji@example.test', password: 'secure-password-26', accept_terms: true as const };
-  assert.equal(signupSchema.safeParse(base).success, true);
-  assert.equal(signupSchema.safeParse({ ...base, verification_method: 'whatsapp' }).success, false);
+  assert.equal(signupSchema.safeParse(base).success, false);
+  assert.equal(signupSchema.safeParse({ ...base, verification_method: 'email', phone_number: '081234567890' }).success, false);
+  assert.equal(signupSchema.safeParse({ ...base, phone_number: '081234567890' }).success, true);
   assert.equal(signupSchema.safeParse({ ...base, verification_method: 'whatsapp', phone_number: '081234567890' }).success, true);
 });

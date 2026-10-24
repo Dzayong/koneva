@@ -184,11 +184,11 @@ export interface InvoiceRow {
 }
 
 export async function createOrder(tenantId: string, planId: string, cycle: BillingCycle): Promise<InvoiceRow> {
-  const payg = await pool.query<{ enabled: boolean }>('SELECT enabled FROM payg_settings WHERE singleton=true');
-  if (payg.rows[0]?.enabled) throw new ServiceError(409, 'PACKAGES_RETIRED', 'Workspace ini memakai PAYG. Isi saldo berdasarkan pemakaian di halaman Tagihan.');
   // Annual checkout is closed for new orders (T1.1); only a subscription that is ALREADY on a yearly cycle keeps
   // reading as yearly (handled by getBillingState/invoices, never re-priced here). No yearly price is invented.
   if (cycle === 'yearly') throw new ServiceError(400, 'ANNUAL_CHECKOUT_CLOSED', 'Checkout tahunan sudah ditutup untuk pesanan baru. Pilih siklus bulanan.');
+  const payg = await pool.query<{ enabled: boolean }>('SELECT enabled FROM payg_settings WHERE singleton=true');
+  if (payg.rows[0]?.enabled) throw new ServiceError(409, 'PACKAGES_RETIRED', 'Workspace ini memakai PAYG. Isi saldo berdasarkan pemakaian di halaman Tagihan.');
   return transaction(async (client) => {
     const tenant = (await client.query<{ name: string; email: string | null }>(
       'SELECT name,email FROM tenants WHERE id = $1 FOR UPDATE', [tenantId],

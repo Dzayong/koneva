@@ -45,8 +45,6 @@ export interface SendMessageRequest {
   external_id?: string | undefined;
   /** Inbound message being answered; limits this no-START path to a recent customer-initiated chat. */
   reply_to_message_id?: string | undefined;
-  /** Explicit per-message approval to bypass only the proactive/media warm-up restriction. */
-  allow_warmup_override?: boolean | undefined;
   /** Accepted for backward compatibility but ignored as a trust signal. Server-verified transactional messages
    * receive urgent routing; caller-supplied `urgent` never bypasses consent, quota, or pacing controls. */
   priority?: 'normal' | 'urgent' | undefined;

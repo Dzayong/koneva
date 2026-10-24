@@ -80,6 +80,7 @@ function Advanced({ persona, canEdit, deviceKey }: { persona: Persona; canEdit: 
   const [wake, setWake] = useState(toTime(persona.wake_hour));
   const [sleep, setSleep] = useState(toTime(persona.sleep_hour));
   const [presence, setPresence] = useState(persona.presence_enabled);
+  const [typingEnabled, setTypingEnabled] = useState(persona.typing_enabled);
   const [pMin, setPMin] = useState(seconds(persona.presence_min_ms));
   const [pMax, setPMax] = useState(seconds(persona.presence_max_ms));
 
@@ -93,6 +94,7 @@ function Advanced({ persona, canEdit, deviceKey }: { persona: Persona; canEdit: 
     update.mutate({
       always_on: alwaysOn,
       presence_enabled: presence,
+      typing_enabled: typingEnabled,
       ...(presence ? { presence_min_ms: n(pMin), presence_max_ms: n(pMax) } : {}),
       ...(mode === "flat" ? { delay_ms: n(flat) } : { delay_min_ms: n(min), delay_max_ms: n(max) }),
       ...(alwaysOn ? {} : { wake_hour: fromTime(wake), sleep_hour: fromTime(sleep) }),
@@ -143,6 +145,17 @@ function Advanced({ persona, canEdit, deviceKey }: { persona: Persona; canEdit: 
               </div>
             )}
             {!valid && <p role="alert" className="text-sm text-destructive">Periksa angka: jeda 1 detik sampai 10 menit, angka terbesar tidak boleh lebih kecil dari yang terkecil, dan jam berhenti harus setelah jam mulai.</p>}
+          </fieldset>
+
+          <fieldset className="space-y-3 border-t pt-5">
+            <legend className="text-sm font-medium">Indikator mengetik</legend>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label htmlFor="typing-enabled">Tampilkan “sedang mengetik”</Label>
+                <p className="text-sm text-muted-foreground">Mengatur indikator yang terlihat penerima. Jeda dan pengaturan pengiriman lain tetap berlaku.</p>
+              </div>
+              <Switch id="typing-enabled" checked={typingEnabled} onCheckedChange={setTypingEnabled} disabled={!canEdit} />
+            </div>
           </fieldset>
 
           <fieldset className="space-y-3 border-t pt-5">

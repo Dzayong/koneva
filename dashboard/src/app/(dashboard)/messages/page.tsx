@@ -1,290 +1,159 @@
 "use client";
 
-import { getMessageStatusConfig } from "@/lib/utils";
-
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Loader2, MessageSquare, Search, Send, Smartphone } from "lucide-react";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, MessageSquare, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageDetail, MessageRow, messageNumber } from "@/components/messages/message-item";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { useContactNames } from "@/hooks/use-contacts";
-import { useDevices } from "@/hooks/use-devices";
-import { useMessages } from "@/hooks/use-messages";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { MessageStatusBadge } from "@/components/messages/message-status-badge";
 import { api } from "@/lib/api";
 import { apiFailure } from "@/lib/errors";
-import type { Message, MessageStatus } from "@/lib/types";
+import { formatDate, formatPhoneNumber, formatShortRelative } from "@/lib/utils";
+import { useInboxConversations, useInboxDevices, useInboxMessages } from "@/hooks/use-messages";
+import type { InboxConversation } from "@/lib/types";
 
-const PAGE_SIZE = 20;
 const ALL = "all";
+const conversationId = (item: InboxConversation) => `${item.device_key}::${item.chat_key}`;
+const peerLabel = (item: InboxConversation) => item.chat_key.endsWith("@g.us")
+  ? `Grup WhatsApp · ${item.peer_number || item.chat_key}`
+  : formatPhoneNumber(item.peer_number || item.chat_key.replace(/@.*$/, "")) || "Nomor tidak dikenal";
+const messagePreview = (item: InboxConversation) => item.type === "text" ? item.content : item.content || `[${item.type}]`;
 
-function ReplyComposer({ message, devices }: { message: Message; devices: NonNullable<ReturnType<typeof useDevices>["data"]> }) {
-  const [text, setText] = useState("");
-  const [now, setNow] = useState<number | null>(null);
+export default function MessagesPage() {
+  const [deviceKey, setDeviceKey] = useState(ALL);
+  const [search, setSearch] = useState("");
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const queryClient = useQueryClient();
+  const devices = useInboxDevices();
+  const conversations = useInboxConversations({
+    ...(deviceKey !== ALL ? { device_key: deviceKey } : {}),
+    ...(search.trim() ? { search: search.trim() } : {}),
+  });
+  const selected = useMemo(() => {
+    const rows = conversations.data ?? [];
+    return rows.find((item) => conversationId(item) === selectedKey) ?? rows[0] ?? null;
+  }, [conversations.data, selectedKey]);
+  const messages = useInboxMessages(
+    { device_key: selected?.device_key ?? "", chat_key: selected?.chat_key ?? "" },
+    !!selected,
+  );
+  const orderedMessages = useMemo(() => messages.data?.messages ?? [], [messages.data]);
+  const latestInbound = useMemo(
+    () => [...orderedMessages].reverse().find((message) => message.direction === "inbound"),
+    [orderedMessages],
+  );
+  const sourceDevice = devices.data?.find((device) => device.device_key === selected?.device_key);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const refresh = () => setNow(Date.now());
-    refresh();
-    const timer = window.setInterval(refresh, 60_000);
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
-  }, [message.id]);
-  const replyWindowOpen = now !== null && now - new Date(message.created_at).getTime() <= 24 * 60 * 60 * 1000;
-  const sourceDevice = devices.find((device) => device.device_key === message.device_key);
-  const canReply = sourceDevice?.status === "online";
-  const send = useMutation({
-    mutationFn: () => api.sendMessage({
-      device_key: message.device_key,
-      to: message.chat_jid?.endsWith("@g.us") ? message.chat_jid : message.from_number!,
-      message: text.trim(),
-      reply_to_message_id: message.id,
-    }),
-    onSuccess: (result) => {
-      toast.success(result.status === "quota_hold" ? "Balasan disimpan, menunggu kuota" : "Balasan masuk antrean");
-      setText("");
+  }, []);
+  const replyWindowOpen = !!latestInbound && now - new Date(latestInbound.created_at).getTime() <= 24 * 60 * 60 * 1000;
+  const isGroup = !!selected?.chat_key.endsWith("@g.us");
+
+  const reply = useMutation({
+    mutationFn: () => api.replyInboxMessage(latestInbound!.id, draft.trim()),
+    onSuccess: () => {
+      setDraft("");
+      toast.success("Balasan masuk antrean");
+      void queryClient.invalidateQueries({ queryKey: ["inbox"] });
       void queryClient.invalidateQueries({ queryKey: ["messages"] });
-      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
     },
     onError: (error) => toast.error("Balasan gagal dikirim", { description: apiFailure(error).message }),
   });
 
-  const isGroupMessage = message.chat_jid?.endsWith("@g.us") ?? false;
-  if (message.direction !== "inbound" || (!message.from_number && !isGroupMessage)) return null;
-  if (!replyWindowOpen) {
-    return <p className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">Waktu untuk membalas pesan ini sudah lewat 24 jam. Minta pelanggan menghubungi Anda kembali sebelum membalas.</p>;
-  }
-  if (!sourceDevice) {
-    return <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">Device yang menerima pesan ini sudah dihapus, jadi sesi WhatsApp dan jalur balas aslinya tidak tersedia lagi. Pesan baru harus dikirim dari device yang masih tersambung.</p>;
-  }
-  if (!canReply) {
-    return <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"><p>Device penerima sedang {sourceDevice.status}. Pulihkan koneksinya dari halaman Device untuk membalas melalui nomor yang sama.</p><Button asChild variant="link" className="h-auto px-0 pt-2 text-amber-950 dark:text-amber-100"><Link href={`/devices/${encodeURIComponent(sourceDevice.device_key)}`}>Buka device {sourceDevice.label || sourceDevice.device_key}</Link></Button></div>;
-  }
+  const chooseConversation = (item: InboxConversation) => {
+    setSelectedKey(conversationId(item));
+    setMobileChatOpen(true);
+  };
 
   return (
-    <form className="space-y-3 border-t pt-4" onSubmit={(event) => { event.preventDefault(); if (text.trim()) send.mutate(); }}>
-      <label htmlFor={`reply-${message.id}`} className="text-sm font-medium">{isGroupMessage ? "Balas di grup" : "Balas percakapan"}</label>
-      <Textarea id={`reply-${message.id}`} rows={3} maxLength={4096} value={text} onChange={(event) => setText(event.target.value)} placeholder="Tulis balasan ke pelanggan…" />
-      <div className="flex items-center justify-between gap-3">
-      <p className="text-xs text-muted-foreground">{isGroupMessage ? "Balasan dikirim ke grup dan mengutip pesan yang dipilih." : "Balasan ini merujuk ke pesan pelanggan yang dipilih."}</p>
-        <Button type="submit" disabled={!text.trim() || send.isPending}>{send.isPending ? "Mengirim…" : "Kirim balasan"}</Button>
-      </div>
-    </form>
-  );
-}
-
-export default function MessagesPage() {
-  const { data: devices } = useDevices();
-  const contactNames = useContactNames();
-  const [deviceKey, setDeviceKey] = useState<string>(ALL);
-  const [status, setStatus] = useState<string>(ALL);
-  const [period, setPeriod] = useState<string>(ALL);
-  const [search, setSearch] = useState("");
-  const [offset, setOffset] = useState(0);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sheetOpen, setSheetOpen] = useState(false);
-
-  const { data, isLoading, isPlaceholderData } = useMessages({
-    device_key: deviceKey === ALL ? undefined : deviceKey,
-    status: status === ALL ? undefined : (status as MessageStatus),
-    created_today: period === "today" ? true : undefined,
-    limit: PAGE_SIZE,
-    offset,
-  });
-
-  // api-gateway has no phone-number search param, so this filters the
-  // current page client-side rather than the whole result set.
-  const filtered = useMemo(() => {
-    if (!search.trim()) return data?.data ?? [];
-    const needle = search.replace(/\D/g, "");
-    return (data?.data ?? []).filter((m) => {
-      const number = m.direction === "inbound" ? m.from_number : m.to_number;
-      return number?.includes(needle) ?? false;
-    });
-  }, [data, search]);
-
-  // Default to the first message on wide screens so the detail pane is never empty.
-  const selected = filtered.find((m) => m.id === selectedId) ?? filtered[0] ?? null;
-
-  const total = data?.pagination.total ?? 0;
-  const page = Math.floor(offset / PAGE_SIZE) + 1;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
-  const resetToFirstPage = () => setOffset(0);
-
-  return (
-    <div className="space-y-6">
-      <div>
+    <div className="space-y-5">
+      <header>
         <h2 className="text-heading">Pesan</h2>
-        <p className="text-muted-foreground">Riwayat dan status pengiriman dari semua nomor</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Ringkasan menghitung pesan masuk dan keluar, semua status, non-sistem sejak 00.00 WIB. Pilih “Hari ini (WIB)” untuk melihat cakupan waktu yang sama.
-        </p>
-      </div>
+        <p className="text-muted-foreground">Semua percakapan dari device yang terhubung, dalam satu kotak masuk.</p>
+      </header>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Cari berdasarkan nomor telepon..."
-            className="pl-8"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <Input className="pl-8" placeholder="Cari nomor atau isi pesan…" value={search} onChange={(event) => setSearch(event.target.value)} />
         </div>
-        <Select
-          value={deviceKey}
-          onValueChange={(value) => {
-            setDeviceKey(value);
-            resetToFirstPage();
-          }}
-        >
-          <SelectTrigger className="w-full sm:w-48">
-            <SelectValue placeholder="Semua device" />
-          </SelectTrigger>
+        <Select value={deviceKey} onValueChange={setDeviceKey}>
+          <SelectTrigger className="w-full sm:w-56" aria-label="Pilih device"><SelectValue placeholder="Semua device" /></SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL}>Semua device</SelectItem>
-            {devices?.map((d) => (
-              <SelectItem key={d.id} value={d.device_key}>
-                {d.label || d.device_key}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={period}
-          onValueChange={(value) => {
-            setPeriod(value);
-            resetToFirstPage();
-          }}
-        >
-          <SelectTrigger className="w-full sm:w-44" aria-label="Rentang waktu">
-            <SelectValue placeholder="Semua waktu" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Semua waktu</SelectItem>
-            <SelectItem value="today">Hari ini (WIB)</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={status}
-          onValueChange={(value) => {
-            setStatus(value);
-            resetToFirstPage();
-          }}
-        >
-          <SelectTrigger className="w-full sm:w-44">
-            <SelectValue placeholder="Semua status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Semua status</SelectItem>
-            {(["queued", "sending", "sent", "delivered", "read", "failed", "blocked", "received"] as const).map(
-              (s) => (
-                <SelectItem key={s} value={s}>
-                  {getMessageStatusConfig(s).label}
-                </SelectItem>
-              ),
-            )}
+            {devices.data?.map((device) => <SelectItem key={device.device_key} value={device.device_key}>{device.label || device.device_key}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
 
-      <div className="grid overflow-hidden rounded-2xl border bg-card shadow-card lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <div className="max-h-[70vh] overflow-y-auto lg:border-r">
-          {isLoading ? (
-            <div className="space-y-px">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-20 w-full rounded-none" />
-              ))}
-            </div>
-          ) : filtered.length > 0 ? (
-            <ul>
-              {filtered.map((message) => (
-                <MessageRow
-                  key={message.id}
-                  message={message}
-                  selected={selected?.id === message.id}
-                  contactName={contactNames.get(messageNumber(message).replace(/\D/g, ""))}
-                  onSelect={() => {
-                    setSelectedId(message.id);
-                    if (window.innerWidth < 1024) setSheetOpen(true);
-                  }}
-                />
-              ))}
-            </ul>
-          ) : (
-            <div className="flex flex-col items-center gap-2 py-16">
-              <MessageSquare className="h-8 w-8 text-muted-foreground" />
-              <p className="text-muted-foreground">Tidak ada pesan</p>
-            </div>
-          )}
+      <section className="grid min-h-[68vh] overflow-hidden rounded-xl border bg-card shadow-card lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.8fr)]" aria-label="Kotak masuk percakapan">
+        <div className={`${mobileChatOpen ? "hidden lg:block" : "block"} min-h-0 border-r`}>
+          <div className="flex h-12 items-center justify-between border-b px-4 text-sm">
+            <span className="font-semibold">Percakapan</span>
+            <span className="text-muted-foreground">{conversations.data?.length ?? 0}</span>
+          </div>
+          <div className="max-h-[68vh] overflow-y-auto">
+            {conversations.isLoading ? Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} className="h-[76px] w-full rounded-none" />)
+              : (conversations.data?.length ?? 0) > 0 ? conversations.data!.map((item) => {
+                const active = selected && conversationId(selected) === conversationId(item);
+                const Arrow = item.direction === "inbound" ? ArrowDownLeft : ArrowUpRight;
+                return (
+                  <button key={conversationId(item)} type="button" onClick={() => chooseConversation(item)} aria-current={active ? "true" : undefined}
+                    className={`flex w-full flex-col gap-1.5 border-b px-4 py-3 text-left transition-colors hover:bg-accent/50 ${active ? "bg-accent" : ""}`}>
+                    <div className="flex min-w-0 items-center justify-between gap-3">
+                      <span className="flex min-w-0 items-center gap-2 text-sm font-medium"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/10 text-primary"><MessageSquare className="h-4 w-4" /></span><span className="truncate">{peerLabel(item)}</span></span>
+                      <time className="shrink-0 text-xs text-muted-foreground" title={formatDate(item.created_at)}>{formatShortRelative(item.created_at)}</time>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 pl-10">
+                      <span className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted-foreground"><Arrow className="h-3 w-3 shrink-0" />{messagePreview(item)}</span>
+                      <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"><Smartphone className="h-3 w-3" />{item.device_label || item.device_key}</span>
+                    </div>
+                  </button>
+                );
+              }) : <div className="px-6 py-16 text-center text-sm text-muted-foreground">{conversations.isError ? "Percakapan gagal dimuat." : "Belum ada percakapan."}</div>}
+          </div>
         </div>
 
-        <div className="hidden p-6 lg:block">
-          {selected ? (
-            <div className="space-y-5">
-              <MessageDetail
-                message={selected}
-                contactName={contactNames.get(messageNumber(selected).replace(/\D/g, ""))}
-              />
-              <ReplyComposer key={selected.id} message={selected} devices={devices ?? []} />
+        <div className={`${mobileChatOpen ? "flex" : "hidden lg:flex"} min-h-[68vh] flex-col`}>
+          {selected ? <>
+            <div className="flex items-center gap-3 border-b px-4 py-3 sm:px-6">
+              <Button variant="ghost" size="icon" className="h-9 w-9 lg:hidden" aria-label="Kembali ke percakapan" onClick={() => setMobileChatOpen(false)}><ArrowLeft className="h-4 w-4" /></Button>
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary"><MessageSquare className="h-5 w-5" /></div>
+              <div className="min-w-0 flex-1"><p className="truncate font-semibold">{peerLabel(selected)}</p><p className="truncate text-xs text-muted-foreground">{selected.device_label || selected.device_key} · {sourceDevice?.status === "online" ? "Online" : sourceDevice?.status || "Device"}</p></div>
             </div>
-          ) : (
-            <p className="py-16 text-center text-sm text-muted-foreground">Pilih pesan untuk membacanya.</p>
-          )}
-        </div>
-      </div>
-
-      <Sheet open={sheetOpen && !!selected} onOpenChange={setSheetOpen}>
-        <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto p-6 lg:hidden">
-          <SheetTitle className="sr-only">Pesan</SheetTitle>
-          {selected && (
-            <div className="space-y-5">
-              <MessageDetail
-                message={selected}
-                contactName={contactNames.get(messageNumber(selected).replace(/\D/g, ""))}
-              />
-              <ReplyComposer key={selected.id} message={selected} devices={devices ?? []} />
+            <div className="flex-1 space-y-3 overflow-y-auto bg-muted/20 px-4 py-5 sm:px-6">
+              {messages.hasNextPage && <div className="flex justify-center"><Button type="button" variant="outline" size="sm" disabled={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}>{messages.isFetchingNextPage ? <><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />Memuat…</> : "Muat pesan sebelumnya"}</Button></div>}
+              {messages.isLoading ? <div className="space-y-3"><Skeleton className="h-16 w-2/3" /><Skeleton className="ml-auto h-16 w-2/3" /></div>
+                : orderedMessages.map((message) => {
+                  const inbound = message.direction === "inbound";
+                  return <div key={message.id} className={`flex ${inbound ? "justify-start" : "justify-end"}`}>
+                    <div className={`max-w-[88%] rounded-xl px-3.5 py-2.5 shadow-sm sm:max-w-[75%] ${inbound ? "rounded-tl-sm border bg-card" : "rounded-tr-sm bg-primary text-primary-foreground"}`}>
+                      <p className="whitespace-pre-wrap break-words text-sm">{message.content || `[${message.type}]`}</p>
+                      <div className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${inbound ? "text-muted-foreground" : "text-primary-foreground/75"}`}><time title={formatDate(message.created_at)}>{new Date(message.created_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</time>{!inbound && <MessageStatusBadge status={message.status} errorMessage={message.error_message} />}</div>
+                    </div>
+                  </div>;
+                })}
+              {!messages.isLoading && orderedMessages.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">Belum ada pesan pada percakapan ini.</p>}
             </div>
-          )}
-        </SheetContent>
-      </Sheet>
-
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <p>
-          Halaman {page} dari {totalPages} · {total} total
-        </p>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={offset === 0}
-            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-          >
-            <ChevronLeft className="mr-1 h-4 w-4" />
-            Sebelumnya
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={isPlaceholderData || offset + PAGE_SIZE >= total}
-            onClick={() => setOffset(offset + PAGE_SIZE)}
-          >
-            Berikutnya
-            <ChevronRight className="ml-1 h-4 w-4" />
-          </Button>
+            <form className="space-y-2 border-t bg-card p-3 sm:p-4" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) reply.mutate(); }}>
+              {!replyWindowOpen ? <p className="text-xs text-muted-foreground">Balasan tersedia sampai 24 jam setelah pesan pelanggan. Minta pelanggan mengirim pesan baru untuk membuka kembali percakapan.</p>
+                : sourceDevice?.status !== "online" ? <p className="text-xs text-amber-700">Device pengirim sedang {sourceDevice?.status ?? "tidak tersedia"}. Sambungkan kembali device tersebut untuk membalas.</p>
+                  : <p className="text-xs text-muted-foreground">Balasan dikirim melalui {selected.device_label || selected.device_key}{isGroup ? " ke grup ini" : ""} dan tetap mengikuti aturan saldo serta izin penerima.</p>}
+              <div className="flex items-end gap-2"><Textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4096} rows={2} disabled={!replyWindowOpen || sourceDevice?.status !== "online" || reply.isPending} placeholder="Tulis balasan…" aria-label="Tulis balasan" />
+                <Button type="submit" size="icon" aria-label="Kirim balasan" disabled={!draft.trim() || !replyWindowOpen || sourceDevice?.status !== "online" || reply.isPending}>{reply.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</Button></div>
+            </form>
+          </> : <div className="hidden flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground lg:flex"><MessageSquare className="h-10 w-10" /><p>Pilih percakapan untuk melihat pesan dan membalas.</p></div>}
+          {conversations.isError && selected && <p className="border-t px-4 py-2 text-xs text-destructive">Daftar percakapan tidak dapat diperbarui.</p>}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

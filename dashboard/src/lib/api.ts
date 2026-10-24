@@ -59,6 +59,8 @@ import type {
   AutoReplyRuleInput,
   CreateDeviceRequest,
   Device,
+  InboxConversation,
+  InboxDevice,
   DeviceHealthData,
   DashboardStats,
   Message,
@@ -143,7 +145,8 @@ class ApiClient {
 
   getSession(): string | null {
     if (!this.session && typeof window !== "undefined") {
-      this.session = window.localStorage.getItem(SESSION_STORAGE_KEY);
+      this.session = window.sessionStorage.getItem(SESSION_STORAGE_KEY)
+        ?? window.localStorage.getItem(SESSION_STORAGE_KEY);
     }
     return this.session;
   }
@@ -155,11 +158,14 @@ class ApiClient {
     return this.workspaceId;
   }
 
-  setSession(token: string, workspaceId?: string): void {
+  setSession(token: string, workspaceId?: string, rememberMe = true): void {
     this.session = token;
     if (workspaceId) this.workspaceId = workspaceId;
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(SESSION_STORAGE_KEY, token);
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+      window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      const storage = rememberMe ? window.localStorage : window.sessionStorage;
+      storage.setItem(SESSION_STORAGE_KEY, token);
       if (workspaceId) window.localStorage.setItem(WORKSPACE_STORAGE_KEY, workspaceId);
     }
     this.notifyAuthListeners();
@@ -171,6 +177,7 @@ class ApiClient {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(SESSION_STORAGE_KEY);
       window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+      window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
     }
     this.notifyAuthListeners();
   }
@@ -187,23 +194,9 @@ class ApiClient {
 
   // ---- Tenant API (/api/v1/*, `apikey` header) ---------------------------
 
-  private async postWithWarmupApproval<T>(path: string, body: object): Promise<T> {
-    try {
-      const response = await this.client.post<T>(path, body, { skipErrorToast: true });
-      return response.data;
-    } catch (error) {
-      const failure = error as AxiosError<{ error?: { code?: string; message?: string } }>;
-      const warning = failure.response?.data?.error;
-      if (warning?.code !== "WARMUP_CONFIRMATION_REQUIRED" || (body as { allow_warmup_override?: boolean }).allow_warmup_override === true || typeof window === "undefined") throw error;
-      const approved = window.confirm(`${warning.message ?? "Nomor masih dalam masa pemanasan."}\n\nKirim satu pesan ini sekarang? Persetujuan ini hanya berlaku untuk pesan yang dipilih. Batas harian, persetujuan penerima, koneksi, dan pemeriksaan keselamatan lainnya tetap berlaku.`);
-      if (!approved) throw error;
-      const response = await this.client.post<T>(path, { ...body, allow_warmup_override: true }, { skipErrorToast: true });
-      return response.data;
-    }
-  }
-
   async sendMessage(data: SendMessageRequest): Promise<SendMessageResponse> {
-    return this.postWithWarmupApproval<SendMessageResponse>("/api/v1/message/send", data);
+    const response = await this.client.post<ApiSuccess<SendMessageResponse>>("/api/v1/message/send", data, { skipErrorToast: true });
+    return response.data.data;
   }
 
   async recordBroadcastConsent(recipients: string[]): Promise<{ recorded: number }> {
@@ -222,6 +215,28 @@ class ApiClient {
     return response.data;
   }
 
+  async getInboxDevices(): Promise<InboxDevice[]> {
+    const response = await this.client.get<ApiSuccess<InboxDevice[]>>("/api/v1/inbox/devices");
+    return response.data.data;
+  }
+
+  async getInboxConversations(params: { device_key?: string; search?: string; limit?: number; offset?: number }): Promise<PaginatedResponse<InboxConversation>> {
+    const response = await this.client.get<PaginatedResponse<InboxConversation>>("/api/v1/inbox/conversations", { params });
+    return response.data;
+  }
+
+  async getInboxMessages(params: { device_key: string; chat_key: string; limit?: number; offset?: number }): Promise<PaginatedResponse<Message>> {
+    const response = await this.client.get<PaginatedResponse<Message>>("/api/v1/inbox/messages", { params });
+    return response.data;
+  }
+
+  async replyInboxMessage(id: string, message: string): Promise<{ message_id: string; status: string }> {
+    const response = await this.client.post<ApiSuccess<{ message_id: string; status: string }>>(
+      `/api/v1/inbox/messages/${id}/reply`, { message }, { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
   async getDashboardStats(): Promise<DashboardStats> {
     const response = await this.client.get<ApiSuccess<DashboardStats>>("/api/v1/dashboard/stats");
     return response.data.data;
@@ -233,7 +248,8 @@ class ApiClient {
   }
 
   async retryMessage(id: string): Promise<{ message_id: string; status: string }> {
-    return this.postWithWarmupApproval<{ message_id: string; status: string }>(`/api/v1/messages/${id}/retry`, {});
+    const response = await this.client.post<ApiSuccess<{ message_id: string; status: string }>>(`/api/v1/messages/${id}/retry`, {}, { skipErrorToast: true });
+    return response.data.data;
   }
 
   async getDevices(): Promise<Device[]> {
@@ -595,8 +611,22 @@ class ApiClient {
     return response.data.data;
   }
 
-  async signup(data: { email: string; password: string; name: string; workspace_name?: string; phone_number?: string; verification_method?: 'email' | 'whatsapp'; accept_terms: true }): Promise<{ verification_required: true; verification_method: 'email' | 'whatsapp'; email: string; resend_after: number }> {
-    const response = await this.client.post<ApiSuccess<{ verification_required: true; verification_method: 'email' | 'whatsapp'; email: string; resend_after: number }>>(
+  async requestPasswordReset(email: string): Promise<{ sent: true; expires_in: number; resend_after: number }> {
+    const response = await this.client.post<ApiSuccess<{ sent: true; expires_in: number; resend_after: number }>>(
+      "/auth/password-reset/request", { email }, { skipErrorToast: true, skipAuthRedirect: true },
+    );
+    return response.data.data;
+  }
+
+  async confirmPasswordReset(email: string, code: string, newPassword: string): Promise<void> {
+    await this.client.post<ApiSuccess<{ reset: true }>>(
+      "/auth/password-reset/confirm", { email, code, new_password: newPassword },
+      { skipErrorToast: true, skipAuthRedirect: true },
+    );
+  }
+
+  async signup(data: { email: string; password: string; name: string; workspace_name?: string; phone_number: string; verification_method: 'whatsapp'; accept_terms: true }): Promise<{ verification_required: true; verification_method: 'whatsapp'; email: string; resend_after: number }> {
+    const response = await this.client.post<ApiSuccess<{ verification_required: true; verification_method: 'whatsapp'; email: string; resend_after: number }>>(
       "/auth/signup", data, { skipErrorToast: true, skipAuthRedirect: true },
     );
     return response.data.data;
@@ -698,7 +728,7 @@ class ApiClient {
     return response.data.data;
   }
 
-  async inviteMember(email: string, role: "developer"): Promise<CreatedInvitation> {
+  async inviteMember(email: string, role: "developer" | "cs"): Promise<CreatedInvitation> {
     const response = await this.client.post<ApiSuccess<CreatedInvitation>>(
       "/api/v1/team/invitations", { email, role }, { skipErrorToast: true },
     );
@@ -709,7 +739,7 @@ class ApiClient {
     await this.client.delete(`/api/v1/team/invitations/${id}`, { skipErrorToast: true });
   }
 
-  async changeMemberRole(userId: string, role: "developer"): Promise<void> {
+  async changeMemberRole(userId: string, role: "developer" | "cs"): Promise<void> {
     await this.client.patch(`/api/v1/team/members/${userId}`, { role }, { skipErrorToast: true });
   }
 
@@ -802,8 +832,8 @@ class ApiClient {
     return response.data.data;
   }
 
-  async createPaygTopupCheckout(amountIdr: number): Promise<DokuCheckoutResult & { invoice_number: string; amount_idr: number }> {
-    const response = await this.client.post<ApiSuccess<DokuCheckoutResult & { invoice_number: string; amount_idr: number }>>(
+  async createPaygTopupCheckout(amountIdr: number): Promise<{ payment_url: string; invoice_number: string; amount_idr: number }> {
+    const response = await this.client.post<ApiSuccess<{ payment_url: string; invoice_number: string; amount_idr: number }>>(
       "/api/v1/billing/payg/topup-checkout", { amount_idr: amountIdr }, { skipErrorToast: true },
     );
     return response.data.data;

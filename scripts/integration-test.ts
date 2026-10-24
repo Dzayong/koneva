@@ -19,7 +19,6 @@ import pool, { query } from '../src/shared/database/connection';
 import { getRedisClient, closeRedisClient } from '../src/shared/redis';
 import {
   canSendMessage,
-  getWarmupStage,
   type QueryFn,
 } from '../src/bot-container/anti-ban';
 import { calculateHealthScore, getDeviceByKey } from '../src/bot-container/health-score';
@@ -620,14 +619,15 @@ async function scenario3ErrorHandling(
 async function scenario4AntiBan(tenant: TestTenant, deviceKey: string): Promise<void> {
   const S = 'Scenario 4: Anti-Ban Integration';
 
-  await step(S, '1. Warm-up protocol active for a new device (day 1 cap = 5)', async () => {
+  await step(S, '1. New device has no age-based restriction on proactive or media sends', async () => {
+    await query('DELETE FROM messages WHERE device_key = $1', [deviceKey]);
     const device = await getDeviceByKey(deviceKey, queryFn);
     assert(!!device, 'device not found');
-    const warmupDay =
-      Math.floor((Date.now() - device!.createdAt.getTime()) / 86_400_000) + 1;
-    const stage = getWarmupStage(warmupDay);
-    assert(stage.maxMessagesPerDay === 5, `expected day-1 cap of 5, got ${stage.maxMessagesPerDay}`);
-    assert(stage.proactiveAllowed === false, 'day 1-2 should not allow proactive messages');
+    const decision = await canSendMessage(deviceKey, {
+      queryFn, isProactive: true, hasMedia: true,
+      now: new Date('2026-10-23T05:00:00Z'),
+    });
+    assert(decision.allowed, `new device should not be blocked by age: ${decision.reason ?? 'unknown reason'}`);
   });
 
   await step(S, '2. Per-minute rate limit (max 2/min) is enforced', async () => {
@@ -747,11 +747,7 @@ async function main(): Promise<void> {
     const offlineDeviceKey = `WAPI-ITEST-OFFLINE-${RUN_ID}`;
 
     await insertDevice(flowTenant.id, flowDeviceKey, 'online');
-    await query(
-      `UPDATE devices SET warmup_started_at = now() - interval '10 days', warmup_completed_at = now(), health_score = 100
-       WHERE device_key = $1`,
-      [flowDeviceKey],
-    );
+    await query('UPDATE devices SET health_score = 100 WHERE device_key = $1', [flowDeviceKey]);
     await insertDevice(quotaTenant.id, quotaDeviceKey, 'online');
     await insertDevice(offlineTenant.id, offlineDeviceKey, 'offline');
     console.log('Test tenants and devices created.');

@@ -100,6 +100,7 @@ export interface DokuNotificationResult {
     | 'invoice_not_found'
     | 'amount_mismatch'
     | 'currency_mismatch'
+    | 'request_id_conflict'
     | 'wallet_topped_up'
     | `status_${string}`;
 }
@@ -139,7 +140,7 @@ export async function handleDokuNotification(
     throw new ServiceError(401, 'STALE_TIMESTAMP', `Request-Timestamp lebih dari ${REQUEST_TIMESTAMP_MAX_AGE_MS / 60_000} menit dari sekarang.`);
   }
 
-  let payload: { order?: { invoice_number?: string; amount?: number; currency?: string }; transaction?: { status?: string } };
+  let payload: { order?: { invoice_number?: string; amount?: number | string; currency?: string }; transaction?: { status?: string } };
   try {
     payload = JSON.parse(rawBody);
   } catch {
@@ -150,13 +151,14 @@ export async function handleDokuNotification(
   if (!invoiceNumber || !status) throw new ServiceError(400, 'INVALID_BODY', 'order.invoice_number / transaction.status tidak ada.');
 
   return transaction(async (client: PoolClient) => {
-    const existing = (await client.query<{ status: string; applied_at: Date | null }>(
-      'SELECT status, applied_at FROM doku_notification_events WHERE request_id = $1 FOR UPDATE',
+    const existing = (await client.query<{ status: string; invoice_number: string; applied_at: Date | null }>(
+      'SELECT status, invoice_number, applied_at FROM doku_notification_events WHERE request_id = $1 FOR UPDATE',
       [headers.requestId],
     )).rows[0];
 
     if (existing) {
       if (existing.applied_at) return { applied: false, reason: 'replay' } as const;
+      if (existing.invoice_number !== invoiceNumber) return { applied: false, reason: 'request_id_conflict' } as const;
       // A row with no applied_at and a non-SUCCESS status was fully recorded and is correctly final
       // (nothing to retry — a PENDING/FAILED/etc. notification never activates anything). Only a
       // row whose recorded status was 'SUCCESS' but applied_at is still null falls through to retry
@@ -174,12 +176,18 @@ export async function handleDokuNotification(
     if (status !== 'SUCCESS') return { applied: false, reason: `status_${status}` } as const;
 
     const topup = (await client.query<{ tenant_id: string; amount_idr: number; status: string }>(
-      'SELECT tenant_id,amount_idr,status FROM wallet_topups WHERE invoice_number=$1 FOR UPDATE', [invoiceNumber],
+      "SELECT tenant_id,amount_idr,status FROM wallet_topups WHERE invoice_number=$1 AND payment_provider='doku' FOR UPDATE", [invoiceNumber],
     )).rows[0];
     if (topup) {
+      // DOKU's Non-SNAP notification samples omit order.currency for some payment channels,
+      // although our checkout is always created in IDR. Reject an explicit foreign currency,
+      // but accept an omitted currency after verifying the invoice and exact amount.
       const notifiedCurrency = payload.order?.currency;
-      if (notifiedCurrency !== 'IDR') return { applied: false, reason: 'currency_mismatch' } as const;
-      if (payload.order?.amount !== Number(topup.amount_idr)) return { applied: false, reason: 'amount_mismatch' } as const;
+      if (notifiedCurrency != null && notifiedCurrency !== 'IDR') return { applied: false, reason: 'currency_mismatch' } as const;
+      const notifiedAmount = typeof payload.order?.amount === 'string' ? Number(payload.order.amount) : payload.order?.amount;
+      if (!Number.isSafeInteger(notifiedAmount) || notifiedAmount !== Number(topup.amount_idr)) {
+        return { applied: false, reason: 'amount_mismatch' } as const;
+      }
       const paid = await client.query(
         `UPDATE wallet_topups SET status='paid',paid_at=now(),payment_reference=$2
          WHERE invoice_number=$1 AND status='unpaid' RETURNING tenant_id`, [invoiceNumber, headers.requestId],

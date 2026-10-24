@@ -1,16 +1,17 @@
-# Access model: Owner, Developer, KONEVA system admin
+# Access model: Owner, Developer, Customer Service, KONEVA system admin
 
 Decision (owner discussion, implemented locally on 2026-09-26; follow-up decisions 2026-09-27 below). Local-tested only; **not** enabled anywhere.
 
-## The three roles
+## Customer roles
 
 | | What it is | Where it lives |
 |---|---|---|
 | **Owner** | The customer who owns a workspace. Buys the plan, handles billing, manages the team and every device/integration. Holds every Developer permission itself: the owner is never invited as a Developer and never has a second membership. | `memberships.role='owner'`, exactly one per workspace (partial unique index) |
 | **Developer** | A workspace member for technical integration: add, configure, connect, pause and **delete** devices, use the API within key scopes, webhooks, content, API keys. **Not** billing, **not** the team (no invite/remove/promote), cannot give themself Owner powers. | `memberships.role='developer'` |
+| **Customer Service (CS)** | Reads and replies to conversations from every connected device through Inbox. Cannot send arbitrary messages, run broadcasts/campaigns, or access device settings, billing, API keys, contacts, or team management. | `memberships.role='cs'` |
 | **KONEVA system admin** | Internal operator account, separate from customers, not a workspace member. Cross-workspace service management per the Operator Panel. No new access to message contents or customer secrets. | `operators` tables, see [OPERATOR_PANEL.md](OPERATOR_PANEL.md) |
 
-Owner and Developer are **memberships**, not account types: one account may be Owner of workspace A and Developer of workspace B (unique `(user, workspace)`; permissions follow the selected workspace). The database refuses roles such as `operator`, `system_admin`.
+These roles are **memberships**, not account types: one account may hold a different role in each workspace (unique `(user, workspace)`; permissions follow the selected workspace). The database refuses roles such as `operator`, `system_admin`.
 
 ## Legacy `admin` and `viewer` (migration 021)
 
@@ -23,7 +24,7 @@ Migration impact and follow-up decisions for the owner are at the end of this fi
 
 ## Invitations and email OTP
 
-1. Only the owner invites, only as Developer, only to an **@gmail.com** address. Whitespace and letter case are normalised; nothing else is (dots and `+tags` are kept as typed, `googlemail.com` is refused), so the invited address, the OTP address and the address the person signs up/in with are identical. Non-Gmail is refused (`400 GMAIL_REQUIRED`), also by a database trigger.
+1. Only the owner invites, as Developer or Customer Service, only to an **@gmail.com** address. Whitespace and letter case are normalised; nothing else is (dots and `+tags` are kept as typed, `googlemail.com` is refused), so the invited address, the OTP address and the address the person signs up/in with are identical. Non-Gmail is refused (`400 GMAIL_REQUIRED`), also by a database trigger.
 2. The link (48 h, single use, stored hashed) is bound to that address. A different address cannot accept (`403 EMAIL_MISMATCH`, checked before any code attempt so a stranger cannot burn the recipient's tries).
 3. To accept, the recipient must prove they own the mailbox: request a 6-digit OTP (emailed to the invited address only), then submit it with the acceptance. Codes: 10 minutes, 5 wrong attempts (counted atomically), 60 s between sends, 5 sends per hour per invitation, only a keyed hash is stored, a new code replaces the old one, a code is single use. Accepting marks the account's email as verified.
 4. An existing account must be signed in as the invited address; otherwise `ACCOUNT_EXISTS` (never silently merged).
@@ -57,7 +58,7 @@ The sender is subject to shared IP, recipient, and daily OTP limits.
 |---|---|
 | One owner per workspace | Unique partial index. **The migration stops with a readable error if any workspace already has two owners** (none can be created by current code). Check first: `SELECT tenant_id, count(*) FROM memberships WHERE role='owner' GROUP BY 1 HAVING count(*)>1;` and decide which owner stays. |
 | Legacy members | Untouched. No automatic promotion or demotion. |
-| Pending admin/viewer invitations and pending invitations to non-Gmail addresses | Revoked by the migration (they cannot pass the new rules). Owners must re-invite as Developer with a Gmail address. |
+| Pending admin/viewer invitations and pending invitations to non-Gmail addresses | Revoked by migration 021 (they cannot pass the new rules). Owners must re-invite with a Gmail address. |
 | Existing pending Developer invitations to Gmail | Still valid but now need the emailed OTP to be accepted, so they cannot be accepted until an email sender exists. |
 | Developer power | Gains `devices:delete`. API keys created by developers may now carry that scope. |
 | New tables/triggers | `invitation_otps`; triggers on `memberships` and `invitations`. |

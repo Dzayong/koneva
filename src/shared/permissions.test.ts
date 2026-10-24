@@ -20,16 +20,16 @@ test('owner holds every developer permission by itself (no second membership nee
   for (const p of PERMISSIONS.filter((x) => can('developer', x))) assert.equal(can('owner', p), true, p);
 });
 
-test('role model: owner + developer are current, admin + viewer are legacy, only developer can be handed out', () => {
-  assert.deepEqual([...CURRENT_ROLES], ['owner', 'developer']);
+test('role model: owner, developer and CS are current; admin + viewer are legacy', () => {
+  assert.deepEqual([...CURRENT_ROLES], ['owner', 'developer', 'cs']);
   assert.deepEqual([...LEGACY_ROLES], ['admin', 'viewer']);
-  assert.deepEqual([...ASSIGNABLE_ROLES], ['developer']);
+  assert.deepEqual([...ASSIGNABLE_ROLES], ['developer', 'cs']);
   assert.deepEqual([...ROLES].sort(), [...CURRENT_ROLES, ...LEGACY_ROLES].sort());
   assert.equal(isLegacyRole('viewer'), true); assert.equal(isLegacyRole('owner'), false); assert.equal(isLegacyRole('developer'), false);
 });
 
 test('legacy members keep exactly their historical access (nothing silently upgraded)', () => {
-  assert.deepEqual([...ROLE_PERMISSIONS_SNAPSHOT.viewer], ['devices:read', 'messages:read']);
+  assert.deepEqual([...ROLE_PERMISSIONS_SNAPSHOT.viewer], ['devices:read', 'messages:read', 'inbox:read']);
   assert.equal(can('admin', 'team:manage'), true);
   assert.equal(can('admin', 'devices:delete'), true);
   assert.equal(can('admin', 'billing:manage'), false);
@@ -37,7 +37,31 @@ test('legacy members keep exactly their historical access (nothing silently upgr
 
 test('viewer can only read', () => {
   const allowed = PERMISSIONS.filter((p) => can('viewer', p));
-  assert.deepEqual([...allowed].sort(), ['devices:read', 'messages:read']);
+  assert.deepEqual([...allowed].sort(), ['devices:read', 'inbox:read', 'messages:read']);
+});
+
+test('Customer Service can only read and reply in Inbox', () => {
+  assert.deepEqual([...ROLE_PERMISSIONS_SNAPSHOT.cs].sort(), ['inbox:read', 'messages:reply']);
+  assert.equal(permissionFor('GET', '/inbox/conversations'), 'inbox:read');
+  assert.equal(permissionFor('GET', '/inbox/devices'), 'inbox:read');
+  assert.equal(permissionFor('GET', '/inbox/messages'), 'inbox:read');
+  assert.equal(permissionFor('POST', '/inbox/messages/00000000-0000-4000-8000-000000000000/reply'), 'messages:reply');
+  // The ordinary history/send APIs and every operational surface remain outside the CS role.
+  for (const [method, route, expected] of [
+    ['GET', '/messages', 'messages:read'],
+    ['POST', '/message/send', 'messages:send'],
+    ['POST', '/broadcast', 'messages:send'],
+    ['GET', '/campaigns', 'messages:read'],
+    ['POST', '/campaigns', 'messages:send'],
+    ['GET', '/devices', 'devices:read'],
+    ['GET', '/team', 'team:manage'],
+    ['GET', '/billing', 'billing:manage'],
+    ['GET', '/keys', 'keys:manage'],
+  ] as const) {
+    const permission = permissionFor(method, route);
+    assert.equal(permission, expected, `${method} ${route} is explicitly classified`);
+    assert.equal(can('cs', permission), false, `CS is denied ${method} ${route}`);
+  }
 });
 
 test('roles are strictly ordered by power', () => {
@@ -90,7 +114,9 @@ test('a viewer cannot reach the QR code, sending, or any write', () => {
 
 test('every route mounted on /api/v1 has a permission rule (guards against forgotten routes)', () => {
   const dir = path.join(__dirname, '..', 'api-gateway', 'routes');
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.routes.ts') && !['admin.routes.ts', 'auth.routes.ts', 'public.routes.ts', 'doku-webhook.routes.ts'].includes(f));
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.routes.ts') && ![
+    'admin.routes.ts', 'auth.routes.ts', 'public.routes.ts', 'doku-webhook.routes.ts', 'duitku-webhook.routes.ts',
+  ].includes(f));
   const missing: string[] = [];
   let seen = 0;
   for (const file of files) {

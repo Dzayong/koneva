@@ -147,7 +147,7 @@ async function main(): Promise<void> {
         canSend: async () => ({
           allowed: true as const, delayMs: 0,
           typing: { shouldSimulate: false, durationMs: 0 },
-          healthScore: 100, dailyCap: 1_000_000, sentToday: 0, warmupDay: 30,
+          healthScore: 100, dailyCap: 1_000_000, sentToday: 0,
         }),
         delay: async () => undefined,
       } : {}),
