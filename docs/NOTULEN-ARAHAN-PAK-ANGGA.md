@@ -2,7 +2,7 @@
 
 **Tanggal pencatatan:** 23 Oktober 2026
 
-**Status:** Implementasi lokal untuk sebagian besar fitur sudah tersedia. Migrasi database, validasi end-to-end, dan deploy belum diselesaikan. Voucher/tarif bertingkat dan beberapa materi publik masih menunggu detail produk.
+**Status:** Inbox dan tiga mode auto-reply tersedia dan sudah dideploy ke local production `:13000`; validasi WhatsApp nyata dan provider AI masih perlu dilakukan. Voucher kredit sudah tersedia; tarif bertingkat dan beberapa materi publik masih menunggu detail produk.
 
 **Sumber:** Rangkuman pemilik produk dari pembahasan dengan Pak Angga. Ini parafrasa, bukan kutipan langsung.
 
@@ -21,8 +21,8 @@ Dokumen ini mengumpulkan kebutuhan yang akan dibahas dan dikerjakan bertahap. Ba
 ## Status pekerjaan
 
 1. **Akun dan device — perubahan lokal tersedia; uji layanan nyata masih perlu:** alur OTP WhatsApp daftar, pemulihan sandi email, pilihan sesi “Ingat saya”, penghapusan gate *warming up*, dan banner risiko broadcast sudah disentuh. Perlu uji end-to-end dengan provider OTP/email dan device yang benar-benar tersambung.
-2. **Inbox dan CS — perubahan lokal tersedia; migrasi dan uji multi-device masih perlu:** role CS dibatasi ke Inbox, dengan pemilihan device dan percakapan. Perlu validasi hak akses setelah migrasi dan tes beberapa device.
-3. **Balasan otomatis — tiga mode tersedia di kode; migrasi dan uji provider nyata masih perlu:** pemicu tetap, AI umum, dan AI dengan instruksi. Perlu memastikan credential provider/enkripsi server serta pesan masuk WhatsApp benar-benar memicu balasan.
+2. **Inbox dan CS — tersedia dan dideploy ke local production `:13000`:** daftar percakapan dan panel chat mendukung pemilihan device serta balas manual; role CS dapat membaca dan membalas Inbox. Migrasi 064–068 tercatat. Perlu uji hak akses multi-device dengan akun CS dan pesan nyata.
+3. **Balasan otomatis — tiga mode tersedia dan dideploy ke local production `:13000`:** pemicu saja, AI umum, dan AI dengan instruksi. Balasan AI grup kini menyimpan `chat_jid` agar tampil dalam percakapan grup yang benar. Perlu uji dengan provider AI dan pesan WhatsApp nyata; mode auto-reply hanya memproses grup, bukan chat pribadi atau saluran.
 4. **Saldo dan tarif:** PAYG berjalan dengan tarif dasar yang dapat diatur. Voucher kredit dan tarif bertingkat belum dibuat karena aturan rinci menunggu pemilik.
 5. **Pembayaran:** alur Duitku POP sandbox dan callback sudah diimplementasikan secara lokal. Tes sintetis tersedia; kredensial privat, callback publik, pembayaran sandbox sungguhan, migrasi database, dan deploy masih perlu divalidasi. Rincian di `docs/DUITKU_MIGRATION_PLAN.md`.
 6. **Pengalaman publik:** footer Privasi dan Syarat & Ketentuan tersedia. Dua tautan tambahan, materi/naskah video halaman utama, dan validasi batas nama profil WhatsApp masih terbuka.
