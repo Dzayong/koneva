@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { ArrowDownLeft, ArrowLeft, ArrowUpRight, ImagePlus, Loader2, MessageSquare, Search, Send, Smartphone, Users, X, Megaphone, Settings2 } from "lucide-react";
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, ImagePlus, Loader2, MessageSquare, Search, Send, Smartphone, Users, X, Megaphone, Settings2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MessageStatusBadge } from "@/components/messages/message-status-badge";
+import { CreateInboxConversationDialog } from "@/components/messages/create-inbox-conversation-dialog";
 import { api } from "@/lib/api";
 import { apiFailure } from "@/lib/errors";
 import { formatDate, formatPhoneNumber, formatShortRelative } from "@/lib/utils";
@@ -63,6 +64,8 @@ export default function MessagesPage() {
   const [attachment, setAttachment] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createDialogKind, setCreateDialogKind] = useState<"group" | "community" | "channel" | "follow">("group");
   const { role } = usePermissions();
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const autoScrolledConversationRef = useRef<string | null>(null);
@@ -177,7 +180,7 @@ export default function MessagesPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><h2 className="text-heading">Kotak masuk</h2>
             <p className="text-muted-foreground">Percakapan pribadi, grup, dan grup komunitas dari device yang terhubung.</p></div>
-          {role !== "cs" && <Link href="/groups" className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-accent"><Settings2 className="h-4 w-4" />Kelola grup & saluran</Link>}
+          {role !== "cs" && <Button type="button" variant="outline" size="icon" aria-label="Buat grup, komunitas, atau saluran" title="Buat grup, komunitas, atau saluran" onClick={() => { setCreateDialogKind("group"); setCreateDialogOpen(true); }}><Plus className="h-4 w-4" /></Button>}
         </div>
       </header>
 
@@ -253,7 +256,7 @@ export default function MessagesPage() {
         </div>
 
         <div className={`${mobileChatOpen ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col`}>
-          {activeTab === "channels" && !selected ? <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"><Megaphone className="h-10 w-10" /><div><p className="font-medium text-foreground">Saluran WhatsApp</p><p className="mt-1 max-w-md text-sm">Saluran bersifat satu arah. Postingan dan pengaturan saluran tersedia lewat menu kelola; saluran tidak memiliki balasan seperti chat pribadi atau grup.</p></div>{role !== "cs" && <Link href="/groups" className="text-sm font-medium text-primary underline underline-offset-4">Buka pengelolaan grup & saluran</Link>}</div>
+          {activeTab === "channels" && !selected ? <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"><Megaphone className="h-10 w-10" /><div><p className="font-medium text-foreground">Saluran WhatsApp</p><p className="mt-1 max-w-md text-sm">Saluran bersifat satu arah. Postingan dan pengaturan saluran tersedia lewat menu kelola; saluran tidak memiliki balasan seperti chat pribadi atau grup.</p></div>{role !== "cs" && <Button type="button" variant="outline" onClick={() => { setCreateDialogKind("channel"); setCreateDialogOpen(true); }}><Plus className="h-4 w-4" />Buat atau ikuti saluran</Button>}</div>
             : selected ? <>
             <div className="flex items-center gap-3 border-b px-4 py-3 sm:px-6">
               <Button variant="ghost" size="icon" className="h-9 w-9 lg:hidden" aria-label="Kembali ke percakapan" onClick={() => setMobileChatOpen(false)}><ArrowLeft className="h-4 w-4" /></Button>
@@ -296,6 +299,13 @@ export default function MessagesPage() {
           {conversations.isError && selected && <p className="border-t px-4 py-2 text-xs text-destructive">Daftar percakapan tidak dapat diperbarui.</p>}
         </div>
       </section>
+      <CreateInboxConversationDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        devices={devices.data ?? []}
+        preferredDeviceKey={deviceKey !== ALL ? deviceKey : undefined}
+        initialKind={createDialogKind}
+      />
     </div>
   );
 }
