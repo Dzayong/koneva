@@ -27,6 +27,13 @@ export function useAutoReplyRules() {
   return useQuery({ queryKey: KEY, queryFn: () => api.getAutoReplyRules(), retry: false });
 }
 
+export function useAutoReplyLogs() {
+  return useQuery({
+    queryKey: ["auto-reply-logs"], queryFn: () => api.getAutoReplyLogs(),
+    retry: false, refetchInterval: 15_000,
+  });
+}
+
 export function useSaveAutoReplyRule() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -201,16 +201,9 @@ export default function MessagesPage() {
             {([
               ["all", "Semua"], ["private", "Pribadi"], ["groups", "Grup"], ["communities", "Komunitas"], ["channels", "Saluran"],
             ] as const).map(([id, label]) => {
-              const count = id === "all" ? conversations.data?.length ?? 0 : (conversations.data ?? []).filter((item) => {
-                const group = groupsByChat.get(conversationId(item));
-                return id === "channels" ? isChannelChat(item)
-                  : id === "private" ? !isGroupChat(item) && !isChannelChat(item)
-                    : id === "groups" ? isGroupChat(item) && !group?.isCommunity && !group?.parentCommunityJid
-                      : isGroupChat(item) && Boolean(group?.isCommunity || group?.parentCommunityJid);
-              }).length;
               return <button key={id} type="button" role="tab" aria-selected={activeTab === id} onClick={() => { setActiveTab(id); setMobileChatOpen(false); }}
                 className={`min-w-0 rounded-md px-1 py-2 text-xs font-medium transition-colors ${activeTab === id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-                <span className="block truncate">{label}</span><span className="text-[10px] opacity-80">{count}</span>
+                <span className="block truncate">{label}</span>
               </button>;
             })}
           </div>

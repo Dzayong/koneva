@@ -265,10 +265,6 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
   const [aiPrompt, setAiPrompt] = useState(rule?.response_type === "ai" ? rule.response_content : "");
   const [skillIds, setSkillIds] = useState<string[]>(rule?.response_config?.skill_ids ?? []);
   const [replyToTrigger, setReplyToTrigger] = useState(rule?.response_config?.reply_to_trigger ?? true);
-  const [variableRows, setVariableRows] = useState(() => {
-    const saved = Object.entries(rule?.response_config?.variables ?? {}).map(([key, value]) => ({ key, value }));
-    return saved.length ? saved : [{ key: "nama_toko", value: "" }, { key: "info_usaha", value: "" }];
-  });
   const content = responseType === "ai" ? aiPrompt : responseType === "ai_general" ? "" : textContent;
   const [delaySeconds, setDelaySeconds] = useState(String((rule?.delay_ms ?? 3000) / 1000));
 
@@ -285,7 +281,6 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
       : null;
   const aiConfigured = responseType === "ai_general" || (responseType === "ai" && (aiPrompt.trim().length > 0 || skillIds.length > 0));
   const canSubmit = deviceKey && (responseType === "text" ? content.trim().length > 0 : aiConfigured) && !patternError && !delayError;
-  const aiVariables = Object.fromEntries(variableRows.filter((item) => item.key.trim()).map((item) => [item.key.trim(), item.value]));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -301,7 +296,8 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           response_content: content,
           response_config: {
             skill_ids: responseType === "ai" ? skillIds : [],
-            variables: responseType === "ai" ? aiVariables : {},
+            // Variable editing is deferred; preserve existing saved values when editing a rule.
+            variables: responseType === "ai" ? (rule?.response_config?.variables ?? {}) : {},
             reply_to_trigger: replyToTrigger,
           },
           delay_ms: Math.round(delay * 1000),
@@ -313,7 +309,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">Balasan otomatis hanya memproses pesan grup/komunitas yang device ini ikuti. Chat pribadi dan saluran tidak diproses.</p>
+      <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">Aturan ini memeriksa isi pesan baru di grup/komunitas yang diikuti device. Pesan pribadi dan saluran belum didukung.</p>
       <div className="space-y-2">
         <Label>Nomor</Label>
         <Select value={deviceKey} onValueChange={setDeviceKey}>
@@ -360,8 +356,8 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
       <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 hover:bg-muted/40">
         <Switch checked={replyToTrigger} onCheckedChange={setReplyToTrigger} aria-label="Balas pesan pemicu" />
         <span>
-          <span className="block text-sm font-medium">Balas pesan pemicu di WhatsApp</span>
-          <span className="block text-xs text-muted-foreground">Balasan terhubung ke pesan yang memicu aturan. Matikan jika ingin mengirim balasan biasa.</span>
+          <span className="block text-sm font-medium">Kutip pesan yang cocok dengan pemicu</span>
+          <span className="block text-xs text-muted-foreground">Balasan Djoko akan tampil sebagai “Balas” pada pesan yang cocok. Ini tidak mengubah kata pemicu yang harus ada di pesan baru.</span>
         </span>
       </label>
 
@@ -395,7 +391,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           placeholder={responseType === "ai" ? "Contoh: Gunakan bahasa santai. Arahkan pelanggan melihat katalog sebelum bertanya harga." : "Halo {nama}! Ada yang bisa kami bantu?"}
         />
         <p className="text-xs text-muted-foreground">
-          {responseType === "ai" ? <>Tulis aturan khusus untuk usahamu. Variabel: <code>{"{nama}"}</code> dan variabel usaha di bawah.</> : <>Variables: {"{nama}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
+          {responseType === "ai" ? "Tulis aturan khusus untuk cara Djoko menjawab. Pengaturan data usaha dan variabel menyusul." : <>Variabel: {"{nama}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
         </p>
         </>}
       </div>
@@ -426,18 +422,6 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
             })}
           </div>
           <div className="space-y-2 border-t pt-3">
-            <div>
-              <Label>Data usaha dan variabel</Label>
-              <p className="mt-1 text-xs text-muted-foreground">AI hanya memakai nilai yang kamu isi. Nama toko otomatis mengikuti nama workspace jika dikosongkan. Tulis variabel di instruksi dengan format <code>{"{nama_toko}"}</code>.</p>
-            </div>
-            {variableRows.map((item, index) => (
-              <div key={index} className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto] items-start gap-2">
-                <Input aria-label="Nama variabel" value={item.key} maxLength={40} placeholder="nama_toko" onChange={(event) => setVariableRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, key: event.target.value.toLocaleLowerCase().replace(/[^a-z0-9_]/g, "") } : row))} />
-                <Textarea aria-label="Nilai variabel" value={item.value} maxLength={1000} rows={2} placeholder={item.key === "nama_toko" ? "Nama toko" : "Info yang boleh dipakai AI"} onChange={(event) => setVariableRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, value: event.target.value } : row))} />
-                <Button type="button" variant="ghost" size="icon" aria-label="Hapus variabel" onClick={() => setVariableRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}>×</Button>
-              </div>
-            ))}
-            <Button type="button" variant="outline" size="sm" disabled={variableRows.length >= 12} onClick={() => setVariableRows((rows) => [...rows, { key: "", value: "" }])}>Tambah variabel</Button>
             {skillIds.length === 0 && !aiPrompt.trim() && <p className="text-xs text-destructive">Pilih minimal satu skill atau isi instruksi manual.</p>}
           </div>
         </div>

@@ -305,6 +305,19 @@ export interface AutoReplyRuleInput {
   delay_ms: number;
 }
 
+export interface AutoReplyLogRecord {
+  id: string;
+  device_key: string;
+  status: "sent" | "blocked" | "failed" | "ignored";
+  stage: "match" | "ai" | "policy" | "presence" | "billing" | "send" | "persist";
+  reason_code: string | null;
+  created_at: string;
+  inbound_content: string;
+  trigger_type: AutoReplyTriggerType | null;
+  trigger_pattern: string | null;
+  response_type: AutoReplyRule["response_type"] | null;
+}
+
 export interface WorkspaceSendHours {
   enabled: boolean;
   start_time: string;

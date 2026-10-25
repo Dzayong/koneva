@@ -356,13 +356,13 @@ export default function WhatsAppGroupsPage() {
 
       <div className="grid gap-2 rounded-xl border bg-card p-2 sm:grid-cols-3" role="tablist" aria-label="Jenis percakapan WhatsApp">
         {([
-          { id: "groups", label: "Grup", icon: Users, count: regularGroups.length },
-          { id: "communities", label: "Komunitas", icon: MessagesSquare, count: communities.length },
-          { id: "channels", label: "Saluran", icon: Megaphone, count: channels.data?.length ?? 0 },
-        ] as const).map(({ id, label, icon: Icon, count }) => (
+          { id: "groups", label: "Grup", icon: Users },
+          { id: "communities", label: "Komunitas", icon: MessagesSquare },
+          { id: "channels", label: "Saluran", icon: Megaphone },
+        ] as const).map(({ id, label, icon: Icon }) => (
           <button key={id} type="button" role="tab" aria-selected={section === id} onClick={() => setSection(id)}
             className={`flex min-h-12 items-center justify-between rounded-lg px-4 text-sm font-medium transition-colors ${section === id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-            <span className="flex items-center gap-2"><Icon className="h-4 w-4" />{label}</span><span className={`rounded-full px-2 py-0.5 text-xs ${section === id ? "bg-primary-foreground/15" : "bg-muted"}`}>{count}</span>
+            <span className="flex items-center gap-2"><Icon className="h-4 w-4" />{label}</span>
           </button>
         ))}
       </div>

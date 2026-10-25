@@ -58,6 +58,10 @@ const listSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
+const logListSchema = z.object({
+  device_key: z.string().min(1).max(32).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
 
 export async function notifyBotReloadRules(deviceKey: string): Promise<void> {
   await getRedisClient(config.redis.url).publish(
@@ -118,6 +122,41 @@ export async function listAutoReplyRules(request: Request, response: Response): 
     data: result.rows.map(({ total: _total, ...row }) => row),
     pagination: { total, limit, offset, has_more: offset + result.rows.length < total },
   });
+}
+
+export async function listAutoReplyLogs(request: Request, response: Response): Promise<void> {
+  // Diagnostic entries can include a short inbound message excerpt; keep them out of CS/API-key access.
+  assertWorkspaceManager(request);
+  const { device_key, limit } = request.validated!.query as z.infer<typeof logListSchema>;
+  const result = await pool.query(
+    `SELECT l.id, l.device_key, l.status, l.stage,
+       CASE
+         WHEN l.error_message='no_matching_rule' THEN 'no_matching_rule'
+         WHEN l.error_message='recipient_opted_out' THEN 'recipient_opted_out'
+         WHEN l.error_message='ai_reply_empty_response' THEN 'ai_empty_response'
+         WHEN l.error_message LIKE 'ai_reply_gateway_http_%' THEN 'ai_provider_unavailable'
+         WHEN l.error_message='delivery_uncertain' THEN 'delivery_uncertain'
+         WHEN l.stage='presence' AND l.status='failed' THEN 'presence_update_failed'
+         WHEN l.stage='billing' AND l.status='failed' THEN 'billing_setup_failed'
+         WHEN l.stage='send' AND l.status='failed' THEN 'whatsapp_send_failed'
+         WHEN l.stage='persist' AND l.status='failed' THEN 'message_persistence_failed'
+         WHEN l.stage='ai' AND l.status='failed' THEN 'ai_reply_failed'
+         WHEN l.stage='policy' AND l.status='failed' THEN 'policy_check_failed'
+         WHEN l.status='blocked' THEN 'blocked_by_policy'
+         WHEN l.status='failed' THEN 'processing_or_send_failed'
+         ELSE NULL
+       END AS reason_code,
+       l.created_at,
+       LEFT(COALESCE(inbound.content, ''), 240) AS inbound_content,
+       r.trigger_type, r.trigger_pattern, r.response_type
+     FROM auto_reply_logs l
+     LEFT JOIN messages inbound ON inbound.id=l.inbound_message_id AND inbound.tenant_id=l.tenant_id
+     LEFT JOIN auto_reply_rules r ON r.id=l.rule_id AND r.tenant_id=l.tenant_id
+     WHERE l.tenant_id=$1 AND ($2::text IS NULL OR l.device_key=$2)
+     ORDER BY l.created_at DESC, l.id DESC LIMIT $3`,
+    [request.tenant!.id, device_key ?? null, limit],
+  );
+  response.json({ success: true, data: result.rows });
 }
 
 export async function getAutoReplyRule(request: Request, response: Response): Promise<void> {
@@ -202,6 +241,7 @@ export async function deleteAutoReplyRule(request: Request, response: Response):
 }
 
 router.get('/auto-reply-rules', validate({ query: listSchema }), listAutoReplyRules);
+router.get('/auto-reply-logs', validate({ query: logListSchema }), listAutoReplyLogs);
 router.get('/workspace/send-hours', getWorkspaceSendHours);
 router.put('/workspace/send-hours', validate({ body: workHoursBody }), updateWorkspaceSendHours);
 router.post('/auto-reply-rules', validate({ body: ruleBody }), createAutoReplyRule);

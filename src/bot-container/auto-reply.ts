@@ -135,15 +135,16 @@ interface AutoReplyDependencies {
 }
 
 async function logActivity(
-  queryFn: QueryFn, rule: AutoReplyRule, message: IncomingForAutoReply, content: string,
-  status: 'sent' | 'blocked' | 'failed', error: string | null, outboundId: string | null,
+  queryFn: QueryFn, rule: AutoReplyRule | null, message: IncomingForAutoReply, content: string,
+  status: 'sent' | 'blocked' | 'failed' | 'ignored', error: string | null, outboundId: string | null,
+  stage: 'match' | 'ai' | 'policy' | 'presence' | 'billing' | 'send' | 'persist' = 'send',
 ): Promise<void> {
   await queryFn(
     `INSERT INTO auto_reply_logs (rule_id, tenant_id, device_key, inbound_message_id,
-       outbound_message_id, recipient, response_content, status, error_message)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [rule.id, message.tenantId, message.deviceKey, message.id, outboundId,
-      message.from, content, status, error],
+       outbound_message_id, recipient, response_content, status, error_message, stage)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [rule?.id ?? null, message.tenantId, message.deviceKey, message.id, outboundId,
+      message.from, content, status, error, stage],
   );
 }
 
@@ -160,14 +161,19 @@ export async function processAutoReply(
   if (!message.isGroup) return false;
 
   const rule = rules.find((candidate) => candidate.tenant_id === message.tenantId && matchesAutoReply(candidate, message.content));
-  if (!rule) return false;
+  if (!rule) {
+    if (rules.length > 0) {
+      await logActivity(queryFn, null, message, '', 'ignored', 'no_matching_rule', null, 'match');
+    }
+    return false;
+  }
 
   const storedConsent = await getStoredRecipientConsent(queryFn, message.tenantId, message.from);
   // This rule answers the inbound message that just started the chat. It is not a proactive send;
   // still honor an explicit STOP and let the dedicated STOP confirmation run separately.
   if (storedConsent === 'opted_out' || message.consentCommand === 'stop') {
     const reason = 'recipient_opted_out';
-    await logActivity(queryFn, rule, message, rule.response.content, 'blocked', reason, null);
+    await logActivity(queryFn, rule, message, rule.response.content, 'blocked', reason, null, 'policy');
     log.warn('Auto-reply blocked by recipient consent', {
       tenantId: message.tenantId, recipientLast4: message.from.replace(/\D/g, '').slice(-4), reason,
     });
@@ -193,7 +199,7 @@ export async function processAutoReply(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     if (rule.response.type === 'ai' || rule.response.type === 'ai_general') {
-      await logActivity(queryFn, rule, message, '[AI reply unavailable]', 'failed', reason, null);
+      await logActivity(queryFn, rule, message, '[AI reply unavailable]', 'failed', reason, null, 'ai');
       log.error('AI auto-reply generation failed', { ruleId: rule.id, error: reason });
       return false;
     }
@@ -207,7 +213,7 @@ export async function processAutoReply(
       recipientName: contactName, requirePersonalization: false,
     });
   if (!decision.allowed) {
-    await logActivity(queryFn, rule, message, content, 'blocked', decision.reason ?? 'blocked', null);
+    await logActivity(queryFn, rule, message, content, 'blocked', decision.reason ?? 'blocked', null, 'policy');
     log.warn('Auto-reply blocked by anti-ban policy', { ruleId: rule.id, reason: decision.reason });
     return false;
   }
@@ -217,7 +223,7 @@ export async function processAutoReply(
   const guard = dependencies.guard ?? ((deviceKey: string) => checkTransmission(deviceKey, queryFn));
   const early = await guard(message.deviceKey);
   if (!early.allowed) {
-    await logActivity(queryFn, rule, message, content, 'blocked', early.reason ?? 'blocked', null);
+    await logActivity(queryFn, rule, message, content, 'blocked', early.reason ?? 'blocked', null, 'policy');
     log.warn('Auto-reply blocked by administrative state', { ruleId: rule.id, reason: early.reason });
     return false;
   }
@@ -227,6 +233,7 @@ export async function processAutoReply(
   // number breaks for @lid chats.
   const jid = message.replyJid ?? `${message.from}@s.whatsapp.net`;
   let outboundId: string | null = null;
+  let failureStage: 'presence' | 'policy' | 'billing' | 'send' | 'persist' = 'presence';
   try {
     // Human order: notice and read the message, think, type, then send. The
     // configured delay is the total, so read and typing time fit inside it.
@@ -252,6 +259,7 @@ export async function processAutoReply(
     const result = await lock(message.tenantId, message.from, async () => {
       const deviceLock = dependencies.deviceSendLock ?? withDeviceSendLock;
       return deviceLock(message.deviceKey, async () => {
+        failureStage = 'policy';
         const consent = await getStoredRecipientConsent(queryFn, message.tenantId, message.from);
         if (consent === 'opted_out') return { blocked: 'recipient_opted_out' };
         const latestDecision = dependencies.canSend
@@ -263,6 +271,7 @@ export async function processAutoReply(
         if (!latestDecision.allowed) return { blocked: latestDecision.reason ?? 'anti_ban_policy' };
         const last = await guard(message.deviceKey);
         if (!last.allowed) return { blocked: last.reason ?? 'blocked' };
+        failureStage = 'billing';
         const payg = await queryFn('SELECT enabled FROM payg_settings WHERE singleton=true');
         if (Boolean((payg.rows[0] as { enabled?: boolean } | undefined)?.enabled)) {
           // Auto-replies use the connected socket directly, so reserve their charge here before
@@ -287,6 +296,7 @@ export async function processAutoReply(
           outboundId = preparedOutboundId;
 
           let sent: Awaited<ReturnType<WASocket['sendMessage']>>;
+          failureStage = 'send';
           try {
             sent = await sock.sendMessage(jid, { text: content },
               rule.response_config?.reply_to_trigger !== false && message.quotedMessage
@@ -299,6 +309,7 @@ export async function processAutoReply(
             );
             throw error;
           }
+          failureStage = 'persist';
           await queryFn(
             `UPDATE messages SET status='sent', whatsapp_message_id=$2, sent_at=NOW() WHERE id=$1`,
             [preparedOutboundId, sent?.key.id ?? null],
@@ -306,10 +317,12 @@ export async function processAutoReply(
           return { sent, outboundId: preparedOutboundId };
         }
 
+        failureStage = 'send';
         const sent = await sock.sendMessage(jid, { text: content },
           rule.response_config?.reply_to_trigger !== false && message.quotedMessage
             ? { quoted: message.quotedMessage }
             : undefined);
+        failureStage = 'persist';
         const inserted = await queryFn(
           `INSERT INTO messages (tenant_id, device_id, device_key, from_number, to_number, content,
            chat_jid, type, status, direction, whatsapp_message_id, sent_at)
@@ -324,7 +337,7 @@ export async function processAutoReply(
     });
     if ('blocked' in result) {
       const reason = result.blocked;
-      await logActivity(queryFn, rule, message, content, 'blocked', reason, null);
+      await logActivity(queryFn, rule, message, content, 'blocked', reason, null, 'policy');
       log.warn('Auto-reply stopped before sending by consent or administrative state', {
         ruleId: rule.id, tenantId: message.tenantId, recipientLast4: message.from.replace(/\D/g, '').slice(-4), reason,
       });
@@ -336,9 +349,11 @@ export async function processAutoReply(
     log.info('Auto-reply sent', { ruleId: rule.id, inboundMessageId: message.id, outboundMessageId: result.outboundId });
     return true;
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    await logActivity(queryFn, rule, message, content, 'failed', reason, outboundId);
-    log.error('Auto-reply failed', { ruleId: rule.id, error: reason });
+    const detail = error instanceof Error ? error.message : String(error);
+    const failedAt: string = failureStage;
+    const reason = failedAt === 'send' ? 'delivery_uncertain' : `${failedAt}_stage_failed`;
+    await logActivity(queryFn, rule, message, content, 'failed', reason, outboundId, failureStage);
+    log.error('Auto-reply failed', { ruleId: rule.id, stage: failureStage, error: detail });
     return false;
   }
 }
