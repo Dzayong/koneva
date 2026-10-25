@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, CircleHelp, Loader2, Radio, RefreshCw, Users, Megaphone, MessagesSquare, Plus, Send, Settings2, Link2, Camera, MessageCircle, Reply, Pencil, Copy, UserPlus, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -331,15 +332,18 @@ export default function WhatsAppGroupsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-display">Grup, komunitas & saluran</h1>
+          <h1 className="text-display">Kelola grup & saluran</h1>
           <p className="text-muted-foreground">Kelola grup dan komunitas, lalu terbitkan informasi untuk pengikut saluran WhatsApp milikmu.</p>
         </div>
-        <div className="w-full sm:w-72">
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end">
+          <Button asChild variant="outline"><Link href="/messages"><MessagesSquare className="mr-2 h-4 w-4" />Kembali ke kotak masuk</Link></Button>
+          <div className="w-full sm:w-72">
           <Label htmlFor="destination-device">Device WhatsApp</Label>
           <Select value={activeDevice} onValueChange={setDeviceKey} disabled={onlineDevices.length === 0}>
             <SelectTrigger id="destination-device" className="mt-2 w-full"><SelectValue placeholder="Pilih device online" /></SelectTrigger>
             <SelectContent>{onlineDevices.map((device) => <SelectItem key={device.id} value={device.device_key}>{device.label || device.device_key}</SelectItem>)}</SelectContent>
           </Select>
+          </div>
         </div>
       </div>
 

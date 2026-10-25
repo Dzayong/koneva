@@ -38,12 +38,11 @@ const groups: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { name: "Ringkasan", href: "/dashboard", icon: LayoutDashboard },
       { name: "Device", href: "/devices", icon: Smartphone, permission: "devices:read" },
-      { name: "Pesan", href: "/messages", icon: MessageSquare, permission: "messages:read" },
+      { name: "Kotak masuk", href: "/messages", icon: MessageSquare, permission: "messages:read" },
       { name: "Broadcast", href: "/broadcast", icon: Radio, permission: "messages:send" },
       { name: "Campaign Terjadwal", href: "/campaigns", icon: CalendarClock, permission: "messages:send" },
       { name: "Status", href: "/status", icon: CircleDot, permission: "devices:read" },
       { name: "Kontak", href: "/contacts", icon: Users, permission: "messages:read" },
-      { name: "Grup & saluran", href: "/groups", icon: Users, permission: "devices:read" },
       { name: "Analitik", href: "/analytics", icon: BarChart3, permission: "messages:read" },
       { name: "Balas otomatis", href: "/settings/auto-reply", icon: Reply, permission: "messages:read" },
     ],
