@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, CircleHelp, Loader2, Radio, RefreshCw, Users, Megaphone, MessagesSquare, Plus, Send, Settings2, Link2, Camera, MessageCircle, Reply, Pencil, Copy, UserPlus, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useDevices } from "@/hooks/use-devices";
+import { useInboxConversations } from "@/hooks/use-messages";
 import { api } from "@/lib/api";
 import type { WhatsAppChannelSummary, WhatsAppGroupSummary } from "@/lib/types";
 import { toast } from "sonner";
@@ -112,6 +113,8 @@ async function createCommunityAndWait(device: string, payload: { name: string; d
 
 function GroupWorkspace({ deviceKey, groups, isLoading, error }: { deviceKey: string; groups: WhatsAppGroupSummary[]; isLoading: boolean; error?: unknown }) {
   const queryClient = useQueryClient();
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const autoScrolledConversationRef = useRef("");
   const [selectedId, setSelectedId] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [editInfoOpen, setEditInfoOpen] = useState(false);
@@ -122,7 +125,19 @@ function GroupWorkspace({ deviceKey, groups, isLoading, error }: { deviceKey: st
   const [createOpen, setCreateOpen] = useState(false);
   const [text, setText] = useState("");
   const [replyId, setReplyId] = useState<string | null>(null);
-  const selected = groups.find((group) => group.id === selectedId) ?? groups[0];
+  const conversations = useInboxConversations({ device_key: deviceKey });
+  const lastActivityByChat = useMemo(() => {
+    const activity = new Map<string, number>();
+    for (const conversation of conversations.data ?? []) {
+      activity.set(conversation.chat_key, new Date(conversation.created_at).getTime());
+    }
+    return activity;
+  }, [conversations.data]);
+  const sortedGroups = useMemo(() => [...groups].sort((a, b) => {
+    const activityDifference = (lastActivityByChat.get(b.id) ?? 0) - (lastActivityByChat.get(a.id) ?? 0);
+    return activityDifference || a.name.localeCompare(b.name, "id");
+  }), [groups, lastActivityByChat]);
+  const selected = sortedGroups.find((group) => group.id === selectedId) ?? sortedGroups[0];
   const jid = selected?.id ?? "";
 
   const details = useQuery({ queryKey: ["whatsapp-group-details", deviceKey, jid], queryFn: () => api.getWhatsAppGroupDetails(deviceKey, jid), enabled: Boolean(deviceKey && jid), retry: false });
@@ -149,14 +164,27 @@ function GroupWorkspace({ deviceKey, groups, isLoading, error }: { deviceKey: st
     onSuccess: (result) => { toast.success(result.status === "quota_hold" ? "Pesan disimpan menunggu kuota." : "Pesan grup masuk antrean."); setText(""); setReplyId(null); void queryClient.invalidateQueries({ queryKey: ["whatsapp-group-messages", deviceKey, jid] }); },
     onError: (e) => toast.error("Pesan gagal dikirim", { description: apiMessage(e) }),
   });
-  const groupMessages = [...(messages.data?.data ?? [])].reverse();
+  const groupMessages = [...(messages.data?.data ?? [])].sort((a, b) =>
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+
+  useLayoutEffect(() => {
+    const panel = chatScrollRef.current;
+    if (!panel || !jid || !messages.data || messages.isLoading || messages.isError) return;
+
+    const conversationKey = `${deviceKey}::${jid}`;
+    const isNewConversation = autoScrolledConversationRef.current !== conversationKey;
+    const isNearLatest = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 96;
+    if (isNewConversation || isNearLatest) panel.scrollTop = panel.scrollHeight;
+    autoScrolledConversationRef.current = conversationKey;
+  }, [deviceKey, jid, messages.data, messages.dataUpdatedAt, messages.isError, messages.isLoading]);
 
   return <>
     <div className="grid h-[68dvh] min-h-[460px] max-h-[760px] grid-rows-[minmax(200px,0.45fr)_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card shadow-sm lg:grid-cols-[340px_minmax(0,1fr)] lg:grid-rows-1">
       <aside className="flex min-h-0 flex-col border-b lg:border-b-0 lg:border-r">
         <div className="flex items-center justify-between gap-3 border-b p-4"><div><h2 className="font-semibold">Grup</h2><p className="text-xs text-muted-foreground">{groups.length} percakapan</p></div><div className="flex gap-2"><Button size="icon" variant="outline" aria-label="Muat ulang grup" onClick={() => void queryClient.invalidateQueries({ queryKey: ["whatsapp-groups", deviceKey] })}><RefreshCw className="h-4 w-4" /></Button><Button size="icon" aria-label="Buat grup" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /></Button></div></div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
-          {isLoading ? <p className="p-5 text-sm text-muted-foreground">Memuat grup…</p> : error ? <p className="p-4 text-sm text-destructive">{apiMessage(error)}</p> : groups.length === 0 ? <div className="p-5 text-center"><p className="text-sm text-muted-foreground">Belum ada grup di device ini.</p><Button className="mt-3" size="sm" onClick={() => setCreateOpen(true)}><Plus className="mr-2 h-4 w-4" />Tambah grup</Button></div> : groups.map((group) => <button type="button" key={group.id} onClick={() => { setSelectedId(group.id); setReplyId(null); setProfileOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors ${jid === group.id ? "bg-primary/10" : "hover:bg-muted/70"}`}>
+          {isLoading ? <p className="p-5 text-sm text-muted-foreground">Memuat grup…</p> : error ? <p className="p-4 text-sm text-destructive">{apiMessage(error)}</p> : sortedGroups.length === 0 ? <div className="p-5 text-center"><p className="text-sm text-muted-foreground">Belum ada grup di device ini.</p><Button className="mt-3" size="sm" onClick={() => setCreateOpen(true)}><Plus className="mr-2 h-4 w-4" />Tambah grup</Button></div> : sortedGroups.map((group) => <button type="button" key={group.id} onClick={() => { setSelectedId(group.id); setReplyId(null); setProfileOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors ${jid === group.id ? "bg-primary/10" : "hover:bg-muted/70"}`}>
             <Avatar className="h-12 w-12 shrink-0"><AvatarImage src={group.image_url ?? undefined} alt="" /><AvatarFallback className="bg-primary/10 font-semibold text-primary">{group.name.slice(0, 1).toLocaleUpperCase("id-ID")}</AvatarFallback></Avatar><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{group.name}</span><span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"><Users className="h-3.5 w-3.5" />{group.member_count} anggota</span></span>
           </button>)}
         </div>
@@ -167,7 +195,7 @@ function GroupWorkspace({ deviceKey, groups, isLoading, error }: { deviceKey: st
           <header className="flex items-center justify-between gap-3 border-b p-3 sm:p-4"><button type="button" onClick={() => setProfileOpen(true)} className="flex min-w-0 items-center gap-3 text-left"><Avatar className="h-11 w-11"><AvatarImage src={details.data?.image_url ?? undefined} /><AvatarFallback className="bg-primary/10 font-semibold text-primary">{selected.name.slice(0, 1).toLocaleUpperCase("id-ID")}</AvatarFallback></Avatar><span className="min-w-0"><span className="block truncate font-semibold">{selected.name}</span><span className="block text-xs text-muted-foreground">{selected.member_count} anggota</span></span></button><Button size="icon" variant="ghost" aria-label="Info grup" onClick={() => setProfileOpen(true)}><Settings2 className="h-5 w-5" /></Button></header>
 
           <>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-muted/20 p-4 sm:p-6">
+            <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-muted/20 p-4 sm:p-6">
               {messages.isLoading ? <p className="py-12 text-center text-sm text-muted-foreground">Memuat percakapan…</p> : messages.isError ? <p className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">{apiMessage(messages.error)}</p> : groupMessages.length === 0 ? <div className="py-12 text-center"><MessageCircle className="mx-auto h-8 w-8 text-muted-foreground/50" /><p className="mt-3 text-sm text-muted-foreground">Belum ada pesan grup yang tersimpan.</p><p className="mt-1 text-xs text-muted-foreground">Pesan baru muncul saat device tersambung. Riwayat lama bergantung pada data yang WhatsApp kirim saat sinkronisasi.</p></div> : groupMessages.map((message) => <div key={message.id} className={`flex ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 shadow-sm ${message.direction === "outbound" ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm border bg-card"}`}><p className="whitespace-pre-wrap break-words text-sm">{message.content || (message.type === "image" ? "📷 Foto" : message.type === "video" ? "🎥 Video" : message.type === "audio" ? "🎙️ Pesan suara" : "Pesan")}</p><div className="mt-1 flex items-center justify-end gap-2"><time className="text-[10px] opacity-70">{new Date(message.created_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</time>{message.direction === "inbound" && messages.dataUpdatedAt >= new Date(message.created_at).getTime() && messages.dataUpdatedAt - new Date(message.created_at).getTime() <= 24 * 60 * 60 * 1000 && <button type="button" className="inline-flex items-center gap-1 text-[10px] underline opacity-80" onClick={() => setReplyId(message.id)}><Reply className="h-3 w-3" />Balas</button>}</div></div>
               </div>)}
