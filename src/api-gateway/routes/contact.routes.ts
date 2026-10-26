@@ -155,9 +155,14 @@ export async function deleteContact(request: Request, response: Response): Promi
 
 export async function listContactGroups(request: Request, response: Response): Promise<void> {
   const result = await pool.query(
-    `SELECT g.id, g.name, g.created_at, g.updated_at, count(m.contact_id)::int AS member_count
+    `SELECT g.id, g.name, g.created_at, g.updated_at,
+       count(DISTINCT m.contact_id)::int AS member_count,
+       count(DISTINCT m.contact_id) FILTER (WHERE p.status = 'opted_in')::int AS opted_in_count
      FROM contact_groups g LEFT JOIN contact_group_members m
        ON m.group_id = g.id AND m.tenant_id = g.tenant_id
+     LEFT JOIN contacts c ON c.id = m.contact_id AND c.tenant_id = m.tenant_id
+     LEFT JOIN recipient_preferences p ON p.tenant_id = c.tenant_id
+       AND p.phone_number = regexp_replace(c.phone_number, '[^0-9]', '', 'g')
      WHERE g.tenant_id = $1 GROUP BY g.id ORDER BY g.name ASC`, [request.tenant!.id],
   );
   response.json({ success: true, data: result.rows });

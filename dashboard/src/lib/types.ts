@@ -229,6 +229,8 @@ export interface ContactGroup {
   id: string;
   name: string;
   member_count: number;
+  /** Contacts in the group whose recipient consent is currently opted in. */
+  opted_in_count?: number;
   created_at: string;
   updated_at: string;
 }

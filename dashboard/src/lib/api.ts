@@ -56,7 +56,6 @@ import type {
   ApiSuccess,
   DokuCheckoutResult,
   AutoReplyRule,
-  AutoReplyLogRecord,
   AutoReplyRuleInput,
   WorkspaceSendHours,
   CreateDeviceRequest,
@@ -521,13 +520,6 @@ class ApiClient {
   async getAutoReplyRules(): Promise<AutoReplyRule[]> {
     const response = await this.client.get<ApiSuccess<AutoReplyRule[]>>("/api/v1/auto-reply-rules", {
       skipErrorToast: true,
-    });
-    return response.data.data;
-  }
-
-  async getAutoReplyLogs(limit = 50): Promise<AutoReplyLogRecord[]> {
-    const response = await this.client.get<ApiSuccess<AutoReplyLogRecord[]>>("/api/v1/auto-reply-logs", {
-      params: { limit }, skipErrorToast: true,
     });
     return response.data.data;
   }

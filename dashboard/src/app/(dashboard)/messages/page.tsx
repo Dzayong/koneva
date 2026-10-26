@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { ArrowDownLeft, ArrowLeft, ArrowUpRight, ImagePlus, Loader2, MessageSquare, Search, Send, Smartphone, Users, X, Megaphone, Settings2, Plus } from "lucide-react";
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, ImagePlus, Loader2, MessageSquare, Search, Send, Smartphone, Users, X, Megaphone, Settings2, Plus, ZoomIn, ZoomOut } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,6 +19,7 @@ import { useInboxConversations, useInboxDevices, useInboxMessages } from "@/hook
 import { usePermissions } from "@/hooks/use-me";
 import type { InboxConversation } from "@/lib/types";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 const ALL = "all";
 const conversationId = (item: InboxConversation) => `${item.device_key}::${item.chat_key}`;
@@ -34,6 +35,8 @@ const messagePreview = (item: InboxConversation) => item.type === "text" ? item.
 
 function InboxMedia({ message }: { message: import("@/lib/types").Message }) {
   const [source, setSource] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [zoom, setZoom] = useState(1);
   useEffect(() => {
     const media = message.media_url;
     if (!media) return;
@@ -48,11 +51,28 @@ function InboxMedia({ message }: { message: import("@/lib/types").Message }) {
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [message.media_url]);
   if (!source) return null;
-  return message.type === "video"
-    ? <video className="mb-2 max-h-80 max-w-full rounded-lg" src={source} controls playsInline preload="metadata" />
-    : message.type === "image"
-      ? <a href={source} target="_blank" rel="noreferrer"><img className="mb-2 max-h-80 max-w-full rounded-lg object-contain" src={source} alt="Foto yang dikirim" loading="lazy" /></a>
-      : null;
+  if (message.type === "video") return <video className="mb-2 max-h-80 max-w-full rounded-lg" src={source} controls playsInline preload="metadata" />;
+  if (message.type !== "image") return null;
+
+  return <>
+    <button type="button" className="mb-2 block cursor-zoom-in rounded-lg text-left" onClick={() => { setZoom(1); setPreviewOpen(true); }} aria-label="Buka foto">
+      <img className="max-h-80 max-w-full rounded-lg object-contain" src={source} alt="Foto yang dikirim. Klik untuk memperbesar." loading="lazy" />
+    </button>
+    <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+      <DialogContent showCloseButton={false} className="h-[min(92dvh,900px)] w-[min(96vw,1200px)] max-w-none overflow-hidden border-0 bg-black p-0 text-white sm:max-w-none">
+        <DialogTitle className="sr-only">Pratinjau foto</DialogTitle>
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-full bg-black/60 p-1">
+          <Button type="button" variant="ghost" size="icon" className="text-white hover:bg-white/20 hover:text-white" aria-label="Perkecil foto" disabled={zoom <= 1} onClick={() => setZoom((value) => Math.max(1, Number((value - 0.25).toFixed(2))))}><ZoomOut className="h-4 w-4" /></Button>
+          <span className="min-w-12 text-center text-xs tabular-nums">{Math.round(zoom * 100)}%</span>
+          <Button type="button" variant="ghost" size="icon" className="text-white hover:bg-white/20 hover:text-white" aria-label="Perbesar foto" disabled={zoom >= 4} onClick={() => setZoom((value) => Math.min(4, Number((value + 0.25).toFixed(2))))}><ZoomIn className="h-4 w-4" /></Button>
+          <Button type="button" variant="ghost" size="icon" className="ml-1 text-white hover:bg-white/20 hover:text-white" aria-label="Tutup pratinjau" onClick={() => setPreviewOpen(false)}><X className="h-5 w-5" /></Button>
+        </div>
+        <div className="flex h-full w-full items-center justify-center overflow-auto p-8">
+          <img src={source} alt="Foto yang dikirim" className="max-h-full max-w-full object-contain transition-transform duration-150" style={{ transform: `scale(${zoom})` }} />
+        </div>
+      </DialogContent>
+    </Dialog>
+  </>;
 }
 
 export default function MessagesPage() {

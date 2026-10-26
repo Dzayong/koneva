@@ -31,8 +31,10 @@ import {
   useDeleteContact,
   useImportContacts,
   useContactGroups,
+  useSetContactConsent,
 } from "@/hooks/use-contacts";
 import { api } from "@/lib/api";
+import type { ContactRecord } from "@/lib/types";
 import {
   clearLegacyContacts,
   getLegacyContacts,
@@ -52,6 +54,9 @@ export default function ContactsPage() {
   const [groupName, setGroupName] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState("");
   const [confirmInPersonConsentForImport, setConfirmInPersonConsentForImport] = useState(false);
+  const [consentContact, setConsentContact] = useState<ContactRecord | null>(null);
+  const [consentSourceNote, setConsentSourceNote] = useState("");
+  const [consentConfirmed, setConsentConfirmed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data, isLoading, isPlaceholderData } = useContacts({
@@ -60,6 +65,7 @@ export default function ContactsPage() {
     offset,
   });
   const deleteContact = useDeleteContact();
+  const setContactConsent = useSetContactConsent();
   const importContacts = useImportContacts();
   const groups = useContactGroups();
   const groupMembers = useQuery({
@@ -218,7 +224,7 @@ export default function ContactsPage() {
             <TableRow>
               <TableHead className="text-label">Nama</TableHead>
               <TableHead className="text-label">Telepon</TableHead>
-              <TableHead className="text-label hidden md:table-cell">Izin pesan</TableHead>
+              <TableHead className="text-label">Izin pesan</TableHead>
               <TableHead className="text-label hidden sm:table-cell">Label</TableHead>
               <TableHead className="w-12" />
             </TableRow>
@@ -258,12 +264,27 @@ export default function ContactsPage() {
                     </div>
                   </TableCell>
                   <TableCell className="tabular-nums">{formatPhoneNumber(contact.phone_number)}</TableCell>
-                  <TableCell className="hidden md:table-cell">
+                  <TableCell>
                     {contact.consent_status === "opted_in" ? (
                       <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-700 dark:text-emerald-300">Diizinkan</span>
                     ) : contact.consent_status === "opted_out" ? (
                       <span className="rounded-full border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">Berhenti</span>
                     ) : <span className="text-xs text-muted-foreground">Belum dicatat</span>}
+                    {contact.consent_status !== "opted_in" && (
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        className="ml-1 h-auto px-1 py-1"
+                        onClick={() => {
+                          setConsentContact(contact);
+                          setConsentSourceNote("");
+                          setConsentConfirmed(false);
+                        }}
+                      >
+                        Catat izin
+                      </Button>
+                    )}
                   </TableCell>
                   <TableCell className="hidden sm:table-cell">
                     <div className="flex flex-wrap gap-1.5">
@@ -324,6 +345,65 @@ export default function ContactsPage() {
       </div>
 
       <AddContactDialog open={addOpen} onOpenChange={setAddOpen} />
+
+      <Dialog
+        open={Boolean(consentContact)}
+        onOpenChange={(open) => {
+          if (!open && !setContactConsent.isPending) {
+            setConsentContact(null);
+            setConsentSourceNote("");
+            setConsentConfirmed(false);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Catat izin menerima pesan</DialogTitle>
+            <DialogDescription>
+              {consentContact?.name || formatPhoneNumber(consentContact?.phone_number ?? "")} harus sudah menyetujui pesan WhatsApp sebelum dimasukkan ke penerima Campaign.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <label className="flex items-start gap-3 rounded-lg border p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={consentConfirmed}
+                onChange={(event) => setConsentConfirmed(event.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-primary"
+              />
+              <span>Saya memastikan penerima ini memang sudah memberi izin untuk menerima pesan.</span>
+            </label>
+            <div className="space-y-2">
+              <Label htmlFor="consent-source-note">Sumber izin</Label>
+              <Input
+                id="consent-source-note"
+                value={consentSourceNote}
+                onChange={(event) => setConsentSourceNote(event.target.value)}
+                placeholder="Contoh: formulir pendaftaran atau persetujuan langsung"
+                maxLength={500}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">Catatan ini disimpan sebagai jejak audit. Jangan mencatat izin jika penerima belum menyetujuinya.</p>
+            <Button
+              className="w-full"
+              disabled={!consentContact || !consentConfirmed || !consentSourceNote.trim() || setContactConsent.isPending}
+              onClick={() => {
+                if (!consentContact) return;
+                setContactConsent.mutate(
+                  { id: consentContact.id, status: "opted_in", source_note: consentSourceNote.trim() },
+                  { onSuccess: () => {
+                    setConsentContact(null);
+                    setConsentSourceNote("");
+                    setConsentConfirmed(false);
+                  } },
+                );
+              }}
+            >
+              {setContactConsent.isPending ? "Menyimpan…" : "Simpan izin"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

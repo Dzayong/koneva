@@ -50,7 +50,10 @@ export function useSetContactConsent() {
     mutationFn: ({ id, status, source_note }: { id: string; status: "opted_in" | "opted_out"; source_note: string }) =>
       api.setContactConsent(id, status, source_note),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["contacts"] }),
+        queryClient.invalidateQueries({ queryKey: ["contact-groups"] }),
+      ]);
       toast.success("Persetujuan penerima dicatat");
     },
     onError: (error) => toast.error("Kontak tersimpan, tetapi persetujuan gagal dicatat", {
