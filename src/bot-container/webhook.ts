@@ -28,7 +28,7 @@ export interface WebhookPayload {
   is_group?: boolean;
   content?: string;
   /** Message payload type when WhatsApp supplies a non-text message. */
-  type?: 'text' | 'image' | 'video' | 'audio' | 'document';
+  type?: 'text' | 'image' | 'video' | 'audio' | 'ptt' | 'document';
   /** Private media ID; fetch through the tenant API using the device API key. */
   media_id?: string;
   direction?: 'inbound' | 'outbound';

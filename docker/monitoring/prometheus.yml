@@ -14,6 +14,13 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["prometheus:9090"]
+  - job_name: api-gateway
+    dns_sd_configs:
+      - names: ["api-gateway"]
+        type: A
+        port: 8000
+        refresh_interval: 30s
+    metrics_path: /metrics
   - job_name: node
     static_configs:
       - targets: ["node-exporter:9100"]

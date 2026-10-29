@@ -14,6 +14,37 @@ import { usePermissions } from "@/hooks/use-me";
 import { api } from "@/lib/api";
 import { apiFailure } from "@/lib/errors";
 
+function CommPreferencesCard() {
+  const qc = useQueryClient();
+  const prefs = useQuery({
+    queryKey: ["comm-preferences"],
+    queryFn: () => api.getCommPreferences(),
+  });
+  const update = useMutation({
+    mutationFn: (productUpdates: boolean) => api.updateCommPreferences(productUpdates),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["comm-preferences"] }); toast.success("Preferensi disimpan"); },
+    onError: (error) => toast.error("Gagal menyimpan", { description: apiFailure(error).message }),
+  });
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Komunikasi</CardTitle>
+        <CardDescription>Notifikasi operasional dan keamanan selalu dikirim. Pilih apakah Anda ingin menerima info produk dan pembaruan fitur.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {prefs.isLoading ? <Skeleton className="h-6 w-48" /> : prefs.isError ? <p className="text-sm text-destructive">Gagal memuat preferensi.</p> : (
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={prefs.data?.product_updates ?? true}
+              onChange={(e) => update.mutate(e.target.checked)} disabled={update.isPending} />
+            Terima info produk dan pembaruan fitur
+          </label>
+        )}
+        <p className="text-xs text-muted-foreground">Notifikasi keamanan (login, perangkat, pelanggaran) selalu aktif dan tidak bisa dinonaktifkan.</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { can } = usePermissions();
@@ -80,6 +111,8 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <CommPreferencesCard />
     </div>
   );
 }

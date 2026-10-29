@@ -41,3 +41,23 @@ export function useDokuCheckout() {
 export function usePaygTopupCheckout() {
   return useMutation({ mutationFn: (amountIdr: number) => api.createPaygTopupCheckout(amountIdr) });
 }
+
+export function useUsageHistory(filters: import("@/lib/types").UsageHistoryFilters) {
+  const { can } = usePermissions();
+  return useQuery({
+    queryKey: ["usage-history", filters],
+    queryFn: () => api.getUsageHistory(filters),
+    enabled: can("billing:manage"),
+    staleTime: 15_000,
+  });
+}
+
+export function useUsageDevices() {
+  const { can } = usePermissions();
+  return useQuery({
+    queryKey: ["usage-devices"],
+    queryFn: () => api.getUsageDevices(),
+    enabled: can("billing:manage"),
+    staleTime: 60_000,
+  });
+}

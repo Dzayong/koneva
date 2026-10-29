@@ -354,16 +354,16 @@ export async function getBillingState(tenantId: string) {
 
 /** One cheap query for the banner every member sees; the full picture is owner-only. */
 export async function getSubscriptionSummary(tenantId: string, now: Date = new Date()) {
-  const payg = (await pool.query<{ enabled: boolean; price_per_message_idr: number | null }>(
-    'SELECT enabled,price_per_message_idr FROM payg_settings WHERE singleton=true',
+  const payg = (await pool.query<{ enabled: boolean }>(
+    'SELECT enabled FROM payg_settings WHERE singleton=true',
   )).rows[0];
   if (payg?.enabled) {
-    const balance = (await pool.query<{ available_idr: number | string }>(
-      'SELECT available_idr FROM wallet_accounts WHERE tenant_id=$1', [tenantId],
-    )).rows[0]?.available_idr ?? 0;
+    const wallet = await getWalletState(tenantId);
     return {
       plan_id: 'payg', plan_name: 'PAYG', status: 'active' as const,
-      can_send: Number(balance) >= Number(payg.price_per_message_idr ?? Number.MAX_SAFE_INTEGER),
+      // This summary represents ordinary/API sending. Auto-reply reservations still
+      // validate their own category atomically before enqueueing.
+      can_send: wallet.available_idr >= wallet.prices.api,
       days_left: null, period_end: null,
     };
   }

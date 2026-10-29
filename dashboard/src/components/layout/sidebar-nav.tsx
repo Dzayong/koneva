@@ -10,6 +10,7 @@ import {
   CalendarClock,
   CircleDot,
   CreditCard,
+  FileText,
   Webhook,
   History,
   KeyRound,
@@ -59,6 +60,7 @@ const groups: Array<{ label: string; items: NavItem[] }> = [
     label: "ADMINISTRASI",
     items: [
       { name: "Tagihan", href: "/billing", icon: CreditCard, permission: "billing:manage" },
+      { name: "Riwayat Penggunaan", href: "/billing/usage", icon: FileText, permission: "billing:manage" },
       { name: "Aktivitas", href: "/activity", icon: History, permission: "audit:read" },
       { name: "Pengaturan", href: "/settings", icon: Settings, permission: "devices:read" },
     ],

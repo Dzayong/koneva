@@ -15,6 +15,13 @@ import { useDashboardStats } from "@/hooks/use-messages";
 import { useContacts } from "@/hooks/use-contacts";
 import { useBilling } from "@/hooks/use-billing";
 
+const PAYG_TIER_LABEL: Record<string, string> = {
+  starter: "Mulai",
+  growth: "Berkembang",
+  scale: "Skala",
+  max: "Tarif terbaik",
+};
+
 export default function DashboardPage() {
   const { user, can } = usePermissions();
   const { data: devices, isLoading: devicesLoading } = useDevices();
@@ -72,8 +79,11 @@ export default function DashboardPage() {
                   <p className="mt-1 text-xl font-semibold">Rp {billing.wallet.spent_idr.toLocaleString("id-ID")}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Tarif per pesan</p>
-                  <p className="mt-1 text-xl font-semibold">Rp {(billing.wallet.price_per_message_idr ?? 0).toLocaleString("id-ID")}</p>
+                  <p className="text-xs text-muted-foreground">Tier & tarif</p>
+                  <p className="mt-1 text-xl font-semibold">{PAYG_TIER_LABEL[billing.wallet.pricing_tier] ?? billing.wallet.pricing_tier}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    API Rp {billing.wallet.prices.api.toLocaleString("id-ID")} · Otomatis Rp {billing.wallet.prices.auto_reply.toLocaleString("id-ID")} · AI Rp {billing.wallet.prices.ai_reply.toLocaleString("id-ID")}
+                  </p>
                 </div>
               </div>
             ) : (

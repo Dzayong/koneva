@@ -2,7 +2,8 @@ import type { Pool, PoolClient } from 'pg';
 
 export type SystemNotificationType =
   | 'signup.created' | 'invoice.paid' | 'student.requested' | 'student.decided'
-  | 'device.status_changed' | 'otp.threshold' | 'operator.break_glass';
+  | 'device.status_changed' | 'otp.threshold' | 'operator.break_glass'
+  | 'balance.low';
 
 /** Add a safe, already-rendered event to the durable outbox only when the owner enabled delivery. */
 export async function recordSystemNotification(

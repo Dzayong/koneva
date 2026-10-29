@@ -3,15 +3,19 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import config from './config';
 
-export const MEDIA_LIMITS = { image: 16 * 1024 * 1024, video: 64 * 1024 * 1024 } as const;
+export const MEDIA_LIMITS = { image: 16 * 1024 * 1024, video: 64 * 1024 * 1024, audio: 16 * 1024 * 1024 } as const;
 const EXTENSIONS: Record<string, string> = {
   'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
   'video/mp4': '.mp4', 'video/3gpp': '.3gp',
+  'audio/ogg': '.ogg', 'audio/ogg; codecs=opus': '.ogg',
 };
 
-export function mediaTypeForMime(mime: string): 'image' | 'video' | undefined {
-  return mime.startsWith('image/') && EXTENSIONS[mime] ? 'image'
-    : mime.startsWith('video/') && EXTENSIONS[mime] ? 'video' : undefined;
+export function mediaTypeForMime(mime: string): 'image' | 'video' | 'audio' | undefined {
+  const base = mime.split(';')[0]!.trim();
+  if (base.startsWith('image/') && EXTENSIONS[base]) return 'image';
+  if (base.startsWith('video/') && EXTENSIONS[base]) return 'video';
+  if (base === 'audio/ogg') return 'audio';
+  return undefined;
 }
 
 export function validMediaBytes(bytes: Buffer, mime: string): boolean {
@@ -20,6 +24,7 @@ export function validMediaBytes(bytes: Buffer, mime: string): boolean {
   if (mime === 'image/gif') return bytes.subarray(0, 6).toString('ascii').startsWith('GIF8');
   if (mime === 'image/webp') return bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
   if (mime === 'video/mp4' || mime === 'video/3gpp') return bytes.length > 12 && bytes.subarray(4, 8).toString('ascii') === 'ftyp';
+  if (mime.startsWith('audio/ogg')) return bytes.length > 4 && bytes.subarray(0, 4).toString('ascii') === 'OggS';
   return false;
 }
 
@@ -29,8 +34,9 @@ function mediaPath(id: string): string {
 }
 
 export async function saveMedia(bytes: Buffer, mime: string): Promise<string> {
-  if (!mediaTypeForMime(mime) || !validMediaBytes(bytes, mime)) throw new Error('Unsupported or invalid media');
-  const limit = mime.startsWith('image/') ? MEDIA_LIMITS.image : MEDIA_LIMITS.video;
+  const mType = mediaTypeForMime(mime);
+  if (!mType || !validMediaBytes(bytes, mime)) throw new Error('Unsupported or invalid media');
+  const limit = mType === 'image' ? MEDIA_LIMITS.image : mType === 'audio' ? MEDIA_LIMITS.audio : MEDIA_LIMITS.video;
   if (bytes.length === 0 || bytes.length > limit) throw new Error('Media exceeds the allowed size');
   const id = randomUUID();
   await mkdir(config.mediaStoragePath, { recursive: true, mode: 0o700 });

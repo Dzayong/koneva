@@ -5,6 +5,7 @@ import config from '../../shared/config';
 import { ServiceError } from './service-error';
 import { computeDuitkuRequestSignature, verifyDuitkuCallbackSignature } from './duitku-signature';
 import { creditWalletWithClient } from './wallet.service';
+import { duitkuCallbacksTotal } from '../metrics';
 
 const CREATE_INVOICE_PATH = '/api/merchant/createInvoice';
 const CALLBACK_PATH = '/billing/duitku/notify';
@@ -137,6 +138,7 @@ export async function handleDuitkuCallback(fields: DuitkuCallback): Promise<Duit
       }
     }
     await client.query('UPDATE duitku_callback_events SET applied_at=CASE WHEN $2 THEN now() ELSE applied_at END, result_reason=$3 WHERE event_key=$1', [eventKey, applied, reason]);
+    duitkuCallbacksTotal.inc({ result: reason });
     return { applied, reason };
   });
 }

@@ -44,6 +44,7 @@ import { startOtpMaintenance } from './services/otp-maintenance';
 import { drainSystemNotificationOutbox } from './services/system-notifications';
 import { mediaTypeForMime, saveMedia, MEDIA_LIMITS, validMediaBytes, removeMedia } from '../shared/media-storage';
 import { purgeExpiredMedia } from './services/media.service';
+import { registry as metricsRegistry, metricsMiddleware } from './metrics';
 
 assertMailerConfig(); // invalid mail settings stop startup; unset = OTP features fail safe
 const operatorConfig = readOperatorConfig();
@@ -70,7 +71,8 @@ app.post('/internal/media/upload', adminAuth, express.raw({ type: 'application/o
     const bytes = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
     const mediaType = mediaTypeForMime(mime);
     const device = (await pool.query<{ id: string; tenant_id: string }>('SELECT id, tenant_id FROM devices WHERE device_key=$1 LIMIT 1', [deviceKey])).rows[0];
-    if (!device || !mediaType || bytes.length === 0 || bytes.length > (mediaType === 'image' ? MEDIA_LIMITS.image : MEDIA_LIMITS.video) || !validMediaBytes(bytes, mime)) {
+    const maxBytes = mediaType === 'image' ? MEDIA_LIMITS.image : mediaType === 'audio' ? MEDIA_LIMITS.audio : MEDIA_LIMITS.video;
+    if (!device || !mediaType || bytes.length === 0 || bytes.length > maxBytes || !validMediaBytes(bytes, mime)) {
       response.status(400).json({ success: false, error: { code: 'INVALID_MEDIA', message: 'Unsupported media or device' } }); return;
     }
     const id = await saveMedia(bytes, mime);
@@ -120,7 +122,15 @@ app.use((request, response, next) => {
   next();
 });
 
+app.use(metricsMiddleware);
+
 app.get('/health', (_request, response) => response.json({ status: 'ok' }));
+app.get('/metrics', async (_request, response, next) => {
+  try {
+    response.set('Content-Type', metricsRegistry.contentType);
+    response.end(await metricsRegistry.metrics());
+  } catch (error) { next(error); }
+});
 app.get('/ready', async (_request, response) => {
   try {
     await Promise.all([

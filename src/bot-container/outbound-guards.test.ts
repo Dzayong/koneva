@@ -356,7 +356,7 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
     const da = await device(a), db_ = await device(b);
     const rule = async (tenantId: string, deviceKey: string): Promise<AutoReplyRule> => {
       const id = (await pool.query<{ id: string }>("INSERT INTO auto_reply_rules(tenant_id,device_key,trigger_type,trigger_pattern,response_type,response_content,delay_ms) VALUES ($1,$2,'all','','text','balasan otomatis',0) RETURNING id", [tenantId, deviceKey])).rows[0]!.id;
-      return { id, tenant_id: tenantId, device_key: deviceKey, trigger: { type: 'all', pattern: '' }, response: { type: 'text', content: 'balasan otomatis', delay_ms: 0 }, is_active: true };
+      return { id, tenant_id: tenantId, device_key: deviceKey, trigger: { type: 'all', pattern: '' }, response: { type: 'text', content: 'balasan otomatis', delay_ms: 0 }, destination_scope: 'all' as const, is_active: true };
     };
     const incoming = async (d: { id: string; deviceKey: string; tenantId: string }) => {
       await pool.query(`INSERT INTO recipient_preferences(tenant_id,phone_number,status,source,evidence_ref)
@@ -411,7 +411,7 @@ test('outbound controls: suspension, pause, last check, urgent, retry, commands,
     )).rows[0]!.id;
     const autoRule: AutoReplyRule = {
       id: ruleId, tenant_id: ws, device_key: d.deviceKey,
-      trigger: { type: 'all', pattern: '' }, response: { type: 'text', content: 'balasan otomatis', delay_ms: 0 }, is_active: true,
+      trigger: { type: 'all', pattern: '' }, response: { type: 'text', content: 'balasan otomatis', delay_ms: 0 }, destination_scope: 'all', is_active: true,
     };
     const autoMessage = {
       id: inbound.rows[0]!.id, tenantId: ws, deviceId: d.id, deviceKey: d.deviceKey,

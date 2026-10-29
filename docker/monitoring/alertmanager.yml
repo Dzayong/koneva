@@ -1,9 +1,33 @@
+# Alertmanager configuration for KONEVA
+# Replace WEBHOOK_URL with your Discord/Telegram/ntfy.sh webhook before deploying.
+# Example ntfy.sh: https://ntfy.sh/koneva-alerts
+# Example Discord: https://discord.com/api/webhooks/...
+
+global:
+  resolve_timeout: 5m
+
 route:
   receiver: default
   group_by: [alertname, job]
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
+  routes:
+    - match: { severity: critical }
+      receiver: critical
+      repeat_interval: 1h
 
 receivers:
   - name: default
+    webhook_configs:
+      - url: "http://host.docker.internal:9999/alert-sink"
+        send_resolved: true
+  - name: critical
+    webhook_configs:
+      - url: "http://host.docker.internal:9999/alert-sink"
+        send_resolved: true
+
+inhibit_rules:
+  - source_matchers: [severity = critical]
+    target_matchers: [severity = warning]
+    equal: [alertname]

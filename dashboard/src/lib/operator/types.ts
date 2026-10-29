@@ -428,3 +428,59 @@ export function parseOwnerInsights(v: unknown): OwnerInsights {
     data_limits: arr(d["data_limits"]).map(str),
   };
 }
+
+// ---- PAYG Revenue Insights ----
+
+export interface PaygCategoryRevenue {
+  billing_category: string;
+  captured: { count: number; idr: number };
+  released: { count: number; idr: number };
+  pending: { count: number; idr: number };
+}
+export interface PaygWorkspaceRevenue {
+  tenant_id: string; name: string; pricing_tier_code: string;
+  lifetime_spent_idr: number; captured_count: number; captured_idr: number; available_idr: number;
+}
+export interface PaygRevenueInsights {
+  measured_at: string;
+  revenue_by_category: PaygCategoryRevenue[];
+  totals: { revenue_idr: number; messages_charged: number; estimated_variable_cost_idr: number; estimated_margin_idr: number; margin_percent: number };
+  funding: { total_topups_idr: number; total_vouchers_idr: number; total_funded_idr: number; topup_count: number; unspent_balance_idr: number };
+  ai_cost_alert: { captured_count: number; revenue_idr: number; avg_selling_price_idr: number; floor_price_idr: number; warning: boolean };
+  workspaces: PaygWorkspaceRevenue[];
+  pricing_tiers: { code: string; min_spent_idr: number; next_at_idr: number | null; prices: { api: number; auto_reply: number; ai_reply: number } }[];
+}
+
+export function parsePaygRevenueInsights(v: unknown): PaygRevenueInsights {
+  const d = obj(v); const t = obj(d["totals"]); const f = obj(d["funding"]); const ai = obj(d["ai_cost_alert"]);
+  return {
+    measured_at: str(d["measured_at"]),
+    revenue_by_category: arr(d["revenue_by_category"]).map((c) => {
+      const x = obj(c); const cap = obj(x["captured"]); const rel = obj(x["released"]); const pen = obj(x["pending"]);
+      return { billing_category: str(x["billing_category"]),
+        captured: { count: num(cap["count"]), idr: num(cap["idr"]) },
+        released: { count: num(rel["count"]), idr: num(rel["idr"]) },
+        pending: { count: num(pen["count"]), idr: num(pen["idr"]) } };
+    }),
+    totals: { revenue_idr: num(t["revenue_idr"]), messages_charged: num(t["messages_charged"]),
+      estimated_variable_cost_idr: num(t["estimated_variable_cost_idr"]), estimated_margin_idr: num(t["estimated_margin_idr"]),
+      margin_percent: num(t["margin_percent"]) },
+    funding: { total_topups_idr: num(f["total_topups_idr"]), total_vouchers_idr: num(f["total_vouchers_idr"]),
+      total_funded_idr: num(f["total_funded_idr"]), topup_count: num(f["topup_count"]), unspent_balance_idr: num(f["unspent_balance_idr"]) },
+    ai_cost_alert: { captured_count: num(ai["captured_count"]), revenue_idr: num(ai["revenue_idr"]),
+      avg_selling_price_idr: num(ai["avg_selling_price_idr"]), floor_price_idr: num(ai["floor_price_idr"]),
+      warning: ai["warning"] === true },
+    workspaces: arr(d["workspaces"]).map((w) => {
+      const x = obj(w);
+      return { tenant_id: str(x["tenant_id"]), name: str(x["name"]), pricing_tier_code: str(x["pricing_tier_code"]),
+        lifetime_spent_idr: num(x["lifetime_spent_idr"]), captured_count: num(x["captured_count"]),
+        captured_idr: num(x["captured_idr"]), available_idr: num(x["available_idr"]) };
+    }),
+    pricing_tiers: arr(d["pricing_tiers"]).map((pt) => {
+      const x = obj(pt); const p = obj(x["prices"]);
+      return { code: str(x["code"]), min_spent_idr: num(x["min_spent_idr"]),
+        next_at_idr: typeof x["next_at_idr"] === "number" ? x["next_at_idr"] : null,
+        prices: { api: num(p["api"]), auto_reply: num(p["auto_reply"]), ai_reply: num(p["ai_reply"]) } };
+    }),
+  };
+}

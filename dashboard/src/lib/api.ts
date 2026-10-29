@@ -708,6 +708,16 @@ class ApiClient {
     await this.client.post("/auth/email-verification/confirm", { code }, { skipErrorToast: true, skipAuthRedirect: true });
   }
 
+  async getCommPreferences(): Promise<{ product_updates: boolean }> {
+    const response = await this.client.get<ApiSuccess<{ product_updates: boolean }>>("/auth/comm-preferences");
+    return response.data.data;
+  }
+
+  async updateCommPreferences(productUpdates: boolean): Promise<{ product_updates: boolean }> {
+    const response = await this.client.put<ApiSuccess<{ product_updates: boolean }>>("/auth/comm-preferences", { product_updates: productUpdates });
+    return response.data.data;
+  }
+
   async requestInvitationOtp(token: string): Promise<{ sent: true; expires_in: number; resend_after: number }> {
     const response = await this.client.post<ApiSuccess<{ sent: true; expires_in: number; resend_after: number }>>(
       `/auth/invitations/${token}/otp`, {}, { skipErrorToast: true, skipAuthRedirect: true },
@@ -748,8 +758,8 @@ class ApiClient {
     await this.client.delete(`/api/v1/keys/${id}`, { skipErrorToast: true });
   }
 
-  async getTeam(): Promise<{ members: TeamMember[]; invitations: PendingInvitation[]; legacy_role_transition: LegacyRoleTransition }> {
-    const response = await this.client.get<ApiSuccess<{ members: TeamMember[]; invitations: PendingInvitation[]; legacy_role_transition: LegacyRoleTransition }>>(
+  async getTeam(): Promise<{ members: TeamMember[]; devices: { device_key: string; label: string | null; phone_number: string | null }[]; invitations: PendingInvitation[]; legacy_role_transition: LegacyRoleTransition }> {
+    const response = await this.client.get<ApiSuccess<{ members: TeamMember[]; devices: { device_key: string; label: string | null; phone_number: string | null }[]; invitations: PendingInvitation[]; legacy_role_transition: LegacyRoleTransition }>>(
       "/api/v1/team", { skipErrorToast: true },
     );
     return response.data.data;
@@ -762,9 +772,11 @@ class ApiClient {
     return response.data.data;
   }
 
-  async inviteMember(email: string, role: "developer" | "cs"): Promise<CreatedInvitation> {
+  async inviteMember(email: string, role: "developer" | "cs", device_keys: string[] = [], phone?: string): Promise<CreatedInvitation> {
+    const body: Record<string, unknown> = { email, role, device_keys };
+    if (phone) body.phone = phone;
     const response = await this.client.post<ApiSuccess<CreatedInvitation>>(
-      "/api/v1/team/invitations", { email, role }, { skipErrorToast: true },
+      "/api/v1/team/invitations", body, { skipErrorToast: true },
     );
     return response.data.data;
   }
@@ -775,6 +787,10 @@ class ApiClient {
 
   async changeMemberRole(userId: string, role: "developer" | "cs"): Promise<void> {
     await this.client.patch(`/api/v1/team/members/${userId}`, { role }, { skipErrorToast: true });
+  }
+
+  async setMemberDevices(userId: string, device_keys: string[]): Promise<void> {
+    await this.client.patch(`/api/v1/team/members/${userId}/devices`, { device_keys }, { skipErrorToast: true });
   }
 
   async removeMember(userId: string): Promise<void> {
@@ -871,6 +887,39 @@ class ApiClient {
       "/api/v1/billing/payg/topup-checkout", { amount_idr: amountIdr }, { skipErrorToast: true },
     );
     return response.data.data;
+  }
+
+  // ---- Usage history -------------------------------------------------------
+
+  async getUsageHistory(filters: import("./types").UsageHistoryFilters = {}): Promise<import("./types").UsageHistoryResponse> {
+    const params = new URLSearchParams();
+    if (filters.device_key) params.set("device_key", filters.device_key);
+    if (filters.billing_category) params.set("billing_category", filters.billing_category);
+    if (filters.status) params.set("status", filters.status);
+    if (filters.date_from) params.set("date_from", filters.date_from);
+    if (filters.date_to) params.set("date_to", filters.date_to);
+    if (filters.limit) params.set("limit", String(filters.limit));
+    if (filters.offset) params.set("offset", String(filters.offset));
+    const response = await this.client.get<import("./types").UsageHistoryResponse>(
+      `/api/v1/billing/usage-history?${params}`, { skipErrorToast: true },
+    );
+    return response.data;
+  }
+
+  async getUsageDevices(): Promise<string[]> {
+    const response = await this.client.get<ApiSuccess<string[]>>("/api/v1/billing/usage-history/devices", { skipErrorToast: true });
+    return response.data.data;
+  }
+
+  getUsageCsvUrl(filters: import("./types").UsageHistoryFilters = {}): string {
+    const params = new URLSearchParams();
+    if (filters.device_key) params.set("device_key", filters.device_key);
+    if (filters.billing_category) params.set("billing_category", filters.billing_category);
+    if (filters.status) params.set("status", filters.status);
+    if (filters.date_from) params.set("date_from", filters.date_from);
+    if (filters.date_to) params.set("date_to", filters.date_to);
+    const qs = params.toString();
+    return `${API_BASE_URL}/api/v1/billing/usage-history/csv${qs ? `?${qs}` : ""}`;
   }
 
   // ---- Sending behaviour --------------------------------------------------

@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { ArrowDownLeft, ArrowLeft, ArrowUpRight, ImagePlus, Loader2, MessageSquare, Search, Send, Smartphone, Users, X, Megaphone, Settings2, Plus, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, ImagePlus, Loader2, MessageSquare, Mic, Search, Send, Smartphone, Users, X, Megaphone, Settings2, Plus, ZoomIn, ZoomOut } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,6 +17,7 @@ import { apiFailure } from "@/lib/errors";
 import { formatDate, formatPhoneNumber, formatShortRelative } from "@/lib/utils";
 import { useInboxConversations, useInboxDevices, useInboxMessages } from "@/hooks/use-messages";
 import { usePermissions } from "@/hooks/use-me";
+import { CsWelcomeBanner } from "@/components/messages/cs-welcome-banner";
 import type { InboxConversation } from "@/lib/types";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -52,6 +53,7 @@ function InboxMedia({ message }: { message: import("@/lib/types").Message }) {
   }, [message.media_url]);
   if (!source) return null;
   if (message.type === "video") return <video className="mb-2 max-h-80 max-w-full rounded-lg" src={source} controls playsInline preload="metadata" />;
+  if (message.type === "ptt" || message.type === "audio") return <div className="mb-2 flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2"><Mic className="h-4 w-4 shrink-0 text-primary" /><audio className="h-8 max-w-[240px] flex-1" src={source} controls preload="metadata" /></div>;
   if (message.type !== "image") return null;
 
   return <>
@@ -196,6 +198,7 @@ export default function MessagesPage() {
 
   return (
     <div className="space-y-5">
+      {role === "cs" && <CsWelcomeBanner />}
       <header>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><h2 className="text-heading">Kotak masuk</h2>
@@ -293,7 +296,7 @@ export default function MessagesPage() {
                     <div className={`max-w-[88%] rounded-xl px-3.5 py-2.5 shadow-sm sm:max-w-[75%] ${inbound ? "rounded-tl-sm border bg-card" : "rounded-tr-sm bg-primary text-primary-foreground"}`}>
                       {inbound && isGroup && <p className="mb-1 text-xs font-semibold text-primary">{participantNames.get((message.from_number ?? "").replace(/\D/g, "")) || formatPhoneNumber(message.from_number ?? "") || "Anggota grup"}</p>}
                       <InboxMedia message={message} />
-                      {message.content && message.content !== "[Image]" && message.content !== "[Video]" && <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>}
+                      {message.content && message.content !== "[Image]" && message.content !== "[Video]" && !message.content.startsWith("[Voice note") && message.content !== "[Audio]" && <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>}
                       {!message.content && !message.media_url && <p className="whitespace-pre-wrap break-words text-sm">[{message.type}]</p>}
                       <div className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${inbound ? "text-muted-foreground" : "text-primary-foreground/75"}`}><time title={formatDate(message.created_at)}>{new Date(message.created_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</time>{!inbound && <MessageStatusBadge status={message.status} errorMessage={message.error_message} />}</div>
                     </div>

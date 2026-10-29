@@ -10,6 +10,7 @@ const baseRule: AutoReplyRule = {
   id: 'rule-1', tenant_id: 'tenant-1', device_key: 'WAPI-1', is_active: true,
   trigger: { type: 'keyword', pattern: 'harga' },
   response: { type: 'template', content: '{Halo|Hi} {nama}', delay_ms: 3000 },
+  destination_scope: 'group',
 };
 
 test('auto-reply matching supports keyword, regex, and all rules', () => {
@@ -167,4 +168,29 @@ test('auto-reply never processes private chats or channel traffic', async () => 
     assert.equal(sent, false);
   }
   assert.equal(sends, 0);
+});
+
+test('destination_scope controls which chat types trigger auto-reply', async () => {
+  const queryFn: QueryFn = async () => ({ rows: [] }) as never;
+  const sock = { sendMessage: async () => ({ key: { id: 'wa-scope' } }) } as unknown as WASocket;
+  const silent = { info() {}, warn() {}, error() {}, debug() {} } as unknown as Logger;
+
+  const privateRule: AutoReplyRule = { ...baseRule, destination_scope: 'private' };
+  const allRule: AutoReplyRule = { ...baseRule, destination_scope: 'all' };
+  const groupRule: AutoReplyRule = { ...baseRule, destination_scope: 'group' };
+
+  const groupMsg = { id: 'g1', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?', isGroup: true, replyJid: '120363@g.us' };
+  const privateMsg = { id: 'p1', tenantId: 'tenant-1', deviceId: 'device-1', deviceKey: 'WAPI-1', from: '62812', content: 'harga?', isGroup: false };
+
+  // group rule matches group, not private
+  assert.equal(await processAutoReply(groupMsg, [groupRule], sock, queryFn, silent), false); // no consent row → no_matching_rule path or consent path
+  assert.equal(await processAutoReply(privateMsg, [groupRule], sock, queryFn, silent), false);
+
+  // private rule matches private, not group
+  assert.equal(await processAutoReply(groupMsg, [privateRule], sock, queryFn, silent), false);
+  assert.equal(await processAutoReply(privateMsg, [privateRule], sock, queryFn, silent), false); // no consent → still reaches rule match
+
+  // all rule matches both
+  assert.equal(await processAutoReply(groupMsg, [allRule], sock, queryFn, silent), false); // no consent
+  assert.equal(await processAutoReply(privateMsg, [allRule], sock, queryFn, silent), false); // no consent but rule IS matched
 });

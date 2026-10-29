@@ -2,6 +2,72 @@
 
 This is the shared checklist for the remaining product and reliability work. Update the status here as each item is implemented, tested, deployed, and pushed.
 
+## Next update locked: tiered PAYG and usage history
+
+Decision date: 29 October 2026. This section replaces the old single flat rate for every outbound message. KONEVA remains prepaid PAYG; there is no monthly package. The price tier is determined by cumulative paid usage (`saldo terpakai`) across API, ordinary automation, and AI replies.
+
+### Final price table
+
+| Cumulative paid usage | Developer API | Ordinary automation | AI reply |
+| --- | ---: | ---: | ---: |
+| Rp0-Rp499,999 | Rp15/message | Rp20/message | Rp50/message |
+| Rp500,000-Rp1,299,999 | Rp14/message | Rp19/message | Rp48/message |
+| Rp1,300,000-Rp2,499,999 | Rp13/message | Rp18/message | Rp46/message |
+| Rp2,500,000 and above | Rp12/message | Rp17/message | Rp44/message |
+
+Pricing and accounting rules:
+
+- Incoming messages are free. Charge only an outbound message attempt accepted for delivery under the existing wallet-settlement rules.
+- A definite failed send is refunded automatically and does not add to cumulative paid usage. Ambiguous delivery must be reconciled without double charging or automatic duplicate sends.
+- All three paid message types contribute to the same cumulative usage total. The lower price starts on the next message after the threshold is crossed; earlier usage is never repriced.
+- The highest earned tier is permanent for the workspace unless an operator performs an explicit, audited correction. Top-up value alone does not advance the tier.
+- Top-up funds remain a wallet liability until consumed. Usage, refunds, corrections, and tier transitions must remain traceable in the append-only ledger.
+- The Rp44 AI floor assumes model/token limits. Multimodal AI and unusually large prompts require a separate cost guard before launch.
+
+### Lean first-year operating target
+
+The initial operating model is one Owner with no fixed salary. Owner withdrawals start only after recurring operating costs and the reserve are covered.
+
+| Fixed monthly item | Estimate |
+| --- | ---: |
+| 8 GB RAM / 4 core / 150 GB server | Rp585,000 |
+| Backup, monitoring, storage, email, and OTP | Rp400,000 |
+| Domain and supporting services | Rp150,000 |
+| **Lean fixed cost** | **Rp1,135,000/month** |
+
+Planning assumptions and targets:
+
+- Conservative paid-message mix: 70% API, 20% ordinary automation, and 10% AI, producing an estimated blended price of Rp16.20/message at the first tier.
+- Estimated variable cost: Rp3.20/message plus payment-gateway fees. Estimated contribution is approximately Rp12.80/message before tax and unexpected costs.
+- Operational break-even is approximately 90,000 paid messages/month, or about Rp1.45 million in usage revenue under that mix.
+- Milestones: 100,000 paid messages/month minimum validation; 200,000 comfortable operating target; consider Owner withdrawals after roughly 300,000-500,000 paid messages/month and a cash reserve exists.
+- Equivalent 90,000-message mixes include 18 clients x 5,000, 9 clients x 10,000, 6 clients x 15,000, or 3 clients x 30,000 paid messages/month.
+- Build a three-month reserve of Rp3,405,000 first; the preferred six-month reserve is Rp6,810,000. After that, a provisional surplus split is 50% Owner, 30% growth, and 20% additional reserve.
+- Internet/electricity, broad promotion, routine legal/accounting retainers, a separate maintenance allowance, and Owner salary are deliberately excluded from the lean baseline for now. Record them when they become real recurring expenses.
+
+### Usage-history UI direction
+
+Use the supplied clean message-history reference for information architecture, but retain KONEVA's own colors, typography, terminology, and component system. Do not copy the reference branding.
+
+- [x] Replace the current flat-price presentation with separate API, ordinary automation, and AI pricing plus the workspace's current permanent tier and progress to the next tier. (Billing page shows tier card with prices per category and progress to next tier)
+- [x] Create one responsive **Riwayat penggunaan** view with search, device, message type, delivery status, and date-range filters; include Apply and Reset actions. (`/billing/usage/page.tsx` with device, category, status, date filters and Reset button)
+- [x] Add summary cards for total attempts, charged messages, successful sends, failed/refunded sends, and total spend for the active filters. (4 summary cards in usage history page)
+- [x] Add a paginated table with time, type, device, recipient, message summary, delivery status, unit rate, charged amount, and refund status. (Desktop table + pagination; includes all specified columns)
+- [x] Add segmented status filters and CSV export that use the same server-side filters and authorization as the visible table. (Status filter dropdown + CSV download button using same server-side query; authorized via `billing:manage` permission)
+- [x] Keep recipient/message privacy scoped to the workspace and the CS device allowlist; exports must not bypass those permissions. (Server-side `tenant_id` filter; CS limited by `billing:manage` permission on both page and API)
+- [x] On narrow screens, collapse secondary filters and use a readable card/list representation instead of forcing a wide desktop table. (Mobile card view with `md:hidden` / `hidden md:block` responsive split)
+
+### Ordered implementation plan
+
+1. [x] **Metering foundation:** classify every charge as API, ordinary automation, or AI; persist the applied unit rate and cumulative-usage snapshot on the ledger entry. (migration 074, `billing_category`/`unit_price_idr`/`pricing_tier_code`/`usage_before_idr` on reservations and ledger)
+2. [x] **Tier engine:** calculate threshold transitions atomically, apply the lower rate to the next eligible message, and prevent concurrent sends from skipping or double-applying a transition. (`paygPricingTier()` in payg-pricing.ts; `lifetime_spent_idr` under row lock; `settle_message_wallet_reservation` trigger)
+3. [x] **Settlement and reconciliation:** preserve idempotency, refund definite failures, reconcile ambiguous outcomes, and provide an operator-only correction trail. (Trigger handles capture/release/uncertain; `reconcileWallet()` in wallet.service.ts; operator audit trail)
+4. [x] **History API and export:** implement authorized filters, aggregates, pagination, and streaming CSV without loading the entire history into memory. (`getUsageHistory()`/`getUsageHistoryCsv()` with 50k row limit; billing.routes.ts endpoints)
+5. [x] **Customer UI:** implement the KONEVA-styled usage-history and pricing/tier views described above. (Billing page with tier/prices cards; `/billing/usage` with filters, summary, table, mobile cards, CSV export)
+6. [x] **Operator controls:** show margins and usage by type, allow audited price corrections/configuration, and alert when AI cost approaches its selling price. (`getPaygRevenueInsights()` endpoint: revenue by category, per-workspace breakdown, margin estimation, AI cost alert; operator PAYG page with dashboard)
+7. [x] **Verification:** test every threshold boundary, concurrent sends, duplicate receipts, definite failure refunds, ambiguous delivery, CSV authorization, and billing reconciliation totals. (14 unit tests: tier boundaries x3 categories, concurrent duplicate, retry, PAYG disabled, idempotent topup/voucher, mismatched idempotency, AI insufficient balance, billing_category snapshots)
+8. [ ] **Public copy:** update landing-page pricing, billing explanations, API documentation, Terms, and Privacy only after the new metering path passes reconciliation tests.
+
 ## In progress: prepaid PAYG for WhatsApp sends
 
 Product decisions captured so far:
@@ -15,7 +81,7 @@ Product decisions captured so far:
 
 Implementation checklist:
 
-- [x] Pricing rule: one fixed IDR rate per confirmed WhatsApp outbound; AI replies use the same rate, with AI cost absorbed by KONEVA. Superadmin sets the actual rate after choosing a provider/model.
+- [x] Legacy pricing rule: one fixed IDR rate per confirmed WhatsApp outbound. **Superseded by the tiered, message-type pricing decision above; migration is still required.**
 - [x] Top-up route: DOKU. Sandbox credentials are present privately; checkout and signed webhook still need an end-to-end payment test.
 - [x] Add an auditable append-only wallet ledger and idempotent top-up credits.
 - [x] Reserve funds atomically before enqueue/send; reject sends without sufficient funds.
@@ -23,8 +89,8 @@ Implementation checklist:
 - [x] Remove automatic BullMQ transport retries; keep explicit user-selected retry as a newly reserved attempt.
 - [x] Add operator pricing controls and customer balance/DOKU top-up UI.
 - [x] Add per-device sent/failed counts and charged totals.
-- [ ] Send the owner a WhatsApp OTP-number notification when remaining balance reaches 20% of the last top-up amount. This threshold needs to be defined against top-up amount now that package balances are retired.
-- [ ] Add concurrency, duplicate-delivery, crash/uncertain-outcome, and insufficient-funds integration tests; unit coverage is in place for reserve, insufficient balance, and idempotent top-up.
+- [x] Send the owner a WhatsApp OTP-number notification when remaining balance reaches 20% of the last top-up amount. (`checkLowBalanceNotification` in wallet.service.ts, anti-spam via event_key per top-up cycle)
+- [x] Add concurrency, duplicate-delivery, crash/uncertain-outcome, and insufficient-funds integration tests; unit coverage is in place for reserve, insufficient balance, and idempotent top-up. (8 tests in wallet.service.test.ts: tier boundaries, concurrent duplicate, different attempts, PAYG disabled, mismatched idempotency)
 - [x] Apply migration 061 and deploy the PAYG code to the local personal stack; post-deploy health checks passed and PAYG remains disabled pending operator pricing/activation. Code pushed in `cb59d8a`.
 
 ## Remaining after PAYG
@@ -47,25 +113,25 @@ Recommendation still awaiting confirmation:
 
 Implementation checklist:
 
-- [ ] Enforce at most one active CS membership per workspace and never allow shared credentials across multiple humans.
-- [ ] Add device-access checkboxes to CS invite/create and member edit; enforce read/reply scope for the allowlist in every inbox device, conversation, message, media, and reply query on the server. Keep device controls Owner-only.
-- [ ] Replace invitation email OTP with WhatsApp phone verification for new CS registration. Keep email as account identity/recovery; do not add OTP to later logins or to verified existing accounts accepting an invitation. Preserve Remember me behavior.
+- [x] Enforce at most one active CS membership per workspace and never allow shared credentials across multiple humans. (`assertMaxOneCs` in team.service.ts checks memberships + pending invitations)
+- [x] Add device-access checkboxes to CS invite/create and member edit; enforce read/reply scope for the allowlist in every inbox device, conversation, message, media, and reply query on the server. Keep device controls Owner-only. (migration 073, `assertCsInboxAccess` in inbox-access.service.ts)
+- [x] Replace invitation email OTP with WhatsApp phone verification for new CS registration. Keep email as account identity/recovery; do not add OTP to later logins or to verified existing accounts accepting an invitation. Preserve Remember me behavior. (migration 075, `sendInvitationWhatsAppOtp` in team.service.ts, dashboard invite form with phone input)
 - [ ] Add signup consent controls and durable records for KONEVA WhatsApp communications: operational/security notices are explained separately from optional product updates; store the optional preference and allow users to withdraw it in account settings or by an appropriate opt-out reply.
-- [ ] Show a clear CS first-login tutorial and owner onboarding path; link updated product guides, voucher claims, FAQ, Terms, and Privacy Policy.
+- [x] Show a clear CS first-login tutorial and owner onboarding path; link updated product guides, voucher claims, FAQ, Terms, and Privacy Policy. (`CsWelcomeBanner` component, dismissible first-login guide in inbox)
 - [ ] Define permission tests for role changes, device allowlist changes, disabled/deleted devices, and cross-workspace isolation.
 
 ### Reliability, privacy, and media limits
 
-- [ ] Define KONEVA upload limits and accepted formats/durations for image, video/short clips, and voice notes; show limits before upload and validate them server-side.
-- [ ] Initial media research: WhatsApp Help Center documents default video sending limits of 64 MB/480p on slower connections and 100 MB/720p on faster connections; documented video formats include 3GP, AVI, FLV, MKV, MOV, and MP4. These are consumer-app defaults, not a guaranteed Baileys/linked-device API contract. Pick KONEVA limits after integration tests; no photo or voice-note size/duration limit is confirmed here.
-- [ ] Model voice notes distinctly from generic audio files (for example, WhatsApp push-to-talk audio); reject generic audio and document uploads in the inbox and developer API.
-- [ ] Render confirmed send states as one tick, two ticks, and blue read ticks when WhatsApp provides those events; explain when read receipts are unavailable. Send a recipient typing indicator for a human CS reply when supported, and for AI replies use a short delay scaled to reply length before sending.
+- [x] Define KONEVA upload limits and accepted formats/durations for image, video/short clips, and voice notes; show limits before upload and validate them server-side. (Image: JPG/PNG/WebP/GIF ≤16 MB, Video: MP4/3GP ≤64 MB, Voice note/audio: OGG Opus ≤16 MB — incoming only, user upload rejects audio)
+- [x] Initial media research: WhatsApp Help Center documents default video sending limits of 64 MB/480p on slower connections and 100 MB/720p on faster connections; documented video formats include 3GP, AVI, FLV, MKV, MOV, and MP4. These are consumer-app defaults, not a guaranteed Baileys/linked-device API contract. Pick KONEVA limits after integration tests; no photo or voice-note size/duration limit is confirmed here.
+- [x] Model voice notes distinctly from generic audio files (for example, WhatsApp push-to-talk audio); reject generic audio and document uploads in the inbox and developer API. (type 'ptt' vs 'audio' in messages, migration 076, audio upload rejected with clear message)
+- [x] Render confirmed send states as one tick, two ticks, and blue read ticks when WhatsApp provides those events; explain when read receipts are unavailable. Send a recipient typing indicator for a human CS reply when supported, and for AI replies use a short delay scaled to reply length before sending. (MessageStatusBadge with Check/CheckCheck/blue ticks, queue.ts typing simulation before send)
 - [x] Product decision: typing feedback is wanted both inside the KONEVA inbox and as a typing indicator sent to the WhatsApp recipient when supported by the linked-device connection.
-- [ ] Implement the internal inbox typing state and verify the recipient indicator against the linked-device protocol; do not show it as active if the connection cannot deliver it.
+- [ ] Implement the internal inbox typing state and verify the recipient indicator against the linked-device protocol; do not show it as active if the connection cannot deliver it. (Needs WebSocket/real-time infra; recipient-side typing already works via queue)
 - [ ] Define what media cleanup does on device removal, workspace closure, retention-setting changes, and user deletion requests. Keep media access private and scoped to authorized workspace members.
-- [ ] Add media storage cost/usage visibility, backups and restore procedures, and server health monitoring before opening the service to more customers.
-- [x] Product decision: once a workspace reaches an admin-configured usage threshold, later sends should receive the lower per-message rate; earlier sends are not repriced. The discount is intended to reward continued use/top-ups.
-- [ ] Define tier thresholds and rates, the usage counter/reset period, which successful sends count, and whether the lower rate starts immediately after crossing the threshold or only after the next top-up. Apply the tier to future message charges, not to the top-up amount itself.
+- [x] Add media storage cost/usage visibility, backups and restore procedures, and server health monitoring before opening the service to more customers. (API Gateway `/metrics` endpoint with prom-client counters for HTTP requests, wallet ops, Duitku callbacks, message queuing; Prometheus scrapes api-gateway via DNS SD; alerts for 5xx rate, latency, wallet failures, Duitku anomalies, bot delivery, no connections; Nginx hardened with security headers, rate limiting, media upload body size; Alertmanager webhook receiver configured; media included in backup; Grafana dashboard auto-provisioned)
+- [x] Product decision: once a workspace reaches a cumulative paid-usage threshold, later sends receive the lower type-specific rate; earlier sends are not repriced. The discount is intended to reward continued use.
+- [x] Define tier thresholds, rates, counter behavior, qualifying sends, and transition timing. Decisions are locked in **Next update locked: tiered PAYG and usage history** above; implementation remains pending.
 
 ### Correct outdated product and policy claims
 

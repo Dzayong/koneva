@@ -12,7 +12,7 @@ import { otpAlerts } from './alerts';
 import { ownerInsights, ownerDeviceList, ownerDeviceDetail, ownerSystemHealth, ownerWorkspaceList, ownerWorkspaceDetail, ownerWorkspaceCostMeter } from './insights';
 import { getSystemWhatsappOtpSender, pairSystemWhatsappOtpSender, queueSystemWhatsappNotificationTest, saveSystemWhatsappNotificationSettings } from './system-whatsapp-otp';
 import { getAiReplySettings, saveAiReplySettings } from './ai-reply-settings';
-import { getPaygSettings, savePaygSettings } from './payg-settings';
+import { getPaygSettings, getPaygRevenueInsights, savePaygSettings } from './payg-settings';
 import { createSignupVoucher, disableSignupVoucher, listSignupVouchers } from '../services/signup-voucher.service';
 import { invoiceDetail, listAudit, listInvoices, listStudents, listWorkspaces, studentDetail, workspaceDetail } from './reads';
 
@@ -196,6 +196,9 @@ export function createOperatorRouter(db: Pool, config: OperatorConfig) {
     const input = z.object({ enabled: z.boolean(), price_per_message_idr: z.number().int().min(1).max(100_000) }).strict().parse(request.body);
     response.json({ success: true, data: await savePaygSettings(db, actorOf(response), response.locals['requestId'] as string,
       request.ip ?? 'unknown', { enabled: input.enabled, pricePerMessageIdr: input.price_per_message_idr }) });
+  });
+  router.get('/system/payg/revenue', permit('owner:insights'), async (request, response) => {
+    response.json({ success: true, data: await getPaygRevenueInsights(db, actorOf(response), response.locals['requestId'] as string, request.ip ?? 'unknown') });
   });
   router.get('/signup-vouchers', permit('owner:insights'), async (request, response) => {
     const { limit, offset } = pageSchema.parse(request.query);

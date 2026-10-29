@@ -28,12 +28,24 @@ if ((${#writers[@]} + ${#bots[@]})); then docker stop --time 30 "${writers[@]}" 
 redis_container="$("${COMPOSE[@]}" ps -q redis)"
 docker cp "$redis_container:/data/personal-backup.rdb" "$backup/redis.rdb"
 tar -C "$SESSION_HOST_PATH" -czf "$backup/sessions.tar.gz" .
+# Media files stored in the api-gateway named volume.
+api_container="$("${COMPOSE[@]}" ps -q api-gateway | head -1)"
+if [[ -n "$api_container" ]]; then
+  docker cp "$api_container:/app/media/." - 2>/dev/null | gzip > "$backup/media.tar.gz" || true
+  if [[ -s "$backup/media.tar.gz" ]]; then
+    gzip -t "$backup/media.tar.gz"
+  else
+    rm -f "$backup/media.tar.gz"
+  fi
+fi
 gzip -t "$backup/postgres.sql.gz"
 tar -tzf "$backup/sessions.tar.gz" >/dev/null
 "${COMPOSE[@]}" exec -T redis redis-check-rdb /data/personal-backup.rdb >/dev/null
 cp "$PERSONAL_ENV_FILE" "$backup/environment.env"
 git -C "$PERSONAL_ROOT" rev-parse HEAD > "$backup/revision.txt"
-(cd "$backup" && sha256sum postgres.sql.gz redis.rdb sessions.tar.gz environment.env revision.txt > SHA256SUMS)
+checksums=(postgres.sql.gz redis.rdb sessions.tar.gz environment.env revision.txt)
+[[ -f "$backup/media.tar.gz" ]] && checksums+=(media.tar.gz)
+(cd "$backup" && sha256sum "${checksums[@]}" > SHA256SUMS)
 final="$BACKUP_DIR/backup-$stamp"
 [[ ! -e $final ]] || die 'Backup timestamp collision'
 mv "$backup" "$final"

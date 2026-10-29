@@ -27,6 +27,7 @@ const ruleBody = z.object({
   response_type: z.enum(['text', 'template', 'ai', 'ai_general']).default('text'),
   response_content: z.string().max(4096),
   response_config: aiReplyConfigSchema,
+  destination_scope: z.enum(['group', 'private', 'all']).default('group'),
   delay_ms: z.number().int().min(0).max(300_000).default(3000),
   is_active: z.boolean().default(true),
 }).strict().superRefine((input, context) => {
@@ -50,6 +51,7 @@ const updateBody = z.object({
   response_type: z.enum(['text', 'template', 'ai', 'ai_general']).optional(),
   response_content: z.string().max(4096).optional(),
   response_config: aiReplyConfigSchema.optional(),
+  destination_scope: z.enum(['group', 'private', 'all']).optional(),
   delay_ms: z.number().int().min(0).max(300_000).optional(),
   is_active: z.boolean().optional(),
 }).strict().refine((input) => Object.keys(input).length > 0, 'At least one update is required');
@@ -171,10 +173,10 @@ export async function createAutoReplyRule(request: Request, response: Response):
   await assertOwnedDevice(request.tenant!.id, input.device_key);
   const result = await pool.query(
     `INSERT INTO auto_reply_rules (tenant_id, device_key, trigger_type, trigger_pattern,
-       response_type, response_content, response_config, delay_ms, is_active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9) RETURNING *`,
+       response_type, response_content, response_config, destination_scope, delay_ms, is_active)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10) RETURNING *`,
     [request.tenant!.id, input.device_key, input.trigger_type, input.trigger_pattern,
-      input.response_type, input.response_content, JSON.stringify(input.response_config), input.delay_ms, input.is_active],
+      input.response_type, input.response_content, JSON.stringify(input.response_config), input.destination_scope, input.delay_ms, input.is_active],
   );
   await notifyBotReloadRules(input.device_key);
   response.status(201).json({ success: true, data: result.rows[0] });
@@ -196,6 +198,7 @@ export async function updateAutoReplyRule(request: Request, response: Response):
     response_type: input.response_type ?? existing.response_type,
     response_content: input.response_content ?? existing.response_content,
     response_config: input.response_config ?? existing.response_config ?? EMPTY_AI_REPLY_RULE_CONFIG,
+    destination_scope: input.destination_scope ?? (existing as { destination_scope?: string }).destination_scope ?? 'group',
     delay_ms: input.delay_ms ?? existing.delay_ms,
     is_active: input.is_active ?? existing.is_active,
   });
@@ -203,11 +206,11 @@ export async function updateAutoReplyRule(request: Request, response: Response):
   await assertOwnedDevice(request.tenant!.id, merged.data.device_key);
   const result = await pool.query(
     `UPDATE auto_reply_rules SET device_key=$1, trigger_type=$2, trigger_pattern=$3,
-       response_type=$4, response_content=$5, response_config=$6::jsonb, delay_ms=$7, is_active=$8, updated_at=NOW()
-     WHERE id=$9 AND tenant_id=$10 RETURNING *`,
+       response_type=$4, response_content=$5, response_config=$6::jsonb, destination_scope=$7, delay_ms=$8, is_active=$9, updated_at=NOW()
+     WHERE id=$10 AND tenant_id=$11 RETURNING *`,
     [merged.data.device_key, merged.data.trigger_type, merged.data.trigger_pattern,
       merged.data.response_type, merged.data.response_content, JSON.stringify(merged.data.response_config),
-      merged.data.delay_ms, merged.data.is_active, id, request.tenant!.id],
+      merged.data.destination_scope, merged.data.delay_ms, merged.data.is_active, id, request.tenant!.id],
   );
   const row = result.rows[0] as { device_key: string } | undefined;
   if (!row) throw new ServiceError(404, 'AUTO_REPLY_RULE_NOT_FOUND', 'Auto-reply rule not found');

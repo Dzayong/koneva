@@ -24,6 +24,12 @@ const STATUS_LABEL: Record<string, string> = {
   trial: "Masa percobaan", active: "Aktif", past_due: "Terlambat bayar", suspended: "Dihentikan sementara", expired: "Berakhir", cancelled: "Dibatalkan",
 };
 const INVOICE_LABEL: Record<Invoice["status"], string> = { unpaid: "Belum dibayar", paid: "Lunas", void: "Dibatalkan" };
+const PAYG_TIER_LABEL: Record<string, string> = {
+  starter: "Mulai",
+  growth: "Berkembang",
+  scale: "Skala",
+  max: "Tarif terbaik",
+};
 
 function UsageRow({ label, used, limit, headline }: { label: string; used: number; limit: number | null; headline?: string | null }) {
   const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
@@ -199,7 +205,24 @@ export default function BillingPage() {
         <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Saldo tersedia</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.available_idr)}</p></div>
         <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Pesan dikenai biaya</p><p className="mt-2 text-2xl font-semibold">{data.wallet.messages_charged.toLocaleString("id-ID")} pesan</p></div>
         <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Total terpakai</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.spent_idr)}</p></div>
-        <div className="rounded-xl border bg-card p-5"><p className="text-sm text-muted-foreground">Tarif per pesan</p><p className="mt-2 text-2xl font-semibold">{rupiah(data.wallet.price_per_message_idr ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">Balasan AI memakai tarif yang sama.</p></div>
+        <div className="rounded-xl border bg-card p-5">
+          <p className="text-sm text-muted-foreground">Tier aktif</p>
+          <p className="mt-2 text-2xl font-semibold">{PAYG_TIER_LABEL[data.wallet.pricing_tier] ?? data.wallet.pricing_tier}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {data.wallet.next_tier_at_idr === null
+              ? "Tarif terbaik sudah berlaku permanen."
+              : `${rupiah(data.wallet.amount_to_next_tier_idr ?? 0)} lagi menuju tarif berikutnya.`}
+          </p>
+        </div>
+      </section>
+      <section className="rounded-xl border bg-card p-5">
+        <h2 className="font-semibold">Tarif aktif</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Setiap kategori dihitung terpisah. Semua pemakaian berbayar tetap membantu mencapai tier berikutnya.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border p-4"><p className="text-sm text-muted-foreground">API developer</p><p className="mt-1 text-xl font-semibold">{rupiah(data.wallet.prices.api)}</p><p className="text-xs text-muted-foreground">per pesan</p></div>
+          <div className="rounded-lg border p-4"><p className="text-sm text-muted-foreground">Balasan otomatis</p><p className="mt-1 text-xl font-semibold">{rupiah(data.wallet.prices.auto_reply)}</p><p className="text-xs text-muted-foreground">per pesan</p></div>
+          <div className="rounded-lg border p-4"><p className="text-sm text-muted-foreground">Balasan AI</p><p className="mt-1 text-xl font-semibold">{rupiah(data.wallet.prices.ai_reply)}</p><p className="text-xs text-muted-foreground">per pesan</p></div>
+        </div>
       </section>
       <section className="rounded-xl border bg-card p-5">
         <div className="flex items-center gap-2"><Wallet className="h-5 w-5 text-primary" aria-hidden /><h2 className="font-semibold">Isi saldo lewat Duitku</h2></div>

@@ -1,3 +1,4 @@
+import { assertCsInboxAccess } from '../services/inbox-access.service';
 import { Router } from 'express';
 import express from 'express';
 import { z } from 'zod';
@@ -8,6 +9,25 @@ import { validate } from '../middleware/validate';
 import { getMessageStatus, listInboxConversations, listInboxDevices, listInboxMessages, listMessages, queueInboxReply, queueMessage, retryMessage } from '../services/message.service';
 
 const router = Router();
+const csUserId = (request: import('express').Request) => request.actor?.kind === 'user' && request.actor.role === 'cs' ? request.actor.userId : undefined;
+router.use('/inbox', async (request, _response, next) => {
+  try {
+    const userId = csUserId(request);
+    if (userId) {
+      const tenantId = request.tenant!.id;
+      const deviceKey = request.query['device_key'];
+      if (typeof deviceKey === 'string') await assertCsInboxAccess(tenantId, userId, 'device', deviceKey);
+      const media = request.path.match(/^\/media\/([^/]+)\/?$/i);
+      const reply = request.path.match(/^\/messages\/([^/]+)\/reply\/?$/i);
+      if (media) await assertCsInboxAccess(tenantId, userId, 'media', media[1]!);
+      if (reply) {
+        await assertCsInboxAccess(tenantId, userId, 'message', reply[1]!);
+        if (typeof request.body?.media_id === 'string') await assertCsInboxAccess(tenantId, userId, 'media', request.body.media_id);
+      }
+    }
+    next();
+  } catch (error) { next(error); }
+});
 export const sendSchema = z.object({
   device_key: z.string().min(1).max(32),
   to: z.union([
@@ -59,6 +79,9 @@ async function uploadMedia(tenantId: string, deviceKey: string, request: import(
     const mediaType = mediaTypeForMime(mime);
     const bytes = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
     const device = (await pool.query<{ id: string }>('SELECT id FROM devices WHERE tenant_id=$1 AND device_key=$2', [tenantId, deviceKey])).rows[0];
+    if (mediaType === 'audio') {
+      response.status(400).json({ success: false, error: { code: 'INVALID_MEDIA', message: 'Upload audio tidak didukung. Kirim foto atau video saja.' } }); return;
+    }
     const maxBytes = mediaType === 'image' ? MEDIA_LIMITS.image : MEDIA_LIMITS.video;
     if (!device || !mediaType || bytes.length === 0 || bytes.length > maxBytes || !validMediaBytes(bytes, mime)) {
       response.status(400).json({ success: false, error: { code: 'INVALID_MEDIA', message: 'Pilih foto JPG/PNG/WebP/GIF hingga 16 MB atau video MP4 hingga 64 MB.' } }); return;
@@ -105,7 +128,7 @@ router.post('/message/send', validate({ body: sendSchema }), async (request, res
 });
 
 router.get('/inbox/devices', async (request, response) => {
-  response.json(await listInboxDevices(request.tenant!.id));
+  response.json(await listInboxDevices(request.tenant!.id, csUserId(request)));
 });
 
 router.get('/inbox/conversations', validate({ query: inboxConversationSchema }), async (request, response) => {
@@ -115,7 +138,7 @@ router.get('/inbox/conversations', validate({ query: inboxConversationSchema }),
     ...(filter.search ? { search: filter.search } : {}),
     limit: filter.limit,
     offset: filter.offset,
-  }));
+  }, csUserId(request)));
 });
 
 router.get('/inbox/messages', validate({ query: inboxMessagesSchema }), async (request, response) => {

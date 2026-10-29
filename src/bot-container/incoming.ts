@@ -35,9 +35,11 @@ export function resolveSenderNumber(key: WAMessageKey): string | undefined {
   return jidNumber(jid?.endsWith('@lid') && alt ? alt : jid);
 }
 
+export type IncomingMessageType = 'text' | 'image' | 'document' | 'video' | 'audio' | 'ptt';
+
 export function incomingContent(message: WAMessage): {
   content: string;
-  type: 'text' | 'image' | 'document' | 'video' | 'audio';
+  type: IncomingMessageType;
 } {
   const content = normalizeMessageContent(message.message);
   if (content?.conversation) return { content: content.conversation, type: 'text' };
@@ -50,7 +52,11 @@ export function incomingContent(message: WAMessage): {
   if (content?.videoMessage) {
     return { content: content.videoMessage.caption || '[Video]', type: 'video' };
   }
-  if (content?.audioMessage) return { content: '[Audio]', type: 'audio' };
+  if (content?.audioMessage) {
+    const isPtt = content.audioMessage.ptt === true;
+    const seconds = content.audioMessage.seconds ?? 0;
+    return { content: isPtt ? `[Voice note ${seconds}s]` : '[Audio]', type: isPtt ? 'ptt' : 'audio' };
+  }
   if (content?.documentMessage) {
     return { content: content.documentMessage.fileName || '[Document]', type: 'document' };
   }
@@ -191,10 +197,13 @@ export async function handleIncomingMessage(
 
   // Download only after the event was deduplicated, so WhatsApp's at-least-once delivery
   // cannot create duplicate private files for one message.
-  if (sock && (parsed.type === 'image' || parsed.type === 'video')) {
+  if (sock && (parsed.type === 'image' || parsed.type === 'video' || parsed.type === 'ptt')) {
     const normalized = normalizeMessageContent(message.message);
-    const mediaMessage = parsed.type === 'image' ? normalized?.imageMessage : normalized?.videoMessage;
-    const mime = mediaMessage?.mimetype || (parsed.type === 'image' ? 'image/jpeg' : 'video/mp4');
+    const mediaMessage = parsed.type === 'image' ? normalized?.imageMessage
+      : parsed.type === 'video' ? normalized?.videoMessage
+        : normalized?.audioMessage;
+    const defaultMime = parsed.type === 'image' ? 'image/jpeg' : parsed.type === 'video' ? 'video/mp4' : 'audio/ogg; codecs=opus';
+    const mime = mediaMessage?.mimetype || defaultMime;
     try {
       const bytes = await downloadMediaMessage(message, 'buffer', {});
       const candidateFileName = mediaMessage && 'fileName' in mediaMessage ? mediaMessage.fileName : undefined;
@@ -270,7 +279,7 @@ export async function handleIncomingMessage(
 
 export interface IncomingMessageRecord {
   id: string; whatsappMessageId: string; tenantId: string; deviceId: string; deviceKey: string; from: string; content: string;
-  type: 'text' | 'image' | 'document' | 'video' | 'audio';
+  type: IncomingMessageType;
   /** Private media UUID, available after successful download for inbox and AI vision. */
   mediaId?: string;
   consentCommand?: 'stop' | 'start';

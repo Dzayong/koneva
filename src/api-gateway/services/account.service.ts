@@ -145,6 +145,14 @@ export async function activatePendingSignup(client: PoolClient, userId: string, 
   await client.query(`INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`, [userId, tenant.id]);
   await redeemSignupVoucherForTenant(client, userId, tenant.id, user.voucher_id);
   await client.query("UPDATE users SET status='active', pending_signup_workspace_name=NULL, pending_signup_phone_number=NULL, pending_signup_verification_method='email', pending_signup_voucher_id=NULL, last_login_at=now() WHERE id=$1", [userId]);
+  await client.query(
+    `INSERT INTO user_comm_preferences (user_id, product_updates) VALUES ($1, true) ON CONFLICT (user_id) DO NOTHING`,
+    [userId],
+  );
+  await client.query(
+    `INSERT INTO user_comm_preference_events (user_id, product_updates, source) VALUES ($1, true, 'signup')`,
+    [userId],
+  );
   const session = await issueSessionToken(client, userId, meta);
   return {
     token: session.token, expires_at: session.expiresAt,

@@ -19,6 +19,7 @@ export interface AutoReplyRule {
   trigger: { type: 'keyword' | 'regex' | 'all'; pattern: string };
   response: { type: 'text' | 'template' | 'ai' | 'ai_general'; content: string; delay_ms: number };
   response_config?: { reply_to_trigger?: boolean };
+  destination_scope: 'group' | 'private' | 'all';
   is_active: boolean;
 }
 
@@ -26,11 +27,12 @@ interface RuleRow {
   id: string; tenant_id: string; device_key: string; trigger_type: AutoReplyRule['trigger']['type'];
   trigger_pattern: string; response_type: AutoReplyRule['response']['type']; response_content: string;
   delay_ms: number; is_active: boolean; response_config?: unknown;
+  destination_scope?: string;
 }
 
 export interface IncomingForAutoReply {
   id: string; tenantId: string; deviceId: string; deviceKey: string; from: string; content: string;
-  type?: 'text' | 'image' | 'document' | 'video' | 'audio'; consentCommand?: 'stop' | 'start';
+  type?: 'text' | 'image' | 'document' | 'video' | 'audio' | 'ptt'; consentCommand?: 'stop' | 'start';
   replyJid?: string; isGroup?: boolean; key?: WAMessageKey;
   mediaId?: string; quotedMessage?: WAMessage;
 }
@@ -38,7 +40,7 @@ export interface IncomingForAutoReply {
 export async function loadAutoReplyRules(deviceKey: string, queryFn: QueryFn): Promise<AutoReplyRule[]> {
   const result = await queryFn(
     `SELECT id, tenant_id, device_key, trigger_type, trigger_pattern, response_type,
-            response_content, response_config, delay_ms, is_active
+            response_content, response_config, delay_ms, is_active, destination_scope
      FROM auto_reply_rules WHERE device_key=$1 AND is_active=true ORDER BY created_at`,
     [deviceKey],
   );
@@ -49,6 +51,7 @@ export async function loadAutoReplyRules(deviceKey: string, queryFn: QueryFn): P
     response_config: typeof row.response_config === 'object' && row.response_config !== null && !Array.isArray(row.response_config)
       ? row.response_config as { reply_to_trigger?: boolean }
       : { reply_to_trigger: true },
+    destination_scope: (row.destination_scope === 'private' || row.destination_scope === 'all') ? row.destination_scope : 'group',
     is_active: row.is_active,
   }));
 }
@@ -156,11 +159,12 @@ export async function processAutoReply(
   log: Logger,
   dependencies: AutoReplyDependencies = {},
 ): Promise<boolean> {
-  // Auto-replies are deliberately limited to groups the connected number is
-  // already part of. Direct chats and channel/newsletter traffic are excluded.
-  if (!message.isGroup) return false;
-
-  const rule = rules.find((candidate) => candidate.tenant_id === message.tenantId && matchesAutoReply(candidate, message.content));
+  const chatType = message.isGroup ? 'group' : 'private';
+  const rule = rules.find((candidate) => {
+    if (candidate.tenant_id !== message.tenantId) return false;
+    if (candidate.destination_scope !== 'all' && candidate.destination_scope !== chatType) return false;
+    return matchesAutoReply(candidate, message.content);
+  });
   if (!rule) {
     if (rules.length > 0) {
       await logActivity(queryFn, null, message, '', 'ignored', 'no_matching_rule', null, 'match');
@@ -289,7 +293,10 @@ export async function processAutoReply(
                 message.isGroup ? jid : message.from, content, jid],
             );
             if (settings.rows[0]?.enabled) {
-              await reserveMessageCharge(client, message.tenantId, inserted.rows[0]!.id, 0);
+              const billingCategory = rule.response.type === 'ai' || rule.response.type === 'ai_general'
+                ? 'ai_reply'
+                : 'auto_reply';
+              await reserveMessageCharge(client, message.tenantId, inserted.rows[0]!.id, 0, billingCategory);
             }
             return inserted.rows[0]!.id;
           });

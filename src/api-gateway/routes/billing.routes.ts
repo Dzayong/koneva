@@ -7,7 +7,7 @@ import { createOrder, getBillingState, getLatestUnpaidInvoice, requestStudentVer
 import { createDokuCheckout } from '../services/doku.service';
 import { createDuitkuCheckout } from '../services/duitku.service';
 import { ServiceError } from '../services/service-error';
-import { createWalletTopup, updateWalletTopupProviderReference, voidWalletTopup } from '../services/wallet.service';
+import { createWalletTopup, getUsageDeviceKeys, getUsageHistory, getUsageHistoryCsv, reconcileWallet, updateWalletTopupProviderReference, voidWalletTopup } from '../services/wallet.service';
 
 const router = Router();
 
@@ -18,6 +18,16 @@ export const orderSchema = z.object({
 
 export const studentSchema = z.object({ note: z.string().trim().max(500).default('') }).strict();
 export const walletTopupSchema = z.object({ amount_idr: z.number().int().min(10000).max(10_000_000) }).strict();
+
+const usageHistoryQuery = z.object({
+  device_key: z.string().min(1).max(32).optional(),
+  billing_category: z.enum(['api', 'auto_reply', 'ai_reply']).optional(),
+  status: z.enum(['charged', 'refunded', 'pending']).optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).default(0),
+}).strict();
 
 router.get('/billing', async (request: Request, response: Response) => {
   const state = await getBillingState(request.tenant!.id);
@@ -61,6 +71,47 @@ router.post('/billing/payg/topup-checkout', requireVerifiedEmail, validate({ bod
     await voidWalletTopup(topup.invoice_number);
     throw error;
   }
+});
+
+router.get('/billing/usage-history', validate({ query: usageHistoryQuery }), async (request: Request, response: Response) => {
+  const q = request.validated!.query as z.infer<typeof usageHistoryQuery>;
+  const result = await getUsageHistory({
+    tenantId: request.tenant!.id,
+    deviceKey: q.device_key,
+    billingCategory: q.billing_category,
+    status: q.status,
+    dateFrom: q.date_from,
+    dateTo: q.date_to,
+    limit: q.limit,
+    offset: q.offset,
+  });
+  response.json({ success: true, ...result });
+});
+
+router.get('/billing/usage-history/csv', validate({ query: usageHistoryQuery }), async (request: Request, response: Response) => {
+  const q = request.validated!.query as z.infer<typeof usageHistoryQuery>;
+  const csv = await getUsageHistoryCsv({
+    tenantId: request.tenant!.id,
+    deviceKey: q.device_key,
+    billingCategory: q.billing_category,
+    status: q.status,
+    dateFrom: q.date_from,
+    dateTo: q.date_to,
+  });
+  const filename = `riwayat-penggunaan-${new Date().toISOString().slice(0, 10)}.csv`;
+  response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  response.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  response.send('﻿' + csv);
+});
+
+router.get('/billing/usage-history/devices', async (request: Request, response: Response) => {
+  const devices = await getUsageDeviceKeys(request.tenant!.id);
+  response.json({ success: true, data: devices });
+});
+
+router.get('/billing/reconcile', async (request: Request, response: Response) => {
+  const result = await reconcileWallet(request.tenant!.id);
+  response.json({ success: true, data: result });
 });
 
 router.post('/billing/student-request', validate({ body: studentSchema }), async (request: Request, response: Response) => {

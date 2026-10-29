@@ -4,7 +4,7 @@ import { ASSIGNABLE_ROLES } from '../../shared/permissions';
 import { validate } from '../middleware/validate';
 import { requireVerifiedEmail } from '../middleware/verified-email';
 import {
-  changeMemberRole, createInvitation, issueLegacyRoleNotice, listTeam, removeMember, revokeInvitation,
+  setMemberDevices, changeMemberRole, createInvitation, issueLegacyRoleNotice, listTeam, removeMember, revokeInvitation,
 } from '../services/team.service';
 import { ServiceError } from '../services/service-error';
 
@@ -14,6 +14,8 @@ const uuid = z.object({ id: z.string().uuid() });
 export const inviteSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(255),
   role: z.enum(ASSIGNABLE_ROLES),
+  device_keys: z.array(z.string().min(1).max(32)).max(500).optional(),
+  phone: z.string().trim().min(1).max(20).optional(),
 }).strict();
 export const roleSchema = z.object({ role: z.enum(ASSIGNABLE_ROLES) }).strict();
 export const legacyRoleNoticeSchema = z.object({ confirm: z.literal(true) }).strict();
@@ -54,6 +56,12 @@ router.patch('/team/members/:id', requireVerifiedEmail, validate({ params: uuid,
 
 router.delete('/team/members/:id', requireVerifiedEmail, validate({ params: uuid }), async (request: Request, response: Response) => {
   await removeMember(request.tenant!.id, person(request), (request.validated!.params as { id: string }).id);
+  response.json({ success: true });
+});
+
+router.patch('/team/members/:id/devices', requireVerifiedEmail, validate({ params: uuid, body: z.object({ device_keys: z.array(z.string().min(1).max(32)).max(500) }).strict() }), async (request, response) => {
+  await setMemberDevices(request.tenant!.id, person(request), (request.validated!.params as { id: string }).id,
+    (request.validated!.body as { device_keys: string[] }).device_keys);
   response.json({ success: true });
 });
 

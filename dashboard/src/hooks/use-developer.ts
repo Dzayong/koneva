@@ -52,7 +52,7 @@ export function useIssueLegacyRoleNotice() {
 export function useInviteMember() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ email, role }: { email: string; role: "developer" | "cs" }) => api.inviteMember(email, role),
+    mutationFn: ({ email, role, device_keys, phone }: { email: string; role: "developer" | "cs"; device_keys?: string[]; phone?: string }) => api.inviteMember(email, role, device_keys, phone),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["team"] }),
   });
 }
@@ -93,5 +93,14 @@ export function useAuditLog() {
     queryFn: ({ pageParam }) => api.getAudit(AUDIT_PAGE, pageParam),
     getNextPageParam: (last) => (last.length === AUDIT_PAGE ? last[last.length - 1]?.created_at : undefined),
     retry: false,
+  });
+}
+
+export function useSetMemberDevices() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, device_keys }: { userId: string; device_keys: string[] }) => api.setMemberDevices(userId, device_keys),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["team"] }); toast.success("Akses device disimpan"); },
+    onError: fail("Gagal menyimpan akses device"),
   });
 }

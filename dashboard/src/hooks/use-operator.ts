@@ -122,6 +122,9 @@ export function useSaveAiReplySettings() {
 export function usePaygSettings(enabled = true) {
   return useQuery({ queryKey: [OP, "payg-settings"], queryFn: () => operatorApi.getPaygSettings(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always" });
 }
+export function usePaygRevenue(enabled = true) {
+  return useQuery({ queryKey: [OP, "payg-revenue"], queryFn: () => operatorApi.getPaygRevenue(), enabled, retry: retryTransient, staleTime: 0, refetchOnMount: "always", refetchInterval: 60_000 });
+}
 export function useSavePaygSettings() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: operatorApi.savePaygSettings, onSuccess: () => {

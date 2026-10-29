@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import config from '../../shared/config';
+import pool from '../../shared/database/connection';
 import { PERMISSIONS, ROLE_PERMISSIONS } from '../../shared/permissions';
 import { getRedisClient } from '../../shared/redis';
 import { validate } from '../middleware/validate';
@@ -202,6 +203,33 @@ router.post('/invitations/:token/accept', limited(15 * 60_000, 30), validate({ p
     actorLabel: session?.user.email ?? result.session?.user.email, action: 'team.join', targetType: 'user', targetId: result.userId, ip: request.ip,
   });
   response.status(201).json({ success: true, data: { joined: result.joined, ...(result.session ? { session: result.session } : {}) } });
+});
+
+// Communication preferences (user-scoped, not tenant-scoped).
+router.get('/comm-preferences', async (request: Request, response: Response) => {
+  const userId = await sessionUser(request);
+  const result = await pool.query(
+    'SELECT product_updates FROM user_comm_preferences WHERE user_id=$1', [userId],
+  );
+  const prefs = result.rows[0] as { product_updates: boolean } | undefined;
+  response.json({ success: true, data: { product_updates: prefs?.product_updates ?? true } });
+});
+
+const commPrefsSchema = z.object({ product_updates: z.boolean() }).strict();
+router.put('/comm-preferences', validate({ body: commPrefsSchema }), async (request: Request, response: Response) => {
+  const userId = await sessionUser(request);
+  const { product_updates } = request.validated!.body as z.infer<typeof commPrefsSchema>;
+  await pool.query(
+    `INSERT INTO user_comm_preferences (user_id, product_updates, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (user_id) DO UPDATE SET product_updates=$2, updated_at=now()`,
+    [userId, product_updates],
+  );
+  await pool.query(
+    `INSERT INTO user_comm_preference_events (user_id, product_updates, source) VALUES ($1, $2, 'settings')`,
+    [userId, product_updates],
+  );
+  response.json({ success: true, data: { product_updates } });
 });
 
 export default router;

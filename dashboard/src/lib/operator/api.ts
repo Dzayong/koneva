@@ -8,6 +8,7 @@ import {
   type OwnerWorkspaceSummary, type OwnerWorkspaceDetailData, type OwnerWorkspaceCostMeter, type Page, type StudentRequestDetail, type StudentRequestSummary,
   type StudentStatus, type WorkspaceDetail,
   type CloseOwnerWorkspaceInput, type CloseOwnerWorkspaceResult, type AiReplyProviderSettings, type SignupVoucher, type CreatedSignupVoucher,
+  type PaygRevenueInsights, parsePaygRevenueInsights,
 } from "./types";
 
 /** Every path below is part of the PROPOSED contract (dashboard/docs/operator-panel-contract.md). */
@@ -114,6 +115,9 @@ export const operatorApi = {
     const d = object((await operatorClient.request("/system/payg", { method: "PUT", body: input }))?.data);
     return { enabled: d["enabled"] === true, price_per_message_idr: typeof d["price_per_message_idr"] === "number" ? d["price_per_message_idr"] : null,
       updated_at: typeof d["updated_at"] === "string" ? d["updated_at"] : null };
+  },
+  async getPaygRevenue(): Promise<PaygRevenueInsights> {
+    return parsePaygRevenueInsights((await operatorClient.request("/system/payg/revenue"))?.data);
   },
   async listSignupVouchers(params: { limit?: number; offset?: number } = {}): Promise<Page<SignupVoucher>> {
     return page(await operatorClient.request("/signup-vouchers", { query: { limit: params.limit ?? PAGE_SIZE, offset: params.offset ?? 0 } }), parseSignupVoucher);

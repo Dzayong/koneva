@@ -69,7 +69,7 @@ export interface Message {
   chat_jid?: string | null;
   content: string;
   media_url?: string | null;
-  type: "text" | "image" | "document" | "video" | "audio";
+  type: "text" | "image" | "document" | "video" | "audio" | "ptt";
   status: MessageStatus;
   external_id: string | null;
   reply_to_message_id?: string | null;
@@ -389,6 +389,7 @@ export interface ApiKeyRecord {
 export interface CreatedApiKey extends ApiKeyRecord { key: string }
 
 export interface TeamMember {
+  device_keys?: string[];
   user_id: string;
   name: string;
   email: string;
@@ -405,7 +406,7 @@ export interface LegacyRoleTransition {
   days_remaining: number | null;
 }
 
-export interface PendingInvitation { id: string; email: string; role: Role; expires_at: string; created_at: string }
+export interface PendingInvitation { id: string; email: string; role: Role; phone?: string | null; expires_at: string; created_at: string }
 
 export interface CreatedInvitation {
   id: string; email: string; role: Role; expires_at: string; token: string; accept_path: string;
@@ -413,8 +414,9 @@ export interface CreatedInvitation {
 
 export interface InvitationPreview {
   workspace: string; role: Role; invited_by: string | null; email_hint: string; expires_at: string;
-  /** The recipient must confirm an emailed code. `otp_available=false` means no email sender is configured yet. */
   requires_otp: boolean; otp_available: boolean;
+  otp_channel: "email" | "whatsapp";
+  phone_hint: string | null;
 }
 
 export interface AuditEntry {
@@ -527,7 +529,9 @@ export interface Invoice {
 }
 
 export interface BillingState {
-  wallet: { enabled: boolean; price_per_message_idr: number | null; available_idr: number; messages_charged: number; spent_idr: number; messages_sent: number; messages_failed: number;
+  wallet: { enabled: boolean; price_per_message_idr: number | null; pricing_tier: "starter" | "growth" | "scale" | "max";
+    prices: { api: number; auto_reply: number; ai_reply: number }; next_tier_at_idr: number | null; amount_to_next_tier_idr: number | null;
+    available_idr: number; messages_charged: number; spent_idr: number; messages_sent: number; messages_failed: number;
     devices: Array<{ device_key: string; messages_sent: number; messages_failed: number; charged_idr: number }>;
     recent_topups: Array<{ invoice_number: string; amount_idr: number; status: string; created_at: string }> };
   subscription: {
@@ -549,6 +553,54 @@ export interface BillingState {
   plans: PublicPlan[];
   invoices: Invoice[];
   payment: { instructions: string; contact: string | null };
+}
+
+// ---- Usage history ----------------------------------------------------------
+
+export type PaygBillingCategory = "api" | "auto_reply" | "ai_reply";
+export type UsageReservationState = "captured" | "released" | "debited";
+
+export interface UsageHistoryItem {
+  message_id: string;
+  device_key: string;
+  to_number: string;
+  content_preview: string;
+  message_type: string;
+  message_status: string;
+  billing_category: PaygBillingCategory;
+  unit_price_idr: number;
+  charged_idr: number;
+  reservation_state: UsageReservationState;
+  pricing_tier_code: string;
+  created_at: string;
+  sent_at: string | null;
+  refunded: boolean;
+}
+
+export interface UsageHistorySummary {
+  total_attempts: number;
+  total_charged: number;
+  total_successful: number;
+  total_failed_refunded: number;
+  total_spend_idr: number;
+  total_refunded_idr: number;
+}
+
+export interface UsageHistoryFilters {
+  device_key?: string;
+  billing_category?: PaygBillingCategory;
+  status?: "charged" | "refunded" | "pending";
+  date_from?: string;
+  date_to?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface UsageHistoryResponse {
+  success: true;
+  data: UsageHistoryItem[];
+  summary: UsageHistorySummary;
+  pagination: { limit: number; offset: number; total: number; has_more: boolean };
 }
 
 // ---- Webhook ---------------------------------------------------------------

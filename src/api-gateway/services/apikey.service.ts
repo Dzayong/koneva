@@ -46,6 +46,15 @@ export async function createApiKey(
   if ((active.rows[0]?.n ?? 0) >= MAX_ACTIVE_KEYS) {
     throw new ServiceError(409, 'KEY_LIMIT', `A workspace can have at most ${MAX_ACTIVE_KEYS} active keys`);
   }
+  if (deviceKey) {
+    const existing = await pool.query<{ id: string }>(
+      `SELECT id FROM api_keys WHERE tenant_id = $1 AND device_key = $2 AND revoked_at IS NULL`,
+      [tenantId, deviceKey],
+    );
+    if (existing.rows.length > 0) {
+      throw new ServiceError(409, 'DEVICE_KEY_TAKEN', 'This device already has an active API key. Revoke it first or rotate.');
+    }
+  }
   const { key, hash, prefix } = newApiKey();
   const expiresAt = input.expires_in_days ? new Date(Date.now() + input.expires_in_days * 86_400_000) : null;
   const row = (await pool.query<ApiKeyRecord>(

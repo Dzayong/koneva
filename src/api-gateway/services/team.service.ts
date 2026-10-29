@@ -8,7 +8,22 @@ import { TERMS_VERSION, hashPassword, newSessionToken, sha256, type SessionResul
 import { ServiceError } from './service-error';
 import { assertCanAddMember } from './billing.service';
 import { emailAvailable, requireEmail, sendInvitationOtp } from './mailer';
-import { reserveIpRequest, reserveOtpSend } from './otp-limits';
+import { reserveIpRequest, reserveOtpSend, reserveWhatsappOtpSend } from './otp-limits';
+import { queueSystemOtp } from './message.service';
+import logger from '../../shared/utils/logger';
+
+async function assertMaxOneCs(tenantId: string, excludeUserId?: string): Promise<void> {
+  const exclude = excludeUserId ? ` AND user_id <> '${excludeUserId}'` : '';
+  const active = (await pool.query<{ n: number }>(
+    `SELECT (
+       (SELECT count(*) FROM memberships WHERE tenant_id=$1 AND role='cs'${exclude})
+       + (SELECT count(*) FROM invitations WHERE tenant_id=$1 AND role='cs' AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now())
+     )::int AS n`, [tenantId],
+  )).rows[0]?.n ?? 0;
+  if (active >= 1) {
+    throw new ServiceError(409, 'CS_LIMIT_REACHED', 'Workspace saat ini dibatasi satu akun CS aktif. Keluarkan CS yang ada atau batalkan undangan CS sebelum menambah yang baru.');
+  }
+}
 
 /** Developer handles integrations; CS is restricted to Inbox. Owner is never invited; admin/viewer are legacy. */
 export const INVITABLE_ROLES = ASSIGNABLE_ROLES;
@@ -21,13 +36,31 @@ export const OTP_RESEND_SECONDS = 60;
  * Invitations go to the Gmail address the person will use for their KONEVA account. Whitespace and letter case are
  * normalised; NOTHING else is (no dot or +tag folding, googlemail.com is refused), so the address stored, the address the
  * OTP goes to, and the address they sign up/sign in with are the same string.
+ * CS invitations accept any valid email (not just Gmail) — identity is verified via WhatsApp OTP.
  */
-export function normalizeInviteEmail(raw: string): string {
+export function normalizeInviteEmail(raw: string, role?: Role): string {
   const email = raw.trim().toLowerCase();
+  if (role === 'cs') {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 255) {
+      throw new ServiceError(400, 'INVALID_EMAIL', 'Masukkan alamat email yang valid untuk akun CS.');
+    }
+    return email;
+  }
   if (!/^[^@\s]+@gmail\.com$/.test(email) || email.length > 255) {
     throw new ServiceError(400, 'GMAIL_REQUIRED', 'Undangan hanya untuk alamat Gmail (@gmail.com), yaitu alamat yang akan dipakai penerima di KONEVA.');
   }
   return email;
+}
+
+export function normalizeInvitePhone(raw: string): string {
+  let digits = raw.replace(/[^0-9]/g, '');
+  if (digits.startsWith('0062')) digits = digits.slice(2);
+  if (digits.startsWith('0')) digits = `62${digits.slice(1)}`;
+  else if (digits.startsWith('8')) digits = `62${digits}`;
+  if (!/^62[0-9]{8,13}$/.test(digits)) {
+    throw new ServiceError(400, 'INVALID_PHONE', 'Masukkan nomor WhatsApp Indonesia yang valid (contoh: 08123456789).');
+  }
+  return digits;
 }
 
 const otpHash = (invitationId: string, code: string): string =>
@@ -57,7 +90,7 @@ export function maskEmail(email: string): string {
 }
 
 export async function createInvitation(
-  tenantId: string, inviter: { userId: string; role: Role }, input: { email: string; role: Role },
+  tenantId: string, inviter: { userId: string; role: Role }, input: { email: string; role: Role; device_keys?: string[] | undefined; phone?: string | undefined },
 ): Promise<{ id: string; email: string; role: Role; expires_at: Date; token: string; accept_path: string }> {
   if (!(INVITABLE_ROLES as readonly string[]).includes(input.role)) {
     throw new ServiceError(400, 'INVALID_ROLE', 'Undangan hanya untuk peran Developer atau Customer Service.');
@@ -65,7 +98,13 @@ export async function createInvitation(
   if (!canGrant(inviter.role, input.role)) {
     throw new ServiceError(403, 'ROLE_NOT_GRANTABLE', 'Hanya Owner workspace yang bisa mengundang.');
   }
-  input = { ...input, email: normalizeInviteEmail(input.email) };
+  input = { ...input, email: normalizeInviteEmail(input.email, input.role) };
+  const phone = input.role === 'cs' ? normalizeInvitePhone(input.phone ?? '') : null;
+  if (input.role === 'cs' && !phone) {
+    throw new ServiceError(400, 'PHONE_REQUIRED', 'Nomor WhatsApp wajib diisi untuk undangan CS.');
+  }
+  const deviceIds = input.role === 'cs' ? await resolveDeviceGrants(tenantId, input.device_keys ?? []) : [];
+  if (input.role === 'cs') await assertMaxOneCs(tenantId);
   await assertCanAddMember(tenantId);
   const existing = await pool.query(
     `SELECT 1 FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = $1 AND lower(u.email) = lower($2)`,
@@ -87,20 +126,21 @@ export async function createInvitation(
   const { token, hash } = newInviteToken();
   const expiresAt = new Date(Date.now() + INVITE_HOURS * 3_600_000);
   const row = (await pool.query<{ id: string }>(
-    `INSERT INTO invitations (tenant_id, email, role, token_hash, invited_by, expires_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [tenantId, input.email, input.role, hash, inviter.userId, expiresAt],
+    `INSERT INTO invitations (tenant_id, email, role, token_hash, invited_by, expires_at, device_ids, phone) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [tenantId, input.email, input.role, hash, inviter.userId, expiresAt, deviceIds, phone],
   )).rows[0]!;
   return { id: row.id, email: input.email, role: input.role, expires_at: expiresAt, token, accept_path: `/invite/${token}` };
 }
 
 export async function listTeam(tenantId: string) {
   const members = (await pool.query(
-    `SELECT u.id AS user_id, u.name, u.email, m.role, m.created_at AS joined_at, u.last_login_at
+    `SELECT u.id AS user_id, u.name, u.email, m.role, m.created_at AS joined_at, u.last_login_at,
+       ARRAY(SELECT d.device_key FROM devices d WHERE d.tenant_id=m.tenant_id AND d.id=ANY(m.device_ids) AND d.status<>'deleted' ORDER BY d.device_key) AS device_keys
      FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = $1 ORDER BY m.created_at`,
     [tenantId],
   )).rows;
   const invitations = (await pool.query(
-    `SELECT id, email, role, expires_at, created_at FROM invitations
+    `SELECT id, email, role, phone, expires_at, created_at FROM invitations
      WHERE tenant_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now() ORDER BY created_at DESC`,
     [tenantId],
   )).rows;
@@ -115,6 +155,7 @@ export async function listTeam(tenantId: string) {
   }, new Date());
   return {
     members,
+    devices: (await pool.query("SELECT device_key, label, phone_number FROM devices WHERE tenant_id=$1 AND status<>'deleted' ORDER BY label NULLS LAST, device_key", [tenantId])).rows,
     invitations,
     legacy_role_transition: {
       phase,
@@ -162,28 +203,30 @@ export async function revokeInvitation(tenantId: string, id: string): Promise<vo
 const INVALID = () => new ServiceError(404, 'INVITATION_INVALID', 'This invitation is invalid, expired or already used');
 
 export async function previewInvitation(token: string) {
-  const row = (await pool.query<{ email: string; role: Role; expires_at: Date; workspace: string; inviter: string | null }>(
-    `SELECT i.email, i.role, i.expires_at, t.name AS workspace, u.name AS inviter
+  const row = (await pool.query<{ email: string; role: Role; expires_at: Date; workspace: string; inviter: string | null; phone: string | null }>(
+    `SELECT i.email, i.role, i.expires_at, i.phone, t.name AS workspace, u.name AS inviter
      FROM invitations i JOIN tenants t ON t.id = i.tenant_id LEFT JOIN users u ON u.id = i.invited_by
      WHERE i.token_hash = $1 AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()`,
     [sha256(token)],
   )).rows[0];
   if (!row) throw INVALID();
+  const otpChannel = row.phone ? 'whatsapp' as const : 'email' as const;
   return {
     workspace: row.workspace, role: row.role, invited_by: row.inviter, email_hint: maskEmail(row.email), expires_at: row.expires_at,
-    requires_otp: true, otp_available: emailAvailable(),
+    requires_otp: true, otp_channel: otpChannel,
+    otp_available: otpChannel === 'whatsapp' || emailAvailable(),
+    phone_hint: row.phone ? `****${row.phone.slice(-4)}` : null,
   };
 }
 
 const OTP_INVALID = () => new ServiceError(401, 'OTP_INVALID', 'Kode salah, kedaluwarsa, atau sudah dipakai. Minta kode baru.');
 
-/** Sends a fresh OTP to the invited address. Fails safe (503) when no email sender is configured: nothing is created then. */
+/** Sends a fresh OTP to the invited address (email) or WhatsApp number (CS invitations with phone). */
 export async function requestInvitationOtp(token: string, ip?: string): Promise<{ sent: true; expires_in: number; resend_after: number }> {
-  requireEmail(); // fail safe first: with no sender configured nothing is counted, generated or stored
-  await reserveIpRequest(ip); // per source address, before any invitation lookup
+  await reserveIpRequest(ip);
   const outcome = await transaction(async (client: PoolClient) => {
-    const invite = (await client.query<{ id: string; tenant_id: string; email: string; workspace: string }>(
-      `SELECT i.id, i.tenant_id, i.email, t.name AS workspace FROM invitations i JOIN tenants t ON t.id = i.tenant_id
+    const invite = (await client.query<{ id: string; tenant_id: string; email: string; workspace: string; phone: string | null }>(
+      `SELECT i.id, i.tenant_id, i.email, i.phone, t.name AS workspace FROM invitations i JOIN tenants t ON t.id = i.tenant_id
        WHERE i.token_hash = $1 AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now() FOR UPDATE OF i`, [sha256(token)],
     )).rows[0];
     if (!invite) throw INVALID();
@@ -192,24 +235,61 @@ export async function requestInvitationOtp(token: string, ip?: string): Promise<
     if (recent.last !== null && recent.last < OTP_RESEND_SECONDS) {
       throw new ServiceError(429, 'OTP_COOLDOWN', `Tunggu ${Math.ceil(OTP_RESEND_SECONDS - recent.last)} detik sebelum meminta kode lagi.`, Math.ceil(OTP_RESEND_SECONDS - recent.last));
     }
-    // Recipient (Gmail aliases share one bucket), invitation, workspace and sender limits, atomically. The invited address itself is
-    // used unchanged for sending; only the limiter key folds aliases.
-    await reserveOtpSend({ email: invite.email, invitationId: invite.id, tenantId: invite.tenant_id });
+    if (invite.phone) {
+      await reserveWhatsappOtpSend(invite.phone);
+    } else {
+      requireEmail();
+      await reserveOtpSend({ email: invite.email, invitationId: invite.id, tenantId: invite.tenant_id });
+    }
     await client.query('UPDATE invitation_otps SET consumed_at = now() WHERE invitation_id = $1 AND consumed_at IS NULL', [invite.id]);
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
     const row = (await client.query<{ id: string }>(
       `INSERT INTO invitation_otps (invitation_id, code_hash, expires_at) VALUES ($1, $2, now() + make_interval(mins => $3)) RETURNING id`,
       [invite.id, otpHash(invite.id, code), OTP_MINUTES])).rows[0]!;
-    return { otpId: row.id, email: invite.email, workspace: invite.workspace, code };
+    return { otpId: row.id, email: invite.email, phone: invite.phone, workspace: invite.workspace, code, tenantId: invite.tenant_id };
   });
-  try {
-    await sendInvitationOtp({ to: outcome.email, code: outcome.code, workspace: outcome.workspace, validMinutes: OTP_MINUTES });
-  } catch (error) {
-    await pool.query('UPDATE invitation_otps SET consumed_at = now() WHERE id = $1', [outcome.otpId]);
-    if (error instanceof ServiceError) throw error;
-    throw new ServiceError(502, 'EMAIL_SEND_FAILED', 'Kode verifikasi gagal dikirim. Coba lagi nanti.');
+  if (outcome.phone) {
+    await sendInvitationWhatsAppOtp(outcome);
+  } else {
+    try {
+      await sendInvitationOtp({ to: outcome.email, code: outcome.code, workspace: outcome.workspace, validMinutes: OTP_MINUTES });
+    } catch (error) {
+      await pool.query('UPDATE invitation_otps SET consumed_at = now() WHERE id = $1', [outcome.otpId]);
+      if (error instanceof ServiceError) throw error;
+      throw new ServiceError(502, 'EMAIL_SEND_FAILED', 'Kode verifikasi gagal dikirim. Coba lagi nanti.');
+    }
   }
   return { sent: true, expires_in: OTP_MINUTES * 60, resend_after: OTP_RESEND_SECONDS };
+}
+
+async function sendInvitationWhatsAppOtp(outcome: { otpId: string; phone: string | null; code: string; workspace: string; tenantId: string }): Promise<void> {
+  const sender = (await pool.query<{ device_key: string | null; tenant_id: string }>(
+    `SELECT s.device_key, s.tenant_id FROM system_whatsapp_otp_sender s
+     JOIN tenants t ON t.id=s.tenant_id AND t.is_system=true WHERE s.singleton=true`,
+  )).rows[0];
+  if (!sender?.device_key) {
+    await pool.query('UPDATE invitation_otps SET consumed_at = now() WHERE id = $1', [outcome.otpId]);
+    throw new ServiceError(503, 'WHATSAPP_OTP_NOT_CONFIGURED', 'Verifikasi WhatsApp belum dikonfigurasi. Hubungi operator.');
+  }
+  const device = (await pool.query<{ status: string }>(
+    `SELECT status FROM devices WHERE device_key=$1 AND tenant_id=$2`, [sender.device_key, sender.tenant_id],
+  )).rows[0];
+  if (!device || device.status !== 'online') {
+    await pool.query('UPDATE invitation_otps SET consumed_at = now() WHERE id = $1', [outcome.otpId]);
+    throw new ServiceError(503, 'WHATSAPP_OTP_SENDER_OFFLINE', 'Pengirim OTP WhatsApp sedang tidak terhubung. Coba lagi nanti.');
+  }
+  try {
+    const queued = await queueSystemOtp(sender.tenant_id, {
+      device_key: sender.device_key, to: outcome.phone!,
+      external_id: `invite_otp_${outcome.otpId}`,
+      message: `${outcome.code} adalah kode verifikasi undangan ${outcome.workspace} di KONEVA. Berlaku ${OTP_MINUTES} menit. Jangan bagikan kode ini.`,
+    });
+    if (queued.status !== 'queued') throw new Error('queue failed');
+  } catch (error) {
+    await pool.query('UPDATE invitation_otps SET consumed_at = now() WHERE id = $1', [outcome.otpId]);
+    logger.error('WhatsApp invitation OTP failed to queue', { otpId: outcome.otpId, error: error instanceof Error ? error.message : String(error) });
+    throw new ServiceError(503, 'WHATSAPP_OTP_SEND_FAILED', 'Kode verifikasi WhatsApp gagal dikirim. Coba lagi nanti.');
+  }
 }
 
 /**
@@ -251,8 +331,8 @@ export async function acceptInvitation(token: string, input: AcceptInput): Promi
   }
   const otpId = await spendInvitationOtpAttempt(pending.id, input.otp);
   return transaction(async (client: PoolClient) => {
-    const invite = (await client.query<{ id: string; tenant_id: string; email: string; role: Role; workspace: string }>(
-      `SELECT i.id, i.tenant_id, i.email, i.role, t.name AS workspace
+    const invite = (await client.query<{ id: string; tenant_id: string; email: string; role: Role; workspace: string; device_ids: string[] }>(
+      `SELECT i.id, i.tenant_id, i.email, i.role, i.device_ids, t.name AS workspace
        FROM invitations i JOIN tenants t ON t.id = i.tenant_id
        WHERE i.token_hash = $1 AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now() FOR UPDATE OF i`,
       [sha256(token)],
@@ -286,7 +366,7 @@ export async function acceptInvitation(token: string, input: AcceptInput): Promi
     }
 
     try {
-      await client.query(`INSERT INTO memberships (user_id, tenant_id, role) VALUES ($1, $2, $3)`, [userId, invite.tenant_id, invite.role]);
+      await client.query(`INSERT INTO memberships (user_id, tenant_id, role, device_ids) VALUES ($1, $2, $3, $4)`, [userId, invite.tenant_id, invite.role, invite.role === 'cs' ? invite.device_ids : []]);
     } catch (error) {
       if ((error as { code?: string }).code === '23505') throw new ServiceError(409, 'ALREADY_MEMBER', 'You are already in this workspace');
       throw error;
@@ -316,7 +396,8 @@ export async function changeMemberRole(tenantId: string, actor: { userId: string
   if (!canManageMember(actor.role, target.role) || !canGrant(actor.role, newRole)) {
     throw new ServiceError(403, 'ROLE_NOT_GRANTABLE', 'Hanya Owner yang bisa mengubah peran menjadi Developer atau Customer Service.');
   }
-  await pool.query('UPDATE memberships SET role = $3 WHERE tenant_id = $1 AND user_id = $2', [tenantId, targetUserId, newRole]);
+  if (newRole === 'cs' && target.role !== 'cs') await assertMaxOneCs(tenantId);
+  await pool.query('UPDATE memberships SET device_ids = CASE WHEN role=$3 THEN device_ids ELSE ARRAY[]::uuid[] END, role = $3 WHERE tenant_id = $1 AND user_id = $2', [tenantId, targetUserId, newRole]);
 }
 
 export async function removeMember(tenantId: string, actor: { userId: string; role: Role }, targetUserId: string): Promise<void> {
@@ -326,4 +407,21 @@ export async function removeMember(tenantId: string, actor: { userId: string; ro
   if (!canManageMember(actor.role, target.role)) throw new ServiceError(403, 'ROLE_NOT_GRANTABLE', 'Your role cannot remove this member');
   await pool.query('DELETE FROM memberships WHERE tenant_id = $1 AND user_id = $2', [tenantId, targetUserId]);
   // Their sessions stay valid for other workspaces, but this workspace no longer resolves for them.
+}
+
+/** Resolve workspace-owned devices; a deleted/recreated key never inherits grants. */
+export async function resolveDeviceGrants(tenantId: string, keys: string[]): Promise<string[]> {
+  const unique = [...new Set(keys)];
+  if (!unique.length) return [];
+  const result = await pool.query<{ id: string }>(
+    "SELECT id FROM devices WHERE tenant_id=$1 AND device_key=ANY($2::text[]) AND status<>'deleted'", [tenantId, unique]);
+  if (result.rows.length !== unique.length) throw new ServiceError(400, 'INVALID_DEVICE_GRANT', 'Pilih device aktif milik workspace ini.');
+  return result.rows.map((row) => row.id);
+}
+
+export async function setMemberDevices(tenantId: string, actor: { userId: string; role: Role }, userId: string, keys: string[]): Promise<void> {
+  if (actor.role !== 'owner') throw new ServiceError(403, 'FORBIDDEN', 'Hanya Owner yang bisa mengatur akses device CS.');
+  const ids = await resolveDeviceGrants(tenantId, keys);
+  const result = await pool.query("UPDATE memberships SET device_ids=$3 WHERE tenant_id=$1 AND user_id=$2 AND role='cs' RETURNING user_id", [tenantId, userId, ids]);
+  if (!result.rowCount) throw new ServiceError(404, 'CS_NOT_FOUND', 'Anggota CS tidak ditemukan.');
 }

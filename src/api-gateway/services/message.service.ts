@@ -253,7 +253,7 @@ async function queueMessageInternal(tenantId: string, input: SendMessageRequest,
         mediaType, mediaUrl, exempt, systemOtp, systemNotification, input.reply_to_message_id ?? null, systemManaged ? 'api' : sendContext],
     );
     if (status === 'queued' && !exempt && payg.enabled) {
-      await reserveMessageCharge(client, tenantId, result.rows[0]!.id, 0);
+      await reserveMessageCharge(client, tenantId, result.rows[0]!.id, 0, 'api');
     }
     if (status === 'queued' && !exempt) await client.query('UPDATE tenants SET used_messages = used_messages + 1 WHERE id = $1', [tenantId]);
     return { message: result.rows[0]!, reused: false };
@@ -406,11 +406,13 @@ export async function listMessages(
   };
 }
 
-export async function listInboxDevices(tenantId: string) {
+export async function listInboxDevices(tenantId: string, csUserId?: string) {
   const result = await pool.query(
-    `SELECT device_key, label, phone_number, status FROM devices
-     WHERE tenant_id = $1 AND status <> 'deleted' ORDER BY label NULLS LAST, device_key`,
-    [tenantId],
+    `SELECT device_key, label, phone_number, status FROM devices d
+     WHERE tenant_id = $1 AND status <> 'deleted'
+       AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM memberships m WHERE m.tenant_id=$1 AND m.user_id=$2 AND m.role='cs' AND d.id=ANY(m.device_ids)))
+     ORDER BY label NULLS LAST, device_key`,
+    [tenantId, csUserId ?? null],
   );
   return { success: true, data: result.rows };
 }
@@ -437,9 +439,14 @@ const inboxChatKey = (alias: string) => {
 export async function listInboxConversations(
   tenantId: string,
   filter: { device_key?: string; search?: string; limit: number; offset: number },
+  csUserId?: string,
 ) {
   const values: unknown[] = [tenantId];
   const conditions = ["m.tenant_id = $1", "m.system_otp = false AND m.system_notification = false"];
+  if (csUserId) {
+    values.push(csUserId);
+    conditions.push(`EXISTS (SELECT 1 FROM memberships grant_member WHERE grant_member.tenant_id=$1 AND grant_member.user_id=$${values.length} AND grant_member.role='cs' AND d.id=ANY(grant_member.device_ids))`);
+  }
   if (filter.device_key) {
     values.push(filter.device_key);
     conditions.push(`m.device_key = $${values.length}`);
@@ -575,7 +582,7 @@ export async function retryMessage(tenantId: string, messageId: string): Promise
       [messageId, tenantId, attemptNo],
     )).rows[0]!;
     if (!updated.quota_exempt && (await currentPaygSettings(client)).enabled) {
-      await reserveMessageCharge(client, tenantId, messageId, attemptNo);
+      await reserveMessageCharge(client, tenantId, messageId, attemptNo, 'api');
     }
     return updated;
   });

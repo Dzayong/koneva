@@ -47,16 +47,23 @@ export default function InvitePage(props: { params: Promise<{ token: string }> }
 
   const signedIn = isAuthenticated === true && api.hasSession();
 
+  const isWhatsApp = preview?.otp_channel === "whatsapp";
+
   const sendOtp = async () => {
     setError(null); setOtpNote(null); setOtpBusy(true);
     try {
       const result = await api.requestInvitationOtp(token);
       setOtpSent(true); setWait(result.resend_after);
-      setOtpNote("Kode sudah dikirim ke alamat Gmail undangan. Berlaku 10 menit.");
+      setOtpNote(isWhatsApp
+        ? `Kode sudah dikirim ke WhatsApp ${preview?.phone_hint ?? ""}. Berlaku 10 menit.`
+        : "Kode sudah dikirim ke alamat Gmail undangan. Berlaku 10 menit.");
     } catch (err) {
       const failure = apiFailure(err);
       setError({ message:
         failure.code === "EMAIL_NOT_CONFIGURED" ? "Pengiriman email belum diaktifkan, jadi undangan belum bisa diterima. Hubungi pemilik workspace."
+        : failure.code === "WHATSAPP_OTP_NOT_CONFIGURED" ? "Pengirim OTP WhatsApp belum disiapkan. Hubungi pemilik workspace."
+        : failure.code === "WHATSAPP_OTP_SENDER_OFFLINE" ? "Pengirim OTP WhatsApp sedang tidak terhubung. Coba lagi nanti."
+        : failure.code === "WHATSAPP_OTP_SEND_FAILED" ? "Kode verifikasi WhatsApp gagal dikirim. Coba lagi nanti."
         : failure.code === "OTP_COOLDOWN" ? failure.message
         : failure.code === "OTP_LIMIT" ? "Terlalu banyak permintaan kode. Coba lagi nanti."
         : failure.code === "INVITATION_INVALID" ? "Undangan ini sudah tidak berlaku."
@@ -141,13 +148,15 @@ export default function InvitePage(props: { params: Promise<{ token: string }> }
               </>
             )}
             <div className="space-y-2 rounded-lg border p-3">
-              <p className="text-sm font-medium">Verifikasi email</p>
+              <p className="text-sm font-medium">{isWhatsApp ? "Verifikasi WhatsApp" : "Verifikasi email"}</p>
               {preview.otp_available ? (
                 <>
-                  <p className="text-xs text-muted-foreground">Kami kirim kode 6 digit ke alamat Gmail undangan ini ({preview.email_hint}). Alamat lain tidak bisa menerima undangan.</p>
+                  <p className="text-xs text-muted-foreground">{isWhatsApp
+                    ? `Kami kirim kode 6 digit ke nomor WhatsApp ${preview.phone_hint ?? ""} yang didaftarkan Owner.`
+                    : `Kami kirim kode 6 digit ke alamat Gmail undangan ini (${preview.email_hint}). Alamat lain tidak bisa menerima undangan.`}</p>
                   <Button type="button" variant="outline" size="sm" onClick={sendOtp} disabled={otpBusy || wait > 0}>
                     {otpBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {otpSent ? (wait > 0 ? `Kirim ulang kode (${wait} dtk)` : "Kirim ulang kode") : "Kirim kode ke email"}
+                    {otpSent ? (wait > 0 ? `Kirim ulang kode (${wait} dtk)` : "Kirim ulang kode") : isWhatsApp ? "Kirim kode ke WhatsApp" : "Kirim kode ke email"}
                   </Button>
                   {otpNote && <p role="status" className="text-xs text-muted-foreground">{otpNote}</p>}
                   {otpSent && (
@@ -158,7 +167,7 @@ export default function InvitePage(props: { params: Promise<{ token: string }> }
                   )}
                 </>
               ) : (
-                <p role="note" className="text-sm text-muted-foreground">Pengiriman email belum diaktifkan, jadi undangan ini belum bisa diterima. Hubungi pemilik workspace.</p>
+                <p role="note" className="text-sm text-muted-foreground">{isWhatsApp ? "Pengirim OTP WhatsApp belum disiapkan. Hubungi pemilik workspace." : "Pengiriman email belum diaktifkan, jadi undangan ini belum bisa diterima. Hubungi pemilik workspace."}</p>
               )}
             </div>
             {error && (

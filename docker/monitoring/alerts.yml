@@ -1,5 +1,5 @@
 groups:
-  - name: wa-gateway
+  - name: infrastructure
     rules:
       - alert: ExporterDown
         expr: up == 0
@@ -13,6 +13,18 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Disk free space is below 15%"
+      - alert: HostDiskSpaceCritical
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) < 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Disk free space is below 5%"
+      - alert: HostMemoryHigh
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.9
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Host memory usage exceeds 90%"
       - alert: PostgreSQLConnectionsHigh
         expr: sum(pg_stat_activity_count) > 80
         for: 5m
@@ -25,3 +37,51 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Redis memory usage exceeds 85%"
+
+  - name: application
+    rules:
+      - alert: ApiHighErrorRate
+        expr: >
+          sum(rate(wa_api_http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(wa_api_http_requests_total[5m])) > 0.05
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "API 5xx error rate exceeds 5%"
+      - alert: ApiHighLatency
+        expr: >
+          histogram_quantile(0.95, sum(rate(wa_api_http_request_duration_seconds_bucket{route!="/metrics"}[5m])) by (le))
+          > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "API p95 latency exceeds 2 seconds"
+      - alert: WalletReservationFailures
+        expr: >
+          sum(rate(wa_api_wallet_operations_total{operation="reserve",outcome="insufficient_balance"}[15m])) > 0.1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sustained wallet insufficient-balance rejections"
+      - alert: DuitkuCallbackAnomalies
+        expr: >
+          sum(rate(wa_api_duitku_callbacks_total{result!~"wallet_topped_up|replay|already_paid"}[30m])) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Duitku callbacks returning unexpected results ({{ $labels.result }})"
+      - alert: BotMessageDeliveryDegraded
+        expr: >
+          sum(rate(wa_bot_messages_failed_total[10m]))
+          / (sum(rate(wa_bot_messages_sent_total[10m])) + sum(rate(wa_bot_messages_failed_total[10m])) + 0.001)
+          > 0.2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "WhatsApp message failure rate exceeds 20%"
+      - alert: NoActiveWhatsAppConnections
+        expr: sum(wa_bot_active_connections) == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "No WhatsApp devices connected"

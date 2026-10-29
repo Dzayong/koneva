@@ -151,6 +151,27 @@ test('status and profile: reading needs devices:read, publishing needs content:w
   assert.equal(can('developer', 'content:write'), true);
 });
 
+test('role change: developer promoted to owner gains billing and team; cs gains nothing extra', () => {
+  const devPerms = new Set(ROLE_PERMISSIONS_SNAPSHOT.developer);
+  const ownerPerms = new Set(ROLE_PERMISSIONS_SNAPSHOT.owner);
+  const gained = [...ownerPerms].filter((p) => !devPerms.has(p));
+  assert.ok(gained.includes('team:manage'), 'promoted developer should gain team:manage');
+  assert.ok(gained.includes('billing:manage'), 'promoted developer should gain billing:manage');
+  assert.ok(gained.includes('audit:read'), 'promoted developer should gain audit:read');
+
+  const csPerms = new Set(ROLE_PERMISSIONS_SNAPSHOT.cs);
+  for (const p of csPerms) {
+    assert.ok(p === 'inbox:read' || p === 'messages:reply', `cs should only have inbox perms, got ${p}`);
+  }
+});
+
+test('device allowlist changes require team:manage and cs cannot do it', () => {
+  assert.equal(permissionFor('PATCH', '/team/members/user-1/devices'), 'team:manage');
+  assert.ok(!can('cs', 'team:manage'), 'cs cannot change device allowlists');
+  assert.ok(!can('developer', 'team:manage'), 'developer cannot change device allowlists');
+  assert.ok(can('owner', 'team:manage'), 'owner can change device allowlists');
+});
+
 test('WhatsApp group, community, and channel management writes require content:write', () => {
   for (const [method, route] of [
     ['POST', '/devices/WAPI-X/whatsapp-groups'],

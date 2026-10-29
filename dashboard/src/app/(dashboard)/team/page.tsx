@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmailVerificationDialog } from "@/components/account/email-verification-dialog";
 import { SecretReveal } from "@/components/developers/secret-reveal";
-import { useChangeRole, useInviteMember, useIssueLegacyRoleNotice, useRemoveMember, useRevokeInvitation, useTeam } from "@/hooks/use-developer";
+import { useSetMemberDevices, useChangeRole, useInviteMember, useIssueLegacyRoleNotice, useRemoveMember, useRevokeInvitation, useTeam } from "@/hooks/use-developer";
 import { usePermissions } from "@/hooks/use-me";
 import { apiFailure } from "@/lib/errors";
 import { ROLE_HELP, ROLE_LABEL, canManageTeam, isLegacyRole } from "@/lib/roles";
@@ -25,12 +25,17 @@ export default function TeamPage() {
   const { can, role, user, isLoading: permsLoading } = usePermissions();
   const { data, isLoading } = useTeam();
   const invite = useInviteMember();
+  const setDevices = useSetMemberDevices();
+  const [inviteDevices, setInviteDevices] = useState<string[]>([]);
+  const [editingCs, setEditingCs] = useState<TeamMember | null>(null);
+  const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
   const changeRole = useChangeRole();
   const remove = useRemoveMember();
   const revokeInvite = useRevokeInvitation();
   const issueLegacyNotice = useIssueLegacyRoleNotice();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [inviteRole, setInviteRole] = useState<"developer" | "cs">("developer");
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [link, setLink] = useState<CreatedInvitation | null>(null);
@@ -49,9 +54,14 @@ export default function TeamPage() {
   const submitInvite = (e: React.FormEvent) => {
     e.preventDefault();
     setInviteError(null);
-    if (!GMAIL.test(email.trim())) { setInviteError("Undangan hanya untuk alamat Gmail (@gmail.com): alamat yang akan dipakai penerima di KONEVA."); return; }
-    invite.mutate({ email: email.trim(), role: inviteRole }, {
-      onSuccess: (created) => { setLink(created); setInviteOpen(false); setEmail(""); setInviteRole("developer"); },
+    if (inviteRole === "cs") {
+      if (!email.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) { setInviteError("Masukkan alamat email yang valid untuk akun CS."); return; }
+      if (!phone.trim()) { setInviteError("Nomor WhatsApp CS wajib diisi untuk verifikasi OTP."); return; }
+    } else {
+      if (!GMAIL.test(email.trim())) { setInviteError("Undangan hanya untuk alamat Gmail (@gmail.com): alamat yang akan dipakai penerima di KONEVA."); return; }
+    }
+    invite.mutate({ email: email.trim(), role: inviteRole, device_keys: inviteRole === "cs" ? inviteDevices : [], phone: inviteRole === "cs" ? phone.trim() : undefined }, {
+      onSuccess: (created) => { setLink(created); setInviteOpen(false); setEmail(""); setPhone(""); setInviteRole("developer"); setInviteDevices([]); },
       onError: (err) => {
         const f = apiFailure(err);
         if (f.code === "EMAIL_NOT_VERIFIED") { setInviteError("Verifikasi email Anda dulu sebelum mengundang anggota."); setVerifyOpen(true); return; }
@@ -104,6 +114,7 @@ export default function TeamPage() {
                       <TableCell><p className="font-medium">{m.name}{self && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">Anda</span>}</p><p className="text-sm text-muted-foreground">{m.email}</p></TableCell>
                       <TableCell>
                         <span className="text-sm">{ROLE_LABEL[m.role]}</span>
+                        {isOwner && m.role === "cs" && <Button variant="link" size="sm" onClick={() => { setEditingCs(m); setSelectedDevices(m.device_keys ?? []); }}>Atur device ({m.device_keys?.length ?? 0})</Button>}
                         {isOwner && !self && isLegacyRole(m.role) && (
                           <Button variant="link" size="sm" className="ml-2 h-auto p-0 text-xs" disabled={changeRole.isPending}
                             onClick={() => changeRole.mutate({ userId: m.user_id, role: "developer" })}>Jadikan Developer</Button>
@@ -137,7 +148,7 @@ export default function TeamPage() {
               <TableBody>
                 {data!.invitations.map((i) => (
                   <TableRow key={i.id}>
-                    <TableCell>{i.email}</TableCell>
+                    <TableCell><span>{i.email}</span>{i.phone && <span className="block text-xs text-muted-foreground">WA: {i.phone}</span>}</TableCell>
                     <TableCell>{ROLE_LABEL[i.role]}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">berlaku sampai {formatDate(i.expires_at)}</TableCell>
                     <TableCell><Button variant="ghost" size="sm" onClick={() => revokeInvite.mutate(i.id)}>Batalkan</Button></TableCell>
@@ -158,19 +169,28 @@ export default function TeamPage() {
         </dl>
       </section>
 
+      <Dialog open={Boolean(editingCs)} onOpenChange={(open) => { if (!open && !setDevices.isPending) setEditingCs(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Akses device {editingCs?.name}</DialogTitle><DialogDescription>CS hanya bisa membaca dan membalas chat dari device yang dicentang.</DialogDescription></DialogHeader>
+          <DeviceChoices devices={data?.devices ?? []} selected={selectedDevices} onChange={setSelectedDevices} />
+          <DialogFooter><Button disabled={setDevices.isPending} onClick={() => editingCs && setDevices.mutate({ userId: editingCs.user_id, device_keys: selectedDevices }, { onSuccess: () => setEditingCs(null) })}>{setDevices.isPending ? "Menyimpan…" : "Simpan akses"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Undang rekan kerja</DialogTitle>
-            <DialogDescription>Anda akan mendapat tautan untuk dikirim sendiri. Tautan berlaku 48 jam, sekali pakai, dan hanya bisa diterima oleh alamat Gmail ini setelah mengonfirmasi kode email.</DialogDescription>
+            <DialogDescription>{inviteRole === "cs" ? "Anda akan mendapat tautan untuk dikirim sendiri. CS akan mengonfirmasi kode OTP yang dikirim ke WhatsApp-nya." : "Anda akan mendapat tautan untuk dikirim sendiri. Tautan berlaku 48 jam, sekali pakai, dan hanya bisa diterima oleh alamat Gmail ini setelah mengonfirmasi kode email."}</DialogDescription>
           </DialogHeader>
           <form onSubmit={submitInvite} className="space-y-4">
-            <div className="space-y-2"><Label htmlFor="inv-email">Alamat Gmail penerima</Label><Input id="inv-email" type="email" required placeholder="nama@gmail.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus /><p className="text-xs text-muted-foreground">Pakai alamat Gmail yang akan dipakai penerima untuk akun KONEVA. Penerima harus mengonfirmasi kode yang dikirim ke alamat ini.</p></div>
             <div className="space-y-1">
-              <div className="space-y-2"><Label htmlFor="inv-role">Peran</Label><select id="inv-role" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={inviteRole} onChange={(e) => setInviteRole(e.target.value as "developer" | "cs")}><option value="developer">Developer</option><option value="cs">Customer Service</option></select><p className="text-xs text-muted-foreground">{ROLE_HELP[inviteRole]}</p></div>
+              <div className="space-y-2"><Label htmlFor="inv-role">Peran</Label><select id="inv-role" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={inviteRole} onChange={(e) => { setInviteRole(e.target.value as "developer" | "cs"); setInviteError(null); }}><option value="developer">Developer</option><option value="cs">Customer Service</option></select><p className="text-xs text-muted-foreground">{ROLE_HELP[inviteRole]}</p></div>
             </div>
+            <div className="space-y-2"><Label htmlFor="inv-email">{inviteRole === "cs" ? "Email penerima" : "Alamat Gmail penerima"}</Label><Input id="inv-email" type="email" required placeholder={inviteRole === "cs" ? "nama@email.com" : "nama@gmail.com"} value={email} onChange={(e) => setEmail(e.target.value)} autoFocus /><p className="text-xs text-muted-foreground">{inviteRole === "cs" ? "Email untuk login akun KONEVA (boleh email apa saja, tidak harus Gmail)." : "Pakai alamat Gmail yang akan dipakai penerima untuk akun KONEVA."}</p></div>
+            {inviteRole === "cs" && <div className="space-y-2"><Label htmlFor="inv-phone">Nomor WhatsApp CS</Label><Input id="inv-phone" type="tel" required placeholder="08123456789" value={phone} onChange={(e) => setPhone(e.target.value)} /><p className="text-xs text-muted-foreground">Kode verifikasi OTP akan dikirim ke nomor WhatsApp ini.</p></div>}
+            {inviteRole === "cs" && <DeviceChoices devices={data?.devices ?? []} selected={inviteDevices} onChange={setInviteDevices} />}
             {inviteError && <p role="alert" className="text-sm text-destructive">{inviteError}</p>}
-            <DialogFooter><Button type="submit" disabled={invite.isPending || !email}>{invite.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Membuat…</> : <><Plus className="mr-2 h-4 w-4" />Buat tautan undangan</>}</Button></DialogFooter>
+            <DialogFooter><Button type="submit" disabled={invite.isPending || !email || (inviteRole === "cs" && !phone)}>{invite.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Membuat…</> : <><Plus className="mr-2 h-4 w-4" />Buat tautan undangan</>}</Button></DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -198,9 +218,9 @@ export default function TeamPage() {
         <SecretReveal
           open
           title="Tautan undangan siap"
-          description={`Kirim tautan ini ke ${link.email} sebagai ${ROLE_LABEL[link.role]}. Penerima akan diminta memasukkan kode yang dikirim ke email tersebut.`}
+          description={link.role === "cs" ? `Kirim tautan ini ke ${link.email} sebagai ${ROLE_LABEL[link.role]}. Kode verifikasi akan dikirim via WhatsApp ke nomor yang sudah diisi.` : `Kirim tautan ini ke ${link.email} sebagai ${ROLE_LABEL[link.role]}. Penerima akan diminta memasukkan kode yang dikirim ke email tersebut.`}
           secret={`${window.location.origin}${link.accept_path}`}
-          warning="Tautan hanya ditampilkan sekali. Berlaku 48 jam, sekali pakai, dan hanya bisa diterima oleh alamat Gmail tersebut setelah konfirmasi kode."
+          warning={link.role === "cs" ? "Tautan hanya ditampilkan sekali. Berlaku 48 jam, sekali pakai. Kode OTP dikirim lewat WhatsApp." : "Tautan hanya ditampilkan sekali. Berlaku 48 jam, sekali pakai, dan hanya bisa diterima oleh alamat Gmail tersebut setelah konfirmasi kode."}
           doneLabel="Sudah saya kirim"
           onDone={() => setLink(null)}
         />
@@ -220,4 +240,11 @@ export default function TeamPage() {
       </Dialog>
     </div>
   );
+}
+
+function DeviceChoices({ devices, selected, onChange }: { devices: { device_key: string; label: string | null; phone_number: string | null }[]; selected: string[]; onChange: (keys: string[]) => void }) {
+  return <fieldset className="space-y-2"><legend className="text-sm font-medium">Device yang boleh diakses</legend>
+    <p className="text-xs text-muted-foreground">Tanpa pilihan, CS belum bisa membuka chat. Owner bisa mengubah pilihan ini nanti.</p>
+    <div className="max-h-60 space-y-2 overflow-y-auto">{devices.length === 0 && <p className="text-sm">Belum ada device di workspace ini.</p>}{devices.map((device) => <label key={device.device_key} className="flex items-center gap-3 rounded-md border p-3 text-sm"><input type="checkbox" checked={selected.includes(device.device_key)} onChange={(event) => onChange(event.target.checked ? [...selected, device.device_key] : selected.filter((key) => key !== device.device_key))} /><span>{device.label || device.device_key}<span className="block text-xs text-muted-foreground">{device.phone_number || device.device_key}</span></span></label>)}</div>
+  </fieldset>;
 }
