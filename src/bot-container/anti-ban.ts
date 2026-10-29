@@ -133,9 +133,15 @@ export async function canSendMessage(
   const dailyCap = 0;
   const sentToday = 0;
 
-  const sentLastMinute = await countMessagesSince(device.id, new Date(now.getTime() - 60_000), queryFn);
-  if (sentLastMinute >= (urgent ? URGENT_PER_MINUTE_LIMIT : PER_MINUTE_LIMIT)) {
-    return denial('rate_limit_per_minute', { healthScore, dailyCap, sentToday });
+  // Reactive replies (auto-reply to an incoming message) bypass the global
+  // per-device rate limit so that heavy group/broadcast traffic never blocks
+  // a direct reply to someone who just wrote in.
+  const reactive = !options.isProactive && !urgent;
+  if (!reactive) {
+    const sentLastMinute = await countMessagesSince(device.id, new Date(now.getTime() - 60_000), queryFn);
+    if (sentLastMinute >= (urgent ? URGENT_PER_MINUTE_LIMIT : PER_MINUTE_LIMIT)) {
+      return denial('rate_limit_per_minute', { healthScore, dailyCap, sentToday });
+    }
   }
 
   if (!urgent && options.scheduleContext) {

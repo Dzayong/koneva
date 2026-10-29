@@ -4,7 +4,7 @@ import type { Request, Response } from 'express';
 import pool from '../shared/database/connection';
 import type { TenantContext } from '../shared/types/api';
 import { ServiceError } from './services/service-error';
-import { listContacts, parseContactsCsv } from './routes/contact.routes';
+import { listContacts, parseContactsCsv, parseContactsVcf } from './routes/contact.routes';
 import { analyticsOverview } from './routes/analytics.routes';
 import { listAutoReplyRules } from './routes/auto-reply.routes';
 import { dashboardStats } from './routes/stats.routes';
@@ -38,6 +38,23 @@ test('CSV contact import handles quoted values and tags', () => {
 test('CSV contact import rejects rows without valid phone numbers', () => {
   assert.throws(() => parseContactsCsv('phone_number,name\nabc,Bad'), (error) =>
     error instanceof ServiceError && error.code === 'INVALID_CSV');
+});
+
+test('VCF contact import supports names, grouped TEL properties and folded lines', () => {
+  const contacts = parseContactsVcf([
+    'BEGIN:VCARD', 'VERSION:3.0', 'FN:Budi Sales', 'item1.TEL;TYPE=CELL:+62 812-3456-789',
+    'NOTE:folded', ' value', 'END:VCARD',
+    'BEGIN:VCARD', 'VERSION:4.0', 'N:Putri;Ayu;;;', 'TEL;VALUE=uri:tel:081234567890', 'END:VCARD',
+  ].join('\r\n'));
+  assert.deepEqual(contacts, [
+    { phone_number: '+628123456789', name: 'Budi Sales', tags: [] },
+    { phone_number: '6281234567890', name: 'Ayu Putri', tags: [] },
+  ]);
+});
+
+test('VCF contact import rejects a card without a valid phone number', () => {
+  assert.throws(() => parseContactsVcf('BEGIN:VCARD\nFN:No Phone\nEND:VCARD'), (error) =>
+    error instanceof ServiceError && error.code === 'INVALID_VCF');
 });
 
 test('message templates render spintax and named variables', () => {

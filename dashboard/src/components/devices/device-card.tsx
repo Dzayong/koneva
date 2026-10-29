@@ -19,7 +19,7 @@ import { usePermissions } from "@/hooks/use-me";
 import { useDeleteDevice, usePauseDevice, useReconnectDevice, useResumeDevice } from "@/hooks/use-devices";
 import { useCreateApiKey, useRotateApiKey } from "@/hooks/use-developer";
 import { SecretReveal } from "@/components/developers/secret-reveal";
-import { cn, formatDate, formatPhoneNumber } from "@/lib/utils";
+import { formatDate, formatPhoneNumber } from "@/lib/utils";
 import type { ApiKeyRecord, CreatedApiKey, Device } from "@/lib/types";
 
 function DeviceCardApiKeyAction({

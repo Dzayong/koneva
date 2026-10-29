@@ -37,9 +37,13 @@ const listQuery = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 export const importContactsSchema = z.object({
-  csv: z.string().min(1).max(900_000),
+  csv: z.string().min(1).max(900_000).optional(),
+  content: z.string().min(1).max(900_000).optional(),
+  format: z.enum(['csv', 'vcf']).optional(),
   consent_source_note: z.string().trim().min(1).max(500).optional(),
-}).strict();
+}).strict().refine((value) => Boolean(value.csv) !== Boolean(value.content), {
+  message: 'Provide exactly one of csv or content',
+});
 
 export interface CsvContact { phone_number: string; name?: string; tags: string[]; notes?: string }
 
@@ -77,6 +81,79 @@ export function parseContactsCsv(csv: string): CsvContact[] {
     if (!parsed.success) throw new ServiceError(400, 'INVALID_CSV', `Invalid contact on CSV row ${rowIndex + 2}`);
     return parsed.data as CsvContact;
   });
+}
+
+function decodeQuotedPrintable(input: string): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < input.length; i++) {
+    if (input[i] === '=' && i + 2 < input.length) {
+      const hex = input.slice(i + 1, i + 3);
+      if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+        bytes.push(parseInt(hex, 16));
+        i += 2;
+        continue;
+      }
+    }
+    bytes.push(input.charCodeAt(i));
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+function unescapeVcardValue(value: string): string {
+  return value
+    .replace(/\\n/gi, ' ')
+    .replace(/\\,/g, ',')
+    .replace(/\\;/g, ';')
+    .replace(/\\\\/g, '\\')
+    .trim();
+}
+
+function normalizeVcardPhone(value: string): string | null {
+  let candidate = unescapeVcardValue(value).replace(/^tel:/i, '').trim();
+  candidate = candidate.replace(/[^+\d]/g, '');
+  if (candidate.startsWith('00')) candidate = `+${candidate.slice(2)}`;
+  if (/^0\d+/.test(candidate)) candidate = `62${candidate.slice(1)}`;
+  return phone.safeParse(candidate).success ? candidate : null;
+}
+
+/** Parse common vCard 2.1/3.0/4.0 exports without storing the uploaded file. */
+export function parseContactsVcf(vcf: string): CsvContact[] {
+  const unfolded = vcf.replace(/^\uFEFF/, '').replace(/\r?\n[ \t]/g, '');
+  const cards = unfolded.match(/BEGIN:VCARD[\s\S]*?END:VCARD/gi) ?? [];
+  if (cards.length === 0) throw new ServiceError(400, 'INVALID_VCF', 'VCF must contain at least one vCard');
+
+  const contacts: CsvContact[] = [];
+  const seen = new Set<string>();
+  for (const card of cards) {
+    const properties = card.split(/\r?\n/).flatMap((line) => {
+      const separator = line.indexOf(':');
+      if (separator < 0) return [];
+      const rawKey = line.slice(0, separator);
+      const params = rawKey.toUpperCase();
+      const key = (rawKey.split(';')[0] ?? '').split('.').pop()?.toUpperCase() ?? '';
+      let value = line.slice(separator + 1);
+      if (params.includes('ENCODING=QUOTED-PRINTABLE')) {
+        value = decodeQuotedPrintable(value.replace(/=$/gm, ''));
+      }
+      return [{ key, value }];
+    });
+    const fullName = properties.find((entry) => entry.key === 'FN')?.value;
+    const structuredName = properties.find((entry) => entry.key === 'N')?.value;
+    const name = fullName
+      ? unescapeVcardValue(fullName)
+      : structuredName
+        ? structuredName.split(';').map(unescapeVcardValue).filter(Boolean).reverse().join(' ')
+        : undefined;
+    for (const entry of properties.filter((property) => property.key === 'TEL')) {
+      const phoneNumber = normalizeVcardPhone(entry.value);
+      if (!phoneNumber || seen.has(phoneNumber)) continue;
+      seen.add(phoneNumber);
+      contacts.push({ phone_number: phoneNumber, ...(name ? { name } : {}), tags: [] });
+      if (contacts.length > 5000) throw new ServiceError(400, 'INVALID_VCF', 'VCF cannot contain more than 5000 phone numbers');
+    }
+  }
+  if (contacts.length === 0) throw new ServiceError(400, 'INVALID_VCF', 'VCF does not contain a valid phone number');
+  return contacts;
 }
 
 function duplicateError(error: unknown): never {
@@ -287,7 +364,9 @@ export async function recordBroadcastConsentForUser(request: Request, response: 
 
 export async function importContacts(request: Request, response: Response): Promise<void> {
   const input = request.validated!.body as z.infer<typeof importContactsSchema>;
-  const contacts = parseContactsCsv(input.csv);
+  const content = input.content ?? input.csv!;
+  const format = input.content ? (input.format ?? 'csv') : 'csv';
+  const contacts = format === 'vcf' ? parseContactsVcf(content) : parseContactsCsv(content);
   const actor = request.actor;
   if (input.consent_source_note && (!actor || actor.kind !== 'user')) {
     throw new ServiceError(403, 'CONSENT_ACTOR_REQUIRED', 'A signed-in workspace member must record manual consent');

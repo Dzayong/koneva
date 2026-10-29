@@ -74,7 +74,9 @@ export interface Message {
   external_id: string | null;
   reply_to_message_id?: string | null;
   error_message: string | null;
+  send_context?: "api" | "broadcast" | null;
   created_at: string;
+  send_started_at: string | null;
   sent_at: string | null;
   delivered_at: string | null;
   read_at: string | null;
@@ -150,6 +152,8 @@ export interface SendMessageResponse {
 export interface MessageListParams {
   device_key?: string;
   status?: MessageStatus;
+  direction?: "inbound" | "outbound";
+  send_context?: "api" | "broadcast";
   created_today?: boolean;
   search?: string;
   chat_jid?: string;
@@ -571,13 +575,17 @@ export interface UsageHistoryItem {
   content_preview: string;
   message_type: string;
   message_status: string;
+  error_message: string | null;
   billing_category: PaygBillingCategory;
   unit_price_idr: number;
   charged_idr: number;
   reservation_state: UsageReservationState;
   pricing_tier_code: string;
   created_at: string;
+  send_started_at: string | null;
   sent_at: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
   refunded: boolean;
 }
 

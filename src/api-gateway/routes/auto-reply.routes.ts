@@ -28,7 +28,7 @@ const ruleBody = z.object({
   response_type: z.enum(['text', 'template', 'ai', 'ai_general']).default('text'),
   response_content: z.string().max(4096),
   response_config: aiReplyConfigSchema,
-  destination_scope: z.enum(['group', 'private', 'all']).default('group'),
+  destination_scope: z.enum(['group', 'private', 'all']).default('all'),
   delay_ms: z.number().int().min(0).max(300_000).default(3000),
   is_active: z.boolean().default(true),
 }).strict().superRefine((input, context) => {
@@ -199,7 +199,7 @@ export async function updateAutoReplyRule(request: Request, response: Response):
     response_type: input.response_type ?? existing.response_type,
     response_content: input.response_content ?? existing.response_content,
     response_config: input.response_config ?? existing.response_config ?? EMPTY_AI_REPLY_RULE_CONFIG,
-    destination_scope: input.destination_scope ?? (existing as { destination_scope?: string }).destination_scope ?? 'group',
+    destination_scope: input.destination_scope ?? (existing as { destination_scope?: string }).destination_scope ?? 'all',
     delay_ms: input.delay_ms ?? existing.delay_ms,
     is_active: input.is_active ?? existing.is_active,
   });

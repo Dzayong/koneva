@@ -472,11 +472,11 @@ class ApiClient {
     await this.client.delete(`/api/v1/contacts/${id}`);
   }
 
-  /** Server-side CSV parse/upsert; header needs phone_number|phone|number. */
-  async importContacts(csv: string, consent_source_note?: string): Promise<{ imported: number }> {
+  /** Server-side CSV/vCard parse and upsert. Uploaded file content is not retained. */
+  async importContacts(content: string, format: "csv" | "vcf" = "csv", consent_source_note?: string): Promise<{ imported: number }> {
     const response = await this.client.post<ApiSuccess<{ imported: number }>>(
       "/api/v1/contacts/import",
-      { csv, ...(consent_source_note ? { consent_source_note } : {}) },
+      { content, format, ...(consent_source_note ? { consent_source_note } : {}) },
       { skipErrorToast: true },
     );
     return response.data.data;

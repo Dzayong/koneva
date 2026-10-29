@@ -35,22 +35,24 @@ const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((par
 const messagePreview = (item: InboxConversation) => item.type === "text" ? item.content : item.content || `[${item.type}]`;
 
 function InboxMedia({ message }: { message: import("@/lib/types").Message }) {
-  const [source, setSource] = useState<string | null>(null);
+  const media = message.media_url;
+  const storedMedia = Boolean(media && /^[0-9a-f-]{36}$/i.test(media));
+  const [storedSource, setStoredSource] = useState<{ media: string; url: string } | null>(null);
+  const source = storedMedia ? (storedSource && storedSource.media === media ? storedSource.url : null) : media ?? null;
   const [previewOpen, setPreviewOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   useEffect(() => {
-    const media = message.media_url;
-    if (!media) return;
-    if (!/^[0-9a-f-]{36}$/i.test(media)) { setSource(media); return; }
+    if (!media || !storedMedia) return;
     let objectUrl: string | null = null;
     let active = true;
     void api.getInboxMedia(media).then((blob) => {
       if (!active) return;
-      objectUrl = URL.createObjectURL(blob);
-      setSource(objectUrl);
-    }).catch(() => { if (active) setSource(null); });
+      const nextObjectUrl = URL.createObjectURL(blob);
+      objectUrl = nextObjectUrl;
+      setStoredSource({ media, url: nextObjectUrl });
+    }).catch(() => undefined);
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [message.media_url]);
+  }, [media, storedMedia]);
   if (!source) return null;
   if (message.type === "video") return <video className="mb-2 max-h-80 max-w-full rounded-lg" src={source} controls playsInline preload="metadata" />;
   if (message.type === "ptt" || message.type === "audio") return <div className="mb-2 flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2"><Mic className="h-4 w-4 shrink-0 text-primary" /><audio className="h-8 max-w-[240px] flex-1" src={source} controls preload="metadata" /></div>;
@@ -58,6 +60,7 @@ function InboxMedia({ message }: { message: import("@/lib/types").Message }) {
 
   return <>
     <button type="button" className="mb-2 block cursor-zoom-in rounded-lg text-left" onClick={() => { setZoom(1); setPreviewOpen(true); }} aria-label="Buka foto">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img className="max-h-80 max-w-full rounded-lg object-contain" src={source} alt="Foto yang dikirim. Klik untuk memperbesar." loading="lazy" />
     </button>
     <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
@@ -70,6 +73,7 @@ function InboxMedia({ message }: { message: import("@/lib/types").Message }) {
           <Button type="button" variant="ghost" size="icon" className="ml-1 text-white hover:bg-white/20 hover:text-white" aria-label="Tutup pratinjau" onClick={() => setPreviewOpen(false)}><X className="h-5 w-5" /></Button>
         </div>
         <div className="flex h-full w-full items-center justify-center overflow-auto p-8">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={source} alt="Foto yang dikirim" className="max-h-full max-w-full object-contain transition-transform duration-150" style={{ transform: `scale(${zoom})` }} />
         </div>
       </DialogContent>
@@ -323,6 +327,7 @@ export default function MessagesPage() {
         </div>
       </section>
       <CreateInboxConversationDialog
+        key={`${createDialogOpen ? "open" : "closed"}-${createDialogKind}`}
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         devices={devices.data ?? []}

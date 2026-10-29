@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, ChevronDown, Clock, Eye, MessageSquare, Pencil, Plus, Reply, Trash2, X, Zap } from "lucide-react";
+import { ArrowRight, Clock, Eye, MessageSquare, Pencil, Plus, Reply, Trash2, X, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,16 +61,13 @@ export default function AutoReplyPage() {
   const [dialog, setDialog] = useState<{ rule: AutoReplyRule | null } | null>(null);
   const workHours = useWorkspaceSendHours();
   const saveHours = useUpdateWorkspaceSendHours();
-  const [hoursEnabled, setHoursEnabled] = useState(true);
-  const [startTime, setStartTime] = useState("08:00");
-  const [endTime, setEndTime] = useState("22:00");
-
-  useEffect(() => {
-    if (!workHours.data) return;
-    setHoursEnabled(workHours.data.enabled);
-    setStartTime(workHours.data.start_time);
-    setEndTime(workHours.data.end_time);
-  }, [workHours.data]);
+  const [hoursDraft, setHoursDraft] = useState<{ enabled: boolean; startTime: string; endTime: string } | null>(null);
+  const hoursEnabled = hoursDraft?.enabled ?? workHours.data?.enabled ?? true;
+  const startTime = hoursDraft?.startTime ?? workHours.data?.start_time ?? "08:00";
+  const endTime = hoursDraft?.endTime ?? workHours.data?.end_time ?? "22:00";
+  const updateHoursDraft = (patch: Partial<NonNullable<typeof hoursDraft>>) => {
+    setHoursDraft((current) => ({ enabled: hoursEnabled, startTime, endTime, ...current, ...patch }));
+  };
 
   return (
     <div className="space-y-6">
@@ -102,11 +99,11 @@ export default function AutoReplyPage() {
                   <Label htmlFor="workspace-hours-enabled">Batasi balas otomatis dan broadcast dengan jam kerja</Label>
                   <p className="text-sm text-muted-foreground">Pesan broadcast di luar jam ini menunggu sampai jadwal dibuka.</p>
                 </div>
-                <Switch id="workspace-hours-enabled" checked={hoursEnabled} onCheckedChange={setHoursEnabled} disabled={!workHours.data || saveHours.isPending} />
+                <Switch id="workspace-hours-enabled" checked={hoursEnabled} onCheckedChange={(enabled) => updateHoursDraft({ enabled })} disabled={!workHours.data || saveHours.isPending} />
               </div>
               <div className="flex flex-wrap items-end gap-4">
-                <div className="space-y-1.5"><Label htmlFor="workspace-hours-start">Mulai</Label><Input id="workspace-hours-start" type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} disabled={!hoursEnabled || !workHours.data || saveHours.isPending} className="w-36" /></div>
-                <div className="space-y-1.5"><Label htmlFor="workspace-hours-end">Selesai</Label><Input id="workspace-hours-end" type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} disabled={!hoursEnabled || !workHours.data || saveHours.isPending} className="w-36" /></div>
+                <div className="space-y-1.5"><Label htmlFor="workspace-hours-start">Mulai</Label><Input id="workspace-hours-start" type="time" value={startTime} onChange={(event) => updateHoursDraft({ startTime: event.target.value })} disabled={!hoursEnabled || !workHours.data || saveHours.isPending} className="w-36" /></div>
+                <div className="space-y-1.5"><Label htmlFor="workspace-hours-end">Selesai</Label><Input id="workspace-hours-end" type="time" value={endTime} onChange={(event) => updateHoursDraft({ endTime: event.target.value })} disabled={!hoursEnabled || !workHours.data || saveHours.isPending} className="w-36" /></div>
                 <Button disabled={!workHours.data || saveHours.isPending || (hoursEnabled && startTime >= endTime)} onClick={() => saveHours.mutate({ enabled: hoursEnabled, start_time: startTime, end_time: endTime })}>
                   {saveHours.isPending ? "Menyimpan…" : "Simpan jam kerja"}
                 </Button>
@@ -257,12 +254,6 @@ function isValidRegex(pattern: string): boolean {
   }
 }
 
-const SCOPE_LABELS: Record<AutoReplyDestinationScope, string> = {
-  group: "Grup & komunitas",
-  private: "Chat pribadi",
-  all: "Semua chat",
-};
-
 function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => void }) {
   const { data: devices } = useDevices();
   const save = useSaveAutoReplyRule();
@@ -274,7 +265,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
   const [aiPrompt, setAiPrompt] = useState(rule?.response_type === "ai" ? rule.response_content : "");
   const [skillIds, setSkillIds] = useState<string[]>(rule?.response_config?.skill_ids ?? []);
   const [replyToTrigger, setReplyToTrigger] = useState(rule?.response_config?.reply_to_trigger ?? true);
-  const [destinationScope, setDestinationScope] = useState<AutoReplyDestinationScope>(rule?.destination_scope ?? "group");
+  const [destinationScope, setDestinationScope] = useState<AutoReplyDestinationScope>(rule?.destination_scope ?? "all");
   const [variables, setVariables] = useState<Record<string, string>>(rule?.response_config?.variables ?? {});
   const [newVarKey, setNewVarKey] = useState("");
   const [newVarValue, setNewVarValue] = useState("");

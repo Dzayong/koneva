@@ -54,6 +54,7 @@ const listSchema = z.object({
   device_key: z.string().max(32).optional(),
   status: z.enum(['queued', 'sending', 'sent', 'delivered', 'read', 'failed', 'blocked', 'received']).optional(),
   direction: z.enum(['inbound', 'outbound']).optional(),
+  send_context: z.enum(['api', 'broadcast']).optional(),
   created_today: z.enum(['true']).optional(),
   search: z.string().trim().max(200).optional(),
   chat_jid: z.string().regex(/^(?:\+?[1-9]\d{6,19}|(?:\d{5,32}-\d{5,32}|\d{5,32})@g\.us)$/).optional(),
@@ -158,7 +159,7 @@ router.post(
 
 router.get('/messages', validate({ query: listSchema }), async (request, response) => {
   const filter = request.validated!.query as z.infer<typeof listSchema>;
-  response.json(await listMessages(request.tenant!.id, { ...filter, created_today: filter.created_today === 'true' }));
+  response.json(await listMessages(request.tenant!.id, { ...filter, created_today: filter.created_today === 'true', send_context: filter.send_context }));
 });
 
 router.get(

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Plus, Search, Trash2, Upload, Users } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Plus, Search, Trash2, Upload, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,6 +33,7 @@ import {
   useContactGroups,
   useSetContactConsent,
 } from "@/hooks/use-contacts";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ContactRecord } from "@/lib/types";
 import {
@@ -57,6 +58,11 @@ export default function ContactsPage() {
   const [consentContact, setConsentContact] = useState<ContactRecord | null>(null);
   const [consentSourceNote, setConsentSourceNote] = useState("");
   const [consentConfirmed, setConsentConfirmed] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkConsentOpen, setBulkConsentOpen] = useState(false);
+  const [bulkConsentNote, setBulkConsentNote] = useState("");
+  const [bulkConsentConfirmed, setBulkConsentConfirmed] = useState(false);
+  const [bulkConsentLoading, setBulkConsentLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data, isLoading, isPlaceholderData } = useContacts({
@@ -94,6 +100,29 @@ export default function ContactsPage() {
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  useEffect(() => { setSelectedIds(new Set()); }, [offset, search]);
+
+  const needsConsent = contacts.filter((c) => c.consent_status !== "opted_in");
+  const selectableIds = needsConsent.map((c) => c.id);
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
+  const someSelected = selectedIds.size > 0;
+
+  const toggleOne = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAll = useCallback(() => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectableIds));
+    }
+  }, [allSelected, selectableIds]);
+
   const migrateLegacy = () =>
     importContacts.mutate(legacyContactsToCsv(legacy), {
       onSuccess: () => {
@@ -113,17 +142,22 @@ export default function ContactsPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.vcf,text/csv,text/vcard,text/x-vcard"
             className="hidden"
             onChange={async (e) => {
               const file = e.target.files?.[0];
               e.target.value = "";
               if (file) {
-                const csv = await file.text();
+                const content = await file.text();
+                const format = file.name.toLowerCase().endsWith(".vcf") ? "vcf" : "csv";
                 importContacts.mutate(
-                  confirmInPersonConsentForImport
-                    ? { csv, consent_source_note: "Pemilik mengonfirmasi persetujuan pesan WhatsApp diterima saat bertemu langsung (impor CSV)." }
-                    : csv,
+                  {
+                    content,
+                    format,
+                    ...(confirmInPersonConsentForImport
+                      ? { consent_source_note: `Pemilik mengonfirmasi persetujuan pesan WhatsApp diterima saat bertemu langsung (impor ${format.toUpperCase()}).` }
+                      : {}),
+                  },
                   { onSuccess: () => setConfirmInPersonConsentForImport(false) },
                 );
               }
@@ -136,7 +170,7 @@ export default function ContactsPage() {
               disabled={importContacts.isPending}
             >
               <Upload className="mr-2 h-4 w-4" />
-              Impor CSV
+              Impor CSV / VCF
             </Button>
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <input
@@ -145,7 +179,7 @@ export default function ContactsPage() {
                 onChange={(event) => setConfirmInPersonConsentForImport(event.target.checked)}
                 className="h-3.5 w-3.5 accent-primary"
               />
-              Semua nomor di CSV sudah menyetujui pesan WhatsApp
+              Semua nomor di file sudah menyetujui pesan WhatsApp
             </label>
           </div>
           <Button onClick={() => setAddOpen(true)}>
@@ -218,10 +252,31 @@ export default function ContactsPage() {
         </CardContent>
       </Card>
 
+      {someSelected && (
+        <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5">
+          <span className="text-sm font-medium">{selectedIds.size} kontak dipilih</span>
+          <Button size="sm" onClick={() => { setBulkConsentOpen(true); setBulkConsentNote(""); setBulkConsentConfirmed(false); }}>
+            <Check className="mr-1.5 h-3.5 w-3.5" />
+            Berikan Izin
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Batal</Button>
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-2xl border bg-card shadow-card">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  disabled={selectableIds.length === 0}
+                  className="h-4 w-4 accent-primary"
+                  aria-label="Pilih semua kontak yang belum punya izin"
+                />
+              </TableHead>
               <TableHead className="text-label">Nama</TableHead>
               <TableHead className="text-label">Telepon</TableHead>
               <TableHead className="text-label">Izin pesan</TableHead>
@@ -233,14 +288,14 @@ export default function ContactsPage() {
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  <TableCell colSpan={5}>
+                  <TableCell colSpan={6}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : contacts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="h-40 text-center">
+                <TableCell colSpan={6} className="h-40 text-center">
                   <div className="flex flex-col items-center gap-2">
                     <Users className="h-8 w-8 text-muted-foreground" />
                     <p className="text-muted-foreground">
@@ -248,7 +303,7 @@ export default function ContactsPage() {
                     </p>
                     {!search && (
                       <p className="text-xs text-muted-foreground">
-                        Header CSV: <code>phone_number,name,tags,notes</code> (label dipisah dengan <code>|</code>)
+                        CSV: <code>phone_number,name,tags,notes</code> (label dipisah <code>|</code>). VCF dari ekspor kontak HP juga didukung.
                       </p>
                     )}
                   </div>
@@ -257,6 +312,19 @@ export default function ContactsPage() {
             ) : (
               contacts.map((contact) => (
                 <TableRow key={contact.id} className="group">
+                  <TableCell>
+                    {contact.consent_status !== "opted_in" ? (
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(contact.id)}
+                        onChange={() => toggleOne(contact.id)}
+                        className="h-4 w-4 accent-primary"
+                        aria-label={`Pilih ${contact.name || contact.phone_number}`}
+                      />
+                    ) : (
+                      <span className="inline-block h-4 w-4" />
+                    )}
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <ContactAvatar name={contact.name} phone={contact.phone_number} />
@@ -400,6 +468,61 @@ export default function ContactsPage() {
               }}
             >
               {setContactConsent.isPending ? "Menyimpan…" : "Simpan izin"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkConsentOpen} onOpenChange={(open) => { if (!bulkConsentLoading) setBulkConsentOpen(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Berikan izin untuk {selectedIds.size} kontak</DialogTitle>
+            <DialogDescription>
+              Pastikan semua kontak yang dipilih memang sudah menyetujui pesan WhatsApp.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <label className="flex items-start gap-3 rounded-lg border p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={bulkConsentConfirmed}
+                onChange={(e) => setBulkConsentConfirmed(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-primary"
+              />
+              <span>Saya memastikan semua penerima yang dipilih sudah memberi izin untuk menerima pesan.</span>
+            </label>
+            <div className="space-y-2">
+              <Label htmlFor="bulk-consent-note">Sumber izin</Label>
+              <Input
+                id="bulk-consent-note"
+                value={bulkConsentNote}
+                onChange={(e) => setBulkConsentNote(e.target.value)}
+                placeholder="Contoh: formulir pendaftaran atau persetujuan langsung"
+                maxLength={500}
+              />
+            </div>
+            <Button
+              className="w-full"
+              disabled={!bulkConsentConfirmed || !bulkConsentNote.trim() || bulkConsentLoading}
+              onClick={async () => {
+                setBulkConsentLoading(true);
+                const ids = [...selectedIds];
+                const results = await Promise.allSettled(
+                  ids.map((id) => api.setContactConsent(id, "opted_in", bulkConsentNote.trim())),
+                );
+                const success = results.filter((r) => r.status === "fulfilled").length;
+                const failed = results.length - success;
+                setBulkConsentLoading(false);
+                setBulkConsentOpen(false);
+                setSelectedIds(new Set());
+                if (failed > 0) {
+                  toast.error(`${success} berhasil, ${failed} gagal`);
+                } else {
+                  toast.success(`Izin dicatat untuk ${success} kontak`);
+                }
+              }}
+            >
+              {bulkConsentLoading ? "Menyimpan…" : "Simpan izin"}
             </Button>
           </div>
         </DialogContent>

@@ -351,6 +351,7 @@ export async function listMessages(
     device_key?: string | undefined;
     status?: string | undefined;
     direction?: 'inbound' | 'outbound' | undefined;
+    send_context?: 'api' | 'broadcast' | undefined;
     created_today?: boolean | undefined;
     search?: string | undefined;
     chat_jid?: string | undefined;
@@ -371,6 +372,10 @@ export async function listMessages(
   if (filter.direction) {
     values.push(filter.direction);
     conditions.push(`direction = $${values.length}`);
+  }
+  if (filter.send_context) {
+    values.push(filter.send_context);
+    conditions.push(`send_context = $${values.length}`);
   }
   if (filter.created_today) {
     conditions.push(`created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta') AT TIME ZONE 'Asia/Jakarta')

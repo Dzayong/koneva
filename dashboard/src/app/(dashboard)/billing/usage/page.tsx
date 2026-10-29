@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Download, Filter, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, Download, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -43,9 +43,30 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+const STATUS_LABEL: Record<string, string> = {
+  queued: "Antrean",
+  sending: "Mengirim",
+  sent: "Terkirim",
+  delivered: "Diterima",
+  read: "Dibaca",
+  failed: "Gagal",
+  blocked: "Diblokir",
+};
+
+const ERROR_LABEL: Record<string, string> = {
+  delivery_uncertain: "Pesan dikirim ke server WhatsApp tapi tidak mendapat konfirmasi. Koneksi WA mungkin terputus saat pengiriman.",
+  rate_limit_per_minute: "Ditahan oleh rate limiter (terlalu banyak pesan dalam 1 menit).",
+  not_connected: "Device tidak terhubung ke WhatsApp saat pesan diproses.",
+  queue_expired: "Pesan kedaluwarsa di antrean sebelum sempat dikirim.",
+  recipient_opted_out: "Penerima sudah minta berhenti menerima pesan.",
+  recipient_consent_required: "Penerima belum memberikan izin menerima pesan.",
+  outside_working_hours: "Ditahan karena di luar jam kerja yang diatur.",
+};
+
 export default function UsageHistoryPage() {
   const { can, isLoading: permsLoading } = usePermissions();
   const [filters, setFilters] = useState<UsageHistoryFilters>({ limit: PAGE_SIZE, offset: 0 });
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const { data: devices } = useUsageDevices();
   const { data, isLoading } = useUsageHistory(filters);
   const { data: deviceSummary, isLoading: summaryLoading } = useUsageDeviceSummary({
@@ -66,7 +87,7 @@ export default function UsageHistoryPage() {
   const totalPages = data ? Math.max(1, Math.ceil(data.pagination.total / PAGE_SIZE)) : 1;
 
   const handleCsvDownload = () => {
-    const { limit: _, offset: __, ...csvFilters } = filters;
+    const csvFilters = { ...filters, limit: undefined, offset: undefined };
     const url = api.getUsageCsvUrl(csvFilters);
     const a = document.createElement("a");
     a.href = url;
@@ -243,17 +264,64 @@ export default function UsageHistoryPage() {
                 <TableBody>
                   {data.data.map((row) => {
                     const badge = RESERVATION_BADGE[row.reservation_state] ?? { label: row.reservation_state, variant: "outline" as const };
+                    const expanded = expandedId === row.message_id;
                     return (
-                      <TableRow key={row.message_id}>
-                        <TableCell className="whitespace-nowrap text-xs">{formatDate(row.created_at)}</TableCell>
+                      <>
+                      <TableRow key={row.message_id} className="cursor-pointer hover:bg-muted/50" onClick={() => setExpandedId(expanded ? null : row.message_id)}>
+                        <TableCell className="whitespace-nowrap text-xs">
+                          <ChevronDown className={`mr-1 inline h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                          {formatDate(row.created_at)}
+                        </TableCell>
                         <TableCell className="font-mono text-xs">{row.device_key}</TableCell>
                         <TableCell className="font-mono text-xs">{row.to_number}</TableCell>
                         <TableCell><Badge variant="outline">{CATEGORY_LABEL[row.billing_category] ?? row.billing_category}</Badge></TableCell>
-                        <TableCell><Badge variant="outline">{row.message_status}</Badge></TableCell>
+                        <TableCell><Badge variant="outline">{STATUS_LABEL[row.message_status] ?? row.message_status}</Badge></TableCell>
                         <TableCell className="text-right text-xs">{rupiah(row.unit_price_idr)}</TableCell>
                         <TableCell className="text-right text-xs font-medium">{rupiah(row.charged_idr)}</TableCell>
                         <TableCell><Badge variant={badge.variant}>{badge.label}</Badge></TableCell>
                       </TableRow>
+                      {expanded && (
+                        <TableRow key={`${row.message_id}-detail`}>
+                          <TableCell colSpan={8} className="bg-muted/30 px-6 py-4">
+                            <div className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                              <div>
+                                <p className="font-medium text-muted-foreground">Isi pesan</p>
+                                <p className="mt-0.5">{row.content_preview || "—"}</p>
+                              </div>
+                              <div>
+                                <p className="font-medium text-muted-foreground">Status pengiriman</p>
+                                <p className="mt-0.5">{STATUS_LABEL[row.message_status] ?? row.message_status}</p>
+                              </div>
+                              {row.error_message && (
+                                <div className="sm:col-span-2">
+                                  <p className="font-medium text-destructive">Alasan gagal</p>
+                                  <p className="mt-0.5">{ERROR_LABEL[row.error_message] ?? row.error_message}</p>
+                                </div>
+                              )}
+                              <div>
+                                <p className="font-medium text-muted-foreground">Masuk antrean</p>
+                                <p className="mt-0.5 tabular-nums">{formatDate(row.created_at)}</p>
+                              </div>
+                              <div>
+                                <p className="font-medium text-muted-foreground">Mulai kirim</p>
+                                <p className="mt-0.5 tabular-nums">{row.send_started_at ? formatDate(row.send_started_at) : "—"}</p>
+                              </div>
+                              <div>
+                                <p className="font-medium text-muted-foreground">Terkirim</p>
+                                <p className="mt-0.5 tabular-nums">{row.sent_at ? formatDate(row.sent_at) : "—"}</p>
+                              </div>
+                              <div>
+                                <p className="font-medium text-muted-foreground">Diterima / Dibaca</p>
+                                <p className="mt-0.5 tabular-nums">
+                                  {row.delivered_at ? formatDate(row.delivered_at) : "—"}
+                                  {row.read_at ? ` · Dibaca ${formatDate(row.read_at)}` : ""}
+                                </p>
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      </>
                     );
                   })}
                 </TableBody>
@@ -264,22 +332,37 @@ export default function UsageHistoryPage() {
             <div className="divide-y md:hidden">
               {data.data.map((row) => {
                 const badge = RESERVATION_BADGE[row.reservation_state] ?? { label: row.reservation_state, variant: "outline" as const };
+                const expanded = expandedId === row.message_id;
                 return (
-                  <div key={row.message_id} className="space-y-1.5 px-4 py-3">
+                  <div key={row.message_id} className="cursor-pointer px-4 py-3" onClick={() => setExpandedId(expanded ? null : row.message_id)}>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-muted-foreground">{formatDate(row.created_at)}</span>
+                      <span className="text-xs text-muted-foreground">
+                        <ChevronDown className={`mr-1 inline h-3 w-3 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                        {formatDate(row.created_at)}
+                      </span>
                       <Badge variant={badge.variant}>{badge.label}</Badge>
                     </div>
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="mt-1 flex items-center justify-between gap-2">
                       <span className="font-mono text-sm">{row.to_number}</span>
                       <span className="text-sm font-semibold">{rupiah(row.charged_idr)}</span>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="mt-1 flex flex-wrap gap-1.5">
                       <Badge variant="outline">{row.device_key}</Badge>
                       <Badge variant="outline">{CATEGORY_LABEL[row.billing_category] ?? row.billing_category}</Badge>
-                      <Badge variant="outline">{row.message_status}</Badge>
+                      <Badge variant="outline">{STATUS_LABEL[row.message_status] ?? row.message_status}</Badge>
                     </div>
-                    {row.content_preview && <p className="truncate text-xs text-muted-foreground">{row.content_preview}</p>}
+                    {expanded && (
+                      <div className="mt-3 space-y-2 rounded-lg border bg-muted/30 p-3 text-xs">
+                        {row.content_preview && <div><span className="font-medium text-muted-foreground">Pesan:</span> {row.content_preview}</div>}
+                        {row.error_message && <div className="text-destructive"><span className="font-medium">Gagal:</span> {ERROR_LABEL[row.error_message] ?? row.error_message}</div>}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div><span className="font-medium text-muted-foreground">Antrean:</span> {formatDate(row.created_at)}</div>
+                          <div><span className="font-medium text-muted-foreground">Mulai kirim:</span> {row.send_started_at ? formatDate(row.send_started_at) : "—"}</div>
+                          <div><span className="font-medium text-muted-foreground">Terkirim:</span> {row.sent_at ? formatDate(row.sent_at) : "—"}</div>
+                          <div><span className="font-medium text-muted-foreground">Diterima:</span> {row.delivered_at ? formatDate(row.delivered_at) : "—"}</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

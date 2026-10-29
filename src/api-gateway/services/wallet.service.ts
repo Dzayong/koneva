@@ -254,13 +254,17 @@ interface UsageHistoryRow {
   content_preview: string;
   message_type: string;
   message_status: string;
+  error_message: string | null;
   billing_category: PaygBillingCategory;
   unit_price_idr: number;
   charged_idr: number;
   reservation_state: string;
   pricing_tier_code: string;
   created_at: Date;
+  send_started_at: Date | null;
   sent_at: Date | null;
+  delivered_at: Date | null;
+  read_at: Date | null;
   refunded: boolean;
 }
 
@@ -315,7 +319,8 @@ export async function getUsageHistory(filters: UsageHistoryFilters) {
     pool.query<UsageHistoryRow>(
       `SELECT m.id AS message_id, m.device_key, m.to_number,
               left(m.content, 60) AS content_preview, m.type AS message_type,
-              m.status AS message_status,
+              m.status AS message_status, m.error_message,
+              m.send_started_at, m.delivered_at, m.read_at,
               r.billing_category, r.unit_price_idr::int AS unit_price_idr,
               r.amount_idr::int AS charged_idr, r.state AS reservation_state,
               r.pricing_tier_code,
@@ -363,6 +368,10 @@ export async function getUsageHistory(filters: UsageHistoryFilters) {
       content_preview: r.content_preview,
       message_type: r.message_type,
       message_status: r.message_status,
+      error_message: r.error_message ?? null,
+      send_started_at: r.send_started_at ?? null,
+      delivered_at: r.delivered_at ?? null,
+      read_at: r.read_at ?? null,
       billing_category: r.billing_category,
       unit_price_idr: Number(r.unit_price_idr),
       charged_idr: Number(r.charged_idr),

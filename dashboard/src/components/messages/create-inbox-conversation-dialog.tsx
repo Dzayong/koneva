@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link2, Users, UsersRound, Megaphone, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -40,8 +40,8 @@ export function CreateInboxConversationDialog({
   initialKind?: CreateKind;
 }) {
   const queryClient = useQueryClient();
-  const [kind, setKind] = useState<CreateKind>("group");
-  const [deviceKey, setDeviceKey] = useState("");
+  const [kind, setKind] = useState<CreateKind>(initialKind);
+  const [deviceKey, setDeviceKey] = useState(preferredDeviceKey ?? "");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [participants, setParticipants] = useState("");
@@ -53,15 +53,6 @@ export function CreateInboxConversationDialog({
     : onlineDevices.some((device) => device.device_key === preferredDeviceKey)
       ? preferredDeviceKey!
       : onlineDevices[0]?.device_key ?? "";
-
-  useEffect(() => {
-    if (open) {
-      setKind(initialKind);
-      setDeviceKey(preferredDeviceKey && onlineDevices.some((device) => device.device_key === preferredDeviceKey)
-        ? preferredDeviceKey
-        : onlineDevices[0]?.device_key ?? "");
-    }
-  }, [open, preferredDeviceKey, onlineDevices]);
 
   const create = useMutation({
     mutationFn: async () => {

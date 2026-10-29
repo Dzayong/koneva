@@ -76,15 +76,17 @@ export function useDeleteContact() {
 export function useImportContacts() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: string | { csv: string; consent_source_note?: string }) =>
-      typeof input === "string" ? api.importContacts(input) : api.importContacts(input.csv, input.consent_source_note),
+    mutationFn: (input: string | { content: string; format: "csv" | "vcf"; consent_source_note?: string }) =>
+      typeof input === "string"
+        ? api.importContacts(input)
+        : api.importContacts(input.content, input.format, input.consent_source_note),
     onSuccess: ({ imported }) => {
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
       toast.success(`${imported} kontak diimpor`);
     },
     onError: (error) =>
       toast.error("Impor gagal", {
-        description: apiErrorMessage(error, 'CSV needs a "phone_number" (or "phone") header column.'),
+        description: apiErrorMessage(error, 'Pastikan file CSV memiliki kolom "phone_number", atau pilih file VCF yang valid.'),
       }),
   });
 }

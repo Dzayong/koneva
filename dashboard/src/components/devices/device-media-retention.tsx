@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -11,14 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 export function DeviceMediaRetention({ deviceKey, canEdit }: { deviceKey: string; canEdit: boolean }) {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["device-media-retention", deviceKey], queryFn: () => api.getDeviceMediaRetention(deviceKey) });
-  const [value, setValue] = useState("30");
-  useEffect(() => {
-    if (query.data) setValue(query.data.media_retention_days === null ? "forever" : String(query.data.media_retention_days));
-  }, [query.data]);
+  const [draft, setDraft] = useState<string | null>(null);
+  const savedValue = query.data?.media_retention_days === null ? "forever" : String(query.data?.media_retention_days ?? 30);
+  const value = draft ?? savedValue;
   const update = useMutation({
     mutationFn: () => api.updateDeviceMediaRetention(deviceKey, value === "forever" ? null : Number(value)),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["device-media-retention", deviceKey] });
+      setDraft(null);
       toast.success("Masa simpan media diperbarui");
     },
     onError: (error) => toast.error("Pengaturan gagal disimpan", { description: apiFailure(error).message }),
@@ -29,7 +29,7 @@ export function DeviceMediaRetention({ deviceKey, canEdit }: { deviceKey: string
       <p className="mt-1 text-sm text-muted-foreground">Media percakapan disimpan privat supaya bisa dibuka kembali di inbox. Pengaturan ini berlaku untuk media baru dan yang sudah tersimpan.</p>
     </div>
     <div className="flex flex-wrap items-center gap-3">
-      <Select value={value} onValueChange={setValue} disabled={!canEdit || query.isLoading || update.isPending}>
+      <Select value={value} onValueChange={setDraft} disabled={!canEdit || query.isLoading || update.isPending}>
         <SelectTrigger className="w-56" aria-label="Masa simpan media"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="1">Hapus setelah 1 hari</SelectItem>
@@ -39,7 +39,7 @@ export function DeviceMediaRetention({ deviceKey, canEdit }: { deviceKey: string
           <SelectItem value="forever">Simpan sampai dihapus</SelectItem>
         </SelectContent>
       </Select>
-      {canEdit && <Button type="button" onClick={() => update.mutate()} disabled={query.isLoading || update.isPending || (query.data && value === String(query.data.media_retention_days ?? "forever"))}>
+      {canEdit && <Button type="button" onClick={() => update.mutate()} disabled={query.isLoading || update.isPending || value === savedValue}>
         {update.isPending ? "Menyimpan…" : "Simpan"}
       </Button>}
     </div>
