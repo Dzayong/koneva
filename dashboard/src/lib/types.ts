@@ -284,6 +284,8 @@ export interface AnalyticsDailyPoint {
 
 export type AutoReplyTriggerType = "keyword" | "regex" | "all";
 
+export type AutoReplyDestinationScope = "group" | "private" | "all";
+
 export interface AutoReplyRule {
   id: string;
   device_key: string;
@@ -292,6 +294,7 @@ export interface AutoReplyRule {
   response_type: "text" | "template" | "ai" | "ai_general";
   response_content: string;
   response_config?: { skill_ids: string[]; variables: Record<string, string>; reply_to_trigger?: boolean };
+  destination_scope: AutoReplyDestinationScope;
   delay_ms: number;
   is_active: boolean;
   created_at: string;
@@ -304,6 +307,7 @@ export interface AutoReplyRuleInput {
   response_type?: "text" | "template" | "ai" | "ai_general";
   response_content: string;
   response_config?: { skill_ids: string[]; variables: Record<string, string>; reply_to_trigger?: boolean };
+  destination_scope?: AutoReplyDestinationScope;
   delay_ms: number;
 }
 

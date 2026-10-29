@@ -569,6 +569,19 @@ class ApiClient {
     await this.client.delete(`/api/v1/auto-reply-rules/${id}`, { skipErrorToast: true });
   }
 
+  async previewAiPrompt(input: {
+    response_type: "ai" | "ai_general";
+    response_content: string;
+    response_config: { skill_ids: string[]; variables: Record<string, string> };
+  }): Promise<{ instruction: string }> {
+    const response = await this.client.post<ApiSuccess<{ instruction: string }>>(
+      "/api/v1/auto-reply-rules/preview",
+      input,
+      { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
   // ---- Analytics ---------------------------------------------------------
 
   async getAnalyticsOverview(): Promise<AnalyticsOverview> {

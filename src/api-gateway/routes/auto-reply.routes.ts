@@ -8,7 +8,8 @@ import { validate } from '../middleware/validate';
 import { ServiceError } from '../services/service-error';
 import { isSafeAutoReplyRegex } from '../../shared/safe-auto-reply-regex';
 import { getWorkspaceWorkHours } from '../../shared/work-hours';
-import { EMPTY_AI_REPLY_RULE_CONFIG } from '../../shared/ai-reply-skills';
+import { EMPTY_AI_REPLY_RULE_CONFIG, normalizeAiReplyRuleConfig } from '../../shared/ai-reply-skills';
+import { composeAiReplyInstruction } from '../operator/ai-reply-settings';
 
 const router = Router();
 const idSchema = z.object({ id: z.string().uuid() });
@@ -243,6 +244,27 @@ export async function deleteAutoReplyRule(request: Request, response: Response):
   response.json({ success: true, data: null });
 }
 
+const previewBody = z.object({
+  response_type: z.enum(['ai', 'ai_general']),
+  response_content: z.string().max(4096).default(''),
+  response_config: aiReplyConfigSchema,
+});
+
+export async function previewAiPrompt(request: Request, response: Response): Promise<void> {
+  const input = request.validated!.body as z.infer<typeof previewBody>;
+  const tenantRow = await pool.query<{ name: string }>(
+    'SELECT name FROM tenants WHERE id=$1', [request.tenant!.id],
+  );
+  const config = normalizeAiReplyRuleConfig(input.response_config);
+  const workspaceName = tenantRow.rows[0]?.name;
+  const instruction = composeAiReplyInstruction(
+    input.response_type, input.response_content, config,
+    { contactName: 'Budi', ...(workspaceName ? { workspaceName } : {}), phone: '+628123456789' },
+  );
+  response.json({ success: true, data: { instruction } });
+}
+
+router.post('/auto-reply-rules/preview', validate({ body: previewBody }), previewAiPrompt);
 router.get('/auto-reply-rules', validate({ query: listSchema }), listAutoReplyRules);
 router.get('/auto-reply-logs', validate({ query: logListSchema }), listAutoReplyLogs);
 router.get('/workspace/send-hours', getWorkspaceSendHours);

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Clock, MessageSquare, Pencil, Plus, Reply, Trash2, Zap } from "lucide-react";
+import { ArrowRight, ChevronDown, Clock, Eye, MessageSquare, Pencil, Plus, Reply, Trash2, X, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,7 +36,8 @@ import {
 import { apiErrorMessage } from "@/hooks/use-contacts";
 import { useDevices } from "@/hooks/use-devices";
 import { cn } from "@/lib/utils";
-import type { AutoReplyRule, AutoReplyTriggerType } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { AutoReplyRule, AutoReplyTriggerType, AutoReplyDestinationScope } from "@/lib/types";
 
 const MAX_DELAY_SECONDS = 300; // backend CHECK: delay_ms <= 300000
 
@@ -85,7 +86,7 @@ export default function AutoReplyPage() {
       </div>
 
       <p className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground">
-        Perubahan aturan berlaku beberapa detik setelah disimpan. Balasan hanya diproses untuk pesan grup/komunitas yang device ikuti.
+        Perubahan aturan berlaku beberapa detik setelah disimpan. Cakupan tujuan menentukan apakah aturan berjalan di grup, chat pribadi, atau keduanya.
       </p>
 
       <Card>
@@ -186,6 +187,8 @@ export default function AutoReplyPage() {
                       </span>
                       <span>•</span>
                       <span>{rule.device_key}</span>
+                      <span>•</span>
+                      <Badge variant="outline" className="text-xs">{rule.destination_scope === "all" ? "Semua" : rule.destination_scope === "private" ? "Pribadi" : "Grup"}</Badge>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 sm:gap-3">
@@ -254,6 +257,12 @@ function isValidRegex(pattern: string): boolean {
   }
 }
 
+const SCOPE_LABELS: Record<AutoReplyDestinationScope, string> = {
+  group: "Grup & komunitas",
+  private: "Chat pribadi",
+  all: "Semua chat",
+};
+
 function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => void }) {
   const { data: devices } = useDevices();
   const save = useSaveAutoReplyRule();
@@ -265,6 +274,12 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
   const [aiPrompt, setAiPrompt] = useState(rule?.response_type === "ai" ? rule.response_content : "");
   const [skillIds, setSkillIds] = useState<string[]>(rule?.response_config?.skill_ids ?? []);
   const [replyToTrigger, setReplyToTrigger] = useState(rule?.response_config?.reply_to_trigger ?? true);
+  const [destinationScope, setDestinationScope] = useState<AutoReplyDestinationScope>(rule?.destination_scope ?? "group");
+  const [variables, setVariables] = useState<Record<string, string>>(rule?.response_config?.variables ?? {});
+  const [newVarKey, setNewVarKey] = useState("");
+  const [newVarValue, setNewVarValue] = useState("");
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const content = responseType === "ai" ? aiPrompt : responseType === "ai_general" ? "" : textContent;
   const [delaySeconds, setDelaySeconds] = useState(String((rule?.delay_ms ?? 3000) / 1000));
 
@@ -296,10 +311,10 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           response_content: content,
           response_config: {
             skill_ids: responseType === "ai" ? skillIds : [],
-            // Variable editing is deferred; preserve existing saved values when editing a rule.
-            variables: responseType === "ai" ? (rule?.response_config?.variables ?? {}) : {},
+            variables: responseType === "ai" ? variables : {},
             reply_to_trigger: replyToTrigger,
           },
+          destination_scope: destinationScope,
           delay_ms: Math.round(delay * 1000),
         },
       },
@@ -309,7 +324,6 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">Aturan ini memeriksa isi pesan baru di grup/komunitas yang diikuti device. Pesan pribadi dan saluran belum didukung.</p>
       <div className="space-y-2">
         <Label>Nomor</Label>
         <Select value={deviceKey} onValueChange={setDeviceKey}>
@@ -324,6 +338,21 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Cakupan tujuan</Label>
+        <Select value={destinationScope} onValueChange={(v) => setDestinationScope(v as AutoReplyDestinationScope)}>
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="group">Grup &amp; komunitas</SelectItem>
+            <SelectItem value="private">Chat pribadi</SelectItem>
+            <SelectItem value="all">Semua chat</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">Tentukan apakah aturan ini berjalan di grup, chat pribadi, atau keduanya.</p>
       </div>
 
       <div className="space-y-2">
@@ -391,7 +420,7 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           placeholder={responseType === "ai" ? "Contoh: Gunakan bahasa santai. Arahkan pelanggan melihat katalog sebelum bertanya harga." : "Halo {nama}! Ada yang bisa kami bantu?"}
         />
         <p className="text-xs text-muted-foreground">
-          {responseType === "ai" ? "Tulis aturan khusus untuk cara Djoko menjawab. Pengaturan data usaha dan variabel menyusul." : <>Variabel: {"{nama}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
+          {responseType === "ai" ? <>Tulis aturan khusus. Gunakan <code className="rounded bg-muted px-1">{`{{variabel}}`}</code> untuk menyisipkan data usaha.</> : <>Variabel: {"{nama}"} · Spintax: {"{Halo|Hai|Hi}"}</>}
         </p>
         </>}
       </div>
@@ -424,7 +453,82 @@ function RuleForm({ rule, onDone }: { rule: AutoReplyRule | null; onDone: () => 
           <div className="space-y-2 border-t pt-3">
             {skillIds.length === 0 && !aiPrompt.trim() && <p className="text-xs text-destructive">Pilih minimal satu skill atau isi instruksi manual.</p>}
           </div>
+
+          <div className="space-y-3 border-t pt-3">
+            <div>
+              <Label>Variabel usaha</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Data usaha yang AI gunakan untuk menjawab. Gunakan <code className="rounded bg-muted px-1">{`{{nama_var}}`}</code> di instruksi.
+                Variabel <code className="rounded bg-muted px-1">nama</code>, <code className="rounded bg-muted px-1">nomor</code>, dan <code className="rounded bg-muted px-1">nama_toko</code> sudah otomatis terisi.
+              </p>
+            </div>
+            {Object.entries(variables).length > 0 && (
+              <div className="space-y-2">
+                {Object.entries(variables).map(([key, value]) => (
+                  <div key={key} className="flex items-center gap-2">
+                    <code className="shrink-0 rounded bg-muted px-2 py-1 text-xs">{key}</code>
+                    <Input
+                      value={value}
+                      onChange={(e) => setVariables((prev) => ({ ...prev, [key]: e.target.value }))}
+                      className="flex-1 text-sm"
+                    />
+                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => setVariables((prev) => { const next = { ...prev }; delete next[key]; return next; })}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {Object.keys(variables).length < 12 && (
+              <div className="flex items-end gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Nama</Label>
+                  <Input value={newVarKey} onChange={(e) => setNewVarKey(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))} placeholder="harga_paket" className="w-36 text-sm" />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Nilai</Label>
+                  <Input value={newVarValue} onChange={(e) => setNewVarValue(e.target.value)} placeholder="Rp 99.000/bulan" className="text-sm" />
+                </div>
+                <Button type="button" variant="outline" size="sm" disabled={!newVarKey || !newVarValue.trim() || ["nama", "nomor", "tanggal", "nama_toko"].includes(newVarKey) || newVarKey in variables}
+                  onClick={() => { setVariables((prev) => ({ ...prev, [newVarKey]: newVarValue })); setNewVarKey(""); setNewVarValue(""); }}>
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Tambah
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
+      )}
+
+      {(responseType === "ai" || responseType === "ai_general") && (
+        <>
+          <Button type="button" variant="outline" size="sm" className="w-full"
+            disabled={previewLoading}
+            onClick={async () => {
+              setPreviewLoading(true);
+              try {
+                const result = await api.previewAiPrompt({
+                  response_type: responseType as "ai" | "ai_general",
+                  response_content: content,
+                  response_config: { skill_ids: responseType === "ai" ? skillIds : [], variables: responseType === "ai" ? variables : {} },
+                });
+                setPreviewText(result.instruction);
+              } catch { setPreviewText("Gagal memuat pratinjau."); }
+              setPreviewLoading(false);
+            }}>
+            <Eye className="mr-2 h-4 w-4" />
+            {previewLoading ? "Memuat…" : "Pratinjau prompt AI"}
+          </Button>
+
+          {previewText !== null && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Pratinjau system instruction</Label>
+                <Button type="button" variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setPreviewText(null)}>Tutup</Button>
+              </div>
+              <pre className="max-h-64 overflow-auto rounded-lg border bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">{previewText}</pre>
+            </div>
+          )}
+        </>
       )}
 
       {responseType === "text" && content.trim() && (
