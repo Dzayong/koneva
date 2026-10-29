@@ -607,6 +607,20 @@ export interface UsageHistoryResponse {
   pagination: { limit: number; offset: number; total: number; has_more: boolean };
 }
 
+export interface DeviceUsageSummary {
+  device_key: string;
+  label: string | null;
+  total_messages: number;
+  total_successful: number;
+  total_failed_refunded: number;
+  total_spend_idr: number;
+  total_refunded_idr: number;
+  api_count: number;
+  auto_reply_count: number;
+  ai_reply_count: number;
+  last_activity: string | null;
+}
+
 // ---- Webhook ---------------------------------------------------------------
 
 export interface WebhookSettings { url: string | null; secret_set: boolean; secret_hint: string | null }

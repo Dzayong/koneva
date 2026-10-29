@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { rupiah } from "@/components/billing/plan-cards";
-import { useUsageHistory, useUsageDevices } from "@/hooks/use-billing";
+import { useUsageHistory, useUsageDevices, useUsageDeviceSummary } from "@/hooks/use-billing";
 import { usePermissions } from "@/hooks/use-me";
 import { api } from "@/lib/api";
 import type { UsageHistoryFilters, PaygBillingCategory } from "@/lib/types";
@@ -48,6 +48,10 @@ export default function UsageHistoryPage() {
   const [filters, setFilters] = useState<UsageHistoryFilters>({ limit: PAGE_SIZE, offset: 0 });
   const { data: devices } = useUsageDevices();
   const { data, isLoading } = useUsageHistory(filters);
+  const { data: deviceSummary, isLoading: summaryLoading } = useUsageDeviceSummary({
+    date_from: filters.date_from,
+    date_to: filters.date_to,
+  });
 
   if (!permsLoading && !can("billing:manage")) {
     return <p className="text-muted-foreground">Hanya pemilik workspace yang bisa membuka halaman ini.</p>;
@@ -140,6 +144,72 @@ export default function UsageHistoryPage() {
           <SummaryCard label="Berhasil dikirim" value={data.summary.total_successful.toLocaleString("id-ID")} />
           <SummaryCard label="Gagal / dikembalikan" value={data.summary.total_failed_refunded.toLocaleString("id-ID")} />
           <SummaryCard label="Total biaya" value={rupiah(data.summary.total_spend_idr)} />
+        </div>
+      ) : null}
+
+      {/* Per-device breakdown */}
+      {summaryLoading ? (
+        <Skeleton className="h-48 rounded-xl" />
+      ) : deviceSummary && deviceSummary.length > 0 ? (
+        <div className="rounded-xl border bg-card">
+          <div className="border-b px-5 py-3">
+            <h3 className="text-sm font-semibold">Penggunaan per device</h3>
+          </div>
+          <div className="hidden overflow-x-auto md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Device</TableHead>
+                  <TableHead className="text-right">Pesan</TableHead>
+                  <TableHead className="text-right">Berhasil</TableHead>
+                  <TableHead className="text-right">API</TableHead>
+                  <TableHead className="text-right">Otomatis</TableHead>
+                  <TableHead className="text-right">AI</TableHead>
+                  <TableHead className="text-right">Biaya</TableHead>
+                  <TableHead className="text-right">Refund</TableHead>
+                  <TableHead>Aktivitas terakhir</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {deviceSummary.map((d) => (
+                  <TableRow key={d.device_key} className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => setFilter({ device_key: d.device_key })}>
+                    <TableCell>
+                      <span className="font-mono text-xs">{d.device_key}</span>
+                      {d.label && <span className="ml-2 text-xs text-muted-foreground">{d.label}</span>}
+                    </TableCell>
+                    <TableCell className="text-right">{d.total_messages.toLocaleString("id-ID")}</TableCell>
+                    <TableCell className="text-right">{d.total_successful.toLocaleString("id-ID")}</TableCell>
+                    <TableCell className="text-right text-xs">{d.api_count.toLocaleString("id-ID")}</TableCell>
+                    <TableCell className="text-right text-xs">{d.auto_reply_count.toLocaleString("id-ID")}</TableCell>
+                    <TableCell className="text-right text-xs">{d.ai_reply_count.toLocaleString("id-ID")}</TableCell>
+                    <TableCell className="text-right font-medium">{rupiah(d.total_spend_idr)}</TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">{rupiah(d.total_refunded_idr)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{d.last_activity ? formatDate(d.last_activity) : "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="divide-y md:hidden">
+            {deviceSummary.map((d) => (
+              <div key={d.device_key} className="space-y-1 px-4 py-3" onClick={() => setFilter({ device_key: d.device_key })}>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-sm">{d.label || d.device_key}</span>
+                  <span className="text-sm font-semibold">{rupiah(d.total_spend_idr)}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+                  <span>{d.total_messages} pesan</span>
+                  <span>·</span>
+                  <span>API {d.api_count}</span>
+                  <span>·</span>
+                  <span>Otomatis {d.auto_reply_count}</span>
+                  <span>·</span>
+                  <span>AI {d.ai_reply_count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 

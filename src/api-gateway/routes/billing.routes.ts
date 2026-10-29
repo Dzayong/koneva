@@ -7,7 +7,7 @@ import { createOrder, getBillingState, getLatestUnpaidInvoice, requestStudentVer
 import { createDokuCheckout } from '../services/doku.service';
 import { createDuitkuCheckout } from '../services/duitku.service';
 import { ServiceError } from '../services/service-error';
-import { createWalletTopup, getUsageDeviceKeys, getUsageHistory, getUsageHistoryCsv, reconcileWallet, updateWalletTopupProviderReference, voidWalletTopup } from '../services/wallet.service';
+import { createWalletTopup, getUsageDeviceKeys, getUsageDeviceSummary, getUsageHistory, getUsageHistoryCsv, reconcileWallet, updateWalletTopupProviderReference, voidWalletTopup } from '../services/wallet.service';
 
 const router = Router();
 
@@ -107,6 +107,17 @@ router.get('/billing/usage-history/csv', validate({ query: usageHistoryQuery }),
 router.get('/billing/usage-history/devices', async (request: Request, response: Response) => {
   const devices = await getUsageDeviceKeys(request.tenant!.id);
   response.json({ success: true, data: devices });
+});
+
+const deviceSummaryQuery = z.object({
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+}).strict();
+
+router.get('/billing/usage-history/device-summary', validate({ query: deviceSummaryQuery }), async (request: Request, response: Response) => {
+  const q = request.validated!.query as z.infer<typeof deviceSummaryQuery>;
+  const summary = await getUsageDeviceSummary(request.tenant!.id, q.date_from, q.date_to);
+  response.json({ success: true, data: summary });
 });
 
 router.get('/billing/reconcile', async (request: Request, response: Response) => {

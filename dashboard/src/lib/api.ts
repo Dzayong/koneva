@@ -924,6 +924,17 @@ class ApiClient {
     return response.data.data;
   }
 
+  async getUsageDeviceSummary(filters: { date_from?: string; date_to?: string } = {}): Promise<import("./types").DeviceUsageSummary[]> {
+    const params = new URLSearchParams();
+    if (filters.date_from) params.set("date_from", filters.date_from);
+    if (filters.date_to) params.set("date_to", filters.date_to);
+    const qs = params.toString();
+    const response = await this.client.get<ApiSuccess<import("./types").DeviceUsageSummary[]>>(
+      `/api/v1/billing/usage-history/device-summary${qs ? `?${qs}` : ""}`, { skipErrorToast: true },
+    );
+    return response.data.data;
+  }
+
   getUsageCsvUrl(filters: import("./types").UsageHistoryFilters = {}): string {
     const params = new URLSearchParams();
     if (filters.device_key) params.set("device_key", filters.device_key);

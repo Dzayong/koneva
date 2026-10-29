@@ -440,6 +440,76 @@ export async function getUsageDeviceKeys(tenantId: string): Promise<string[]> {
   return rows.map((r) => r.device_key);
 }
 
+export interface DeviceUsageSummary {
+  device_key: string;
+  label: string | null;
+  total_messages: number;
+  total_successful: number;
+  total_failed_refunded: number;
+  total_spend_idr: number;
+  total_refunded_idr: number;
+  api_count: number;
+  auto_reply_count: number;
+  ai_reply_count: number;
+  last_activity: string | null;
+}
+
+export async function getUsageDeviceSummary(tenantId: string, dateFrom?: string, dateTo?: string): Promise<DeviceUsageSummary[]> {
+  const conditions = ['m.tenant_id = $1', 'm.system_otp = false', 'm.system_notification = false'];
+  const params: (string | number)[] = [tenantId];
+  let idx = 2;
+  if (dateFrom) {
+    conditions.push(`m.created_at >= $${idx}::timestamptz`);
+    params.push(dateFrom + 'T00:00:00Z');
+    idx += 1;
+  }
+  if (dateTo) {
+    conditions.push(`m.created_at < $${idx}::timestamptz`);
+    params.push(dateTo + 'T24:00:00Z');
+    idx += 1;
+  }
+  const where = conditions.join(' AND ');
+  const { rows } = await pool.query<{
+    device_key: string; label: string | null;
+    total_messages: string; total_successful: string; total_failed_refunded: string;
+    total_spend_idr: string; total_refunded_idr: string;
+    api_count: string; auto_reply_count: string; ai_reply_count: string;
+    last_activity: string | null;
+  }>(
+    `SELECT m.device_key,
+            d.label,
+            count(*)::int AS total_messages,
+            count(*) FILTER (WHERE m.status IN ('sent','delivered','read'))::int AS total_successful,
+            count(*) FILTER (WHERE r.state = 'released')::int AS total_failed_refunded,
+            COALESCE(sum(r.amount_idr) FILTER (WHERE r.state = 'captured'), 0)::bigint AS total_spend_idr,
+            COALESCE(sum(r.amount_idr) FILTER (WHERE r.state = 'released'), 0)::bigint AS total_refunded_idr,
+            count(*) FILTER (WHERE r.billing_category = 'api')::int AS api_count,
+            count(*) FILTER (WHERE r.billing_category = 'auto_reply')::int AS auto_reply_count,
+            count(*) FILTER (WHERE r.billing_category = 'ai_reply')::int AS ai_reply_count,
+            max(m.created_at) AS last_activity
+     FROM messages m
+     INNER JOIN message_wallet_reservations r ON r.message_id = m.id AND r.attempt_no = m.retry_count
+     LEFT JOIN devices d ON d.device_key = m.device_key AND d.tenant_id = m.tenant_id
+     WHERE ${where}
+     GROUP BY m.device_key, d.label
+     ORDER BY total_spend_idr DESC`,
+    params,
+  );
+  return rows.map((r) => ({
+    device_key: r.device_key,
+    label: r.label,
+    total_messages: Number(r.total_messages),
+    total_successful: Number(r.total_successful),
+    total_failed_refunded: Number(r.total_failed_refunded),
+    total_spend_idr: Number(r.total_spend_idr),
+    total_refunded_idr: Number(r.total_refunded_idr),
+    api_count: Number(r.api_count),
+    auto_reply_count: Number(r.auto_reply_count),
+    ai_reply_count: Number(r.ai_reply_count),
+    last_activity: r.last_activity,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Wallet reconciliation: verify balance integrity
 // ---------------------------------------------------------------------------

@@ -61,3 +61,13 @@ export function useUsageDevices() {
     staleTime: 60_000,
   });
 }
+
+export function useUsageDeviceSummary(filters: { date_from?: string; date_to?: string } = {}) {
+  const { can } = usePermissions();
+  return useQuery({
+    queryKey: ["usage-device-summary", filters],
+    queryFn: () => api.getUsageDeviceSummary(filters),
+    enabled: can("billing:manage"),
+    staleTime: 30_000,
+  });
+}
