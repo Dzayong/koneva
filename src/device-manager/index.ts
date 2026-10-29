@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { unlink } from 'node:fs/promises';
 import http from 'node:http';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
@@ -259,12 +260,18 @@ export function createDeviceManagerApp(orchestrator: BotOrchestrator): express.E
     // Hard delete. messages.device_key keeps the history readable, so only the
     // FK is detached; unsent messages can never be delivered anymore.
     const client = await pool.connect();
+    let mediaIds: string[] = [];
     try {
       await client.query('BEGIN');
       const device = (await client.query<{ id: string }>(
         'SELECT id FROM devices WHERE device_key = $1', [parsed.data],
       )).rows[0];
       if (device) {
+        // Collect media file IDs before CASCADE deletes the rows.
+        mediaIds = (await client.query<{ id: string }>(
+          'SELECT id FROM media_objects WHERE device_id = $1', [device.id],
+        )).rows.map((r) => r.id);
+
         await client.query(
           `UPDATE messages SET status = 'failed', error_message = 'Device deleted'
            WHERE device_id = $1 AND status IN ('queued', 'sending')`,
@@ -279,6 +286,16 @@ export function createDeviceManagerApp(orchestrator: BotOrchestrator): express.E
       throw error;
     } finally {
       client.release();
+    }
+    // Best-effort file cleanup after commit; stale files are harmless.
+    if (mediaIds.length > 0) {
+      const storagePath = config.mediaStoragePath.replace(/\/$/, '');
+      for (const id of mediaIds) {
+        unlink(`${storagePath}/${id}`).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') logger.warn('Failed to remove media file on device delete', { id, error: error.message });
+        });
+      }
+      logger.info('Cleaned up media files for deleted device', { deviceKey: parsed.data, count: mediaIds.length });
     }
     response.status(204).send();
   }));
