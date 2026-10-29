@@ -30,10 +30,13 @@ export function composeAiReplyInstruction(
   config: AiReplyRuleConfig,
   context: { contactName: string; workspaceName?: string; phone?: string },
 ): string {
-  const variables: Record<string, string> = { ...config.variables, nama: context.contactName };
+  const builtIn: Record<string, string> = { nama: context.contactName };
+  if (context.workspaceName) builtIn.nama_toko = context.workspaceName;
+  if (context.phone) builtIn.nomor = context.phone;
+  const variables: Record<string, string> = { ...builtIn, ...config.variables };
   const skills = config.skill_ids.map((id) => AI_REPLY_SKILLS[id].instructions);
   const renderedOwnerPrompt = renderAiPromptVariables(rolePrompt, variables).trim();
-  const businessFacts = Object.fromEntries(Object.entries(config.variables).filter(([, value]) => value.trim()));
+  const businessFacts = Object.fromEntries(Object.entries(variables).filter(([, value]) => value.trim()));
   const base = buildAiReplySystemInstruction(responseType, '');
   return [
     base,
